@@ -80,6 +80,7 @@
 | 单元测试：LUT / 胶片模型 / 图像 I/O，3 个程序全绿 | ✅ |
 | 双击验收：`scripts\demo-m1.cmd`、`scripts\verify-m1.cmd` | ✅ |
 | parity：PSNR **88.07 dB**，ΔE76 max **0.0065** | ✅ |
+| CI：Windows + macOS 都跑 `lut bake` + `lut compare`（D019） | ✅ 两个 job 绿 |
 | 冻结参考 LUT：`tests/reference/portra400_endura_33.cube` | ✅ |
 
 ### 4. 改名与上线
@@ -93,7 +94,8 @@
 - [x] GitHub 公开仓库建立并推送成功
 - [x] GitHub 登录凭据问题解决（`scripts\push.cmd` 一键登录 + 推送）
 - [x] GitHub Actions 双平台首次跑通，**Windows 和 macOS 都绿**
-- [x] M0 历史 6 个 commit 已全部推送到 `main`（M1 待提交）
+- [x] M0 历史 6 个 commit 已全部推送；M1 已提交并推送（`f493ee9`），CI 双平台绿
+- [x] CI 现在在 Windows + macOS 都烘 M1 LUT 并和冻结参考对比（D019）
 
 ### 5. 实测数据（本机，真实跑出来的）
 
@@ -135,6 +137,7 @@
 | **D016** | 印片中性滤色片 | 查上游数据库 **(0, 51.568, 52.534)** | 通用值 (0,65,55) 会偏绿，已排除 |
 | **D017** | 16-bit I/O | **stb 读 + 自写 16-bit PNG** | OpenImageIO/EXR 推迟；16-bit 输出仅 `.png` |
 | **D018** | parity 验收 | **PSNR ≥ 60 dB + 报告 ΔE76** | 实测 88.07 dB / ΔE76 max 0.0065 |
+| **D019** | CI 覆盖 M1 | **Windows + macOS 都烘 LUT 并和参考对比** | 光谱链退化会在 CI 直接变红 |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -268,7 +271,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D018
+├── DECISIONS.md             决策台账 D001–D019
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -277,7 +280,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D018**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D019**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）

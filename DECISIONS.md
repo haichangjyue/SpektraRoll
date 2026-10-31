@@ -191,6 +191,17 @@
 
 ---
 
+## D019 · CI 也跑 M1 光谱链
+
+- **日期**：2026-11-01
+- **背景**：CI 原来只做编译 + 单元测试 + `gen` / 合成 LUT 冒烟，光谱链坏了要在本地才会发现。
+- **决定**：GitHub Actions 的 Windows 和 macOS 两个 job，在冒烟之后都执行 `lut bake` + `lut compare`（对 `tests/reference/portra400_endura_33.cube`）。
+- **后果**：
+  - 任何平台的光谱链退化都会在 PR/推送时直接变红，门槛仍是 D018 的 PSNR ≥ 60 dB。
+  - 顺带证明了 macOS 编译出来的程序能跑通完整 M1 链路，而不只是"能编译"。
+
+---
+
 ## 待决策（还没问你）
 
 - D009：Windows UI 用 WinUI 3 还是 Qt（建议 WinUI 3）

@@ -19,6 +19,7 @@
 - [x] 16-bit PNG 读写：`gen --bits 16`，`lut apply` 自动保持位深
 - [x] 双击验收：`scripts\demo-m1.cmd`、`scripts\verify-m1.cmd`
 - [x] 单元测试 3 个程序全绿（LUT / 胶片模型 / 图像 I/O）
+- [x] 已推送 `main`，GitHub Actions Windows + macOS 双平台绿（CI 也会烘 LUT 并和参考对比）
 
 ## 实测数据（本机）
 

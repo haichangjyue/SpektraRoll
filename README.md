@@ -1,5 +1,7 @@
 # SpektraRoll
 
+[![build](https://github.com/haichangjyue/SpektraRoll/actions/workflows/build.yml/badge.svg)](https://github.com/haichangjyue/SpektraRoll/actions/workflows/build.yml)
+
 Open-source spectral film simulation for **motion picture**.
 
 Status: **M1 complete** — the spectral colour chain is ported to C++ and bakes a
@@ -46,7 +48,9 @@ macOS / Linux:
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
-# parity needs the upstream checkout and Python; see tools/parity/README.md
+# CI also bakes the M1 LUT and compares it to the frozen reference here;
+# re-running the full parity against the upstream Python model needs the
+# upstream checkout and Python, see tools/parity/README.md
 ```
 
 ## Use
