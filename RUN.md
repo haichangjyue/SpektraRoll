@@ -1,40 +1,54 @@
 # RUN — 三步跑起来
 
-> 这份文档是给你看的，不需要懂代码。所有命令都在 **PowerShell** 里执行，窗口路径要停在仓库根目录 `X:\agent\spektravideo`。
+> 这份文档是给你看的，不需要懂代码。
+> 所有操作都是**双击**，或者在 PowerShell 里粘贴一行命令。
 
-## 第一次（只做一次）
+## 第 1 步：装工具链（只做一次）
 
-```powershell
-cd X:\agent\spektravideo
-.\scripts\dev-install.ps1
+双击：
+
+```
+X:\agent\spektravideo\scripts\dev-install.cmd
 ```
 
-会弹一次 UAC 授权（安装 Visual Studio 的 C++ 编译器），点"是"。
-装完**关掉这个窗口，重新开一个**（让 PATH 生效）。
+它会自动下载 CMake / Ninja / MinGW 编译器，**不需要管理员权限**，不用点 UAC。
+大概 260 MB，看你网速，等它跑完出现 `Toolchain ready` 就行。
 
-## 每次编译
+## 第 2 步：编译
 
-```powershell
-cd X:\agent\spektravideo
-.\scripts\build.ps1
+双击：
+
+```
+X:\agent\spektravideo\scripts\build.cmd
 ```
 
-看到绿色 `OK. Binary:` 就是成功了。
+看到 `OK. Binary:` 就是成功了。
 
-## 看结果
+## 第 3 步：看结果
 
-```powershell
-cd X:\agent\spektravideo
-.\scripts\demo.ps1
+双击：
+
+```
+X:\agent\spektravideo\scripts\demo.cmd
 ```
 
 它会自动生成两张图并打开文件夹：
 
 - `out\chart.png` —— 原始测试图（灰阶 + 色块）
-- `out\chart_warm.png` —— 套了暖调 LUT 之后
+- `out\chart_warm.png` —— 套了暖调 LUT 之后（注意看右边白色是不是偏暖了）
 
-**你要做的判断只有一个：第二张看起来是不是"有味道"，而不是死板的三原色。**
+**你要做的判断只有一个：第二张有没有"胶片味"，还是死板的三原色。**
+觉得不对就告诉我"太淡了 / 太黄了"，我来调。
 
 ## 出问题了怎么办
 
-把报错窗口截图发给我，或者说一句"跑挂了"。不需要你自己修。
+把窗口截图发给我，或者说一句"跑挂了"。不需要你自己修。
+
+## 给技术朋友看的命令（你可以忽略）
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+.\build\spektravideo-cli.exe --help
+```

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -60,12 +61,16 @@ bool Lut3D::loadCube(const std::string& path, std::string& error) {
         if (trimmed.empty() || trimmed[0] == '#') continue;
 
         std::istringstream stream(trimmed);
-        std::string keyword;
-        stream >> keyword;
-        const std::string key = lower(keyword);
+        std::string token;
+        stream >> token;
+        const std::string key = lower(token);
 
         if (key == "title") {
-            title_ = trim(trimmed.substr(keyword.size()));
+            std::string value = trim(trimmed.substr(token.size()));
+            if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+                value = value.substr(1, value.size() - 2);
+            }
+            title_ = value;
             continue;
         }
         if (key == "lut_3d_size") {
@@ -85,9 +90,12 @@ bool Lut3D::loadCube(const std::string& path, std::string& error) {
             continue;
         }
 
-        // Otherwise it must be a triplet of table values.
+        // Otherwise the line must be a triplet of table values. The first one
+        // has already been consumed as `token`.
+        char* end = nullptr;
         Rgb value;
-        if (!(stream >> value.r >> value.g >> value.b)) {
+        value.r = std::strtof(token.c_str(), &end);
+        if (end == token.c_str() || !(stream >> value.g >> value.b)) {
             error = "malformed row at line " + std::to_string(lineNumber);
             return false;
         }

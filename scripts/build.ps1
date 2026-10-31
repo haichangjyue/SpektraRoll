@@ -31,10 +31,14 @@ function Find-Tool([string]$name, [string[]]$fallbacks) {
     return $null
 }
 
-$cmake = Find-Tool "cmake" @(
-    "C:\Program Files\CMake\bin\cmake.exe",
-    "$toolRoot\cmake\bin\cmake.exe"
-)
+$cmake = $null
+foreach ($p in @("C:\Program Files\CMake\bin\cmake.exe", "$toolRoot\cmake\bin\cmake.exe")) {
+    if (Test-Path $p) { $cmake = $p; break }
+}
+if (-not $cmake) {
+    $cmd = Get-Command "cmake" -ErrorAction SilentlyContinue
+    if ($cmd) { $cmake = $cmd.Source }
+}
 if (-not $cmake) {
     Write-Host "CMake not found. Run scripts/dev-install.ps1 first." -ForegroundColor Red
     exit 1

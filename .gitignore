@@ -20,3 +20,6 @@ desktop.ini
 # Crash dumps / logs
 *.dmp
 *.log
+
+# Local configure logs
+configure.log

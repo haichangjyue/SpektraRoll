@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 spektravideo contributors
 #include "sv/image.hpp"
+#include "sv/lut3d.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -20,10 +20,11 @@ add_library(sv_core
     src/core/src/image.cpp)
 
 target_include_directories(sv_core
-    PUBLIC src/core/include
-    PRIVATE third_party/stb)
+    PUBLIC src/core/include)
 
 # stb is third-party C code; keep its warnings out of our build.
+target_include_directories(sv_core SYSTEM PRIVATE third_party/stb)
+
 target_compile_options(sv_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>)
@@ -31,11 +32,19 @@ target_compile_options(sv_core PRIVATE
 add_executable(spektravideo-cli src/cli/main.cpp)
 target_link_libraries(spektravideo-cli PRIVATE sv_core)
 
+# Ship one self-contained .exe: no MinGW runtime DLLs to hunt for.
+if(MINGW)
+    target_link_options(spektravideo-cli PRIVATE -static)
+endif()
+
 if(SV_BUILD_TESTS)
     enable_testing()
 
     add_executable(test_lut3d tests/test_lut3d.cpp)
     target_link_libraries(test_lut3d PRIVATE sv_core)
+    if(MINGW)
+        target_link_options(test_lut3d PRIVATE -static)
+    endif()
     add_test(NAME lut3d COMMAND test_lut3d)
 endif()
 

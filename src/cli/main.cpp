@@ -95,7 +95,7 @@ int cmdGen(const Args& args) {
     return 0;
 }
 
-Rgb warmPreset(float r, float g, float b) {
+sv::Rgb warmPreset(float r, float g, float b) {
     // A deliberately simple, film-ish curve so the demo is not a no-op:
     // lifted shadows, slightly rolled highlights, warm crossover.
     const auto curve = [](float v, float lift, float gain) {
@@ -103,7 +103,7 @@ Rgb warmPreset(float r, float g, float b) {
         const float s = v * v * (3.0f - 2.0f * v);  // smoothstep
         return std::min(1.0f, lift + (gain - lift) * (0.55f * v + 0.45f * s));
     };
-    return Rgb{curve(r, 0.03f, 0.97f), curve(g, 0.025f, 0.95f), curve(b, 0.05f, 0.90f)};
+    return sv::Rgb{curve(r, 0.03f, 0.97f), curve(g, 0.025f, 0.95f), curve(b, 0.05f, 0.90f)};
 }
 
 int cmdLutGen(const Args& args) {
