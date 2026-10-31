@@ -1,0 +1,43 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test the CLI
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektravideo-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          "$exe" version
+          "$exe" gen --out chart.png --width 320 --height 180
+          "$exe" lut gen --out warm.cube --size 17 --preset warm
+          "$exe" lut apply --lut warm.cube --in chart.png --out chart_warm.png
+          ls -l chart.png chart_warm.png
