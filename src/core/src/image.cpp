@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 spektravideo contributors
-#include "sv/image.hpp"
-#include "sv/lut3d.hpp"
+// Copyright (C) 2026 SpektraRoll contributors
+#include "sr/image.hpp"
+#include "sr/lut3d.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,7 +12,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-namespace sv {
+namespace sr {
 namespace {
 
 unsigned char toByte(float v) {
@@ -117,4 +117,4 @@ Image makeTestChart(int width, int height) {
     return image;
 }
 
-}  // namespace sv
+}  // namespace sr

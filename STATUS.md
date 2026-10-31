@@ -28,7 +28,7 @@
 | CMake | 4.4.4 |
 | 单元测试 | 6/6 通过 |
 | 1.44 MP 套 33³ LUT | **49.3 ms**（单线程，未优化） |
-| 可执行文件 | `build\spektravideo-cli.exe`，静态链接，无 DLL 依赖 |
+| 可执行文件 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
 ## 下一步（M1）
 
@@ -40,7 +40,7 @@
 ## 需要你决定的事
 
 - **D008**：第一支胶片选哪个？我建议 **Kodak Portra 400 + Portra Endura**（最经典、数据最全）
-- **D009**：产品名继续叫 `spektravideo` 吗？还是现在就想一个正式名字
+- **D009**：产品名继续叫 `SpektraRoll` 吗？还是现在就想一个正式名字
 
 ## 风险 / 提醒
 

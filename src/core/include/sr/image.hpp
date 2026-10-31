@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 spektravideo contributors
+// Copyright (C) 2026 SpektraRoll contributors
 #pragma once
 
 #include <string>
 #include <vector>
 
-namespace sv {
+namespace sr {
 
 // Interleaved RGB float image, nominally 0..1.
 //
@@ -35,4 +35,4 @@ bool saveImage(const std::string& path, const Image& image, std::string& error);
 // `gen` command and by the demo, so there is always something to feed the LUT.
 Image makeTestChart(int width, int height);
 
-}  // namespace sv
+}  // namespace sr

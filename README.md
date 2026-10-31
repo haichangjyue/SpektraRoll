@@ -1,9 +1,11 @@
-# spektravideo
+# SpektraRoll
 
 Open-source spectral film simulation for **motion picture**.
 
-Status: **M0 scaffold** — a working CLI that applies a baked 3D LUT to images,
+Status: **M0 complete** — a working CLI that applies a baked 3D LUT to images,
 with tests and CI. The spectral film model is not wired in yet.
+
+Repo: https://github.com/haichangjyue/SpektraRoll
 
 ## What this will become
 
@@ -27,10 +29,13 @@ stay out of the LUT. That split is what makes video tractable.
 Windows:
 
 ```powershell
-.\scripts\dev-install.ps1   # once, needs one UAC click
+.\scripts\dev-install.ps1   # once, no admin rights needed
 .\scripts\build.ps1
 .\scripts\demo.ps1          # writes out\chart.png and out\chart_warm.png
 ```
+
+Or double-click `scripts\dev-install.cmd`, `scripts\build.cmd`,
+`scripts\demo.cmd`.
 
 macOS / Linux:
 
@@ -43,10 +48,10 @@ ctest --test-dir build --output-on-failure
 ## Use
 
 ```
-spektravideo-cli gen --out chart.png --width 1600 --height 900
-spektravideo-cli lut gen --out warm.cube --size 33 --preset warm
-spektravideo-cli lut info --lut warm.cube
-spektravideo-cli lut apply --lut warm.cube --in chart.png --out chart_warm.png
+spektra-roll-cli gen --out chart.png --width 1600 --height 900
+spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
+spektra-roll-cli lut info --lut warm.cube
+spektra-roll-cli lut apply --lut warm.cube --in chart.png --out chart_warm.png
 ```
 
 ## Layout

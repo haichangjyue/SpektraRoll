@@ -85,8 +85,8 @@ Write-Host "Testing..." -ForegroundColor Cyan
 & $cmake --build $BuildDir --target test
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$exe = Join-Path $BuildDir "spektravideo-cli.exe"
-if (-not (Test-Path $exe)) { $exe = Join-Path $BuildDir "spektravideo-cli" }
+$exe = Join-Path $BuildDir "spektra-roll-cli.exe"
+if (-not (Test-Path $exe)) { $exe = Join-Path $BuildDir "spektra-roll-cli" }
 
 Write-Host ""
 Write-Host "OK. Binary:" -ForegroundColor Green

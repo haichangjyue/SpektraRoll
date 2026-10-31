@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(spektravideo
+project(SpektraRoll
     VERSION 0.1.0
     DESCRIPTION "Open-source spectral film simulation for motion picture"
     LANGUAGES CXX)
@@ -13,39 +13,39 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-option(SV_BUILD_TESTS "Build the test binaries" ON)
+option(SR_BUILD_TESTS "Build the test binaries" ON)
 
-add_library(sv_core
+add_library(sr_core
     src/core/src/lut3d.cpp
     src/core/src/image.cpp)
 
-target_include_directories(sv_core
+target_include_directories(sr_core
     PUBLIC src/core/include)
 
 # stb is third-party C code; keep its warnings out of our build.
-target_include_directories(sv_core SYSTEM PRIVATE third_party/stb)
+target_include_directories(sr_core SYSTEM PRIVATE third_party/stb)
 
-target_compile_options(sv_core PRIVATE
+target_compile_options(sr_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>)
 
-add_executable(spektravideo-cli src/cli/main.cpp)
-target_link_libraries(spektravideo-cli PRIVATE sv_core)
+add_executable(spektra-roll-cli src/cli/main.cpp)
+target_link_libraries(spektra-roll-cli PRIVATE sr_core)
 
 # Ship one self-contained .exe: no MinGW runtime DLLs to hunt for.
 if(MINGW)
-    target_link_options(spektravideo-cli PRIVATE -static)
+    target_link_options(spektra-roll-cli PRIVATE -static)
 endif()
 
-if(SV_BUILD_TESTS)
+if(SR_BUILD_TESTS)
     enable_testing()
 
     add_executable(test_lut3d tests/test_lut3d.cpp)
-    target_link_libraries(test_lut3d PRIVATE sv_core)
+    target_link_libraries(test_lut3d PRIVATE sr_core)
     if(MINGW)
         target_link_options(test_lut3d PRIVATE -static)
     endif()
     add_test(NAME lut3d COMMAND test_lut3d)
 endif()
 
-install(TARGETS spektravideo-cli RUNTIME DESTINATION bin)
+install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

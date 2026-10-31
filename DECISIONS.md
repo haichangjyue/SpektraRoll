@@ -79,11 +79,19 @@
 
 ---
 
-## D007 · 仓库代号
+## D007 · 产品名与仓库名
 
 - **日期**：2026-11-01
-- **决定**：`spektravideo`（暂定，产品名以后可改）。
-- **后果**：改名前需要同步改二进制名、CI、文档；越早定越省事。
+- **背景**：需要一个能长期用的名字，避免后面改二进制名、CI、文档。
+- **选项**：`spektravideo`（临时代号）/ `SpektraRoll` / 其他
+- **建议**：先用代号，等方向稳了再定
+- **你的决定**：**`SpektraRoll`**，立即生效
+- **后果**：
+  - 仓库：https://github.com/haichangjyue/SpektraRoll
+  - 二进制：`spektra-roll-cli`
+  - C++ 命名空间：`sr`，头文件目录 `src/core/include/sr`
+  - 本地目录：`X:\agent\SpektraRoll`
+  - 与上游 `spektrafilm`、同类产品 `SpektraLab` 形成 "Spektra-" 家族，但品牌独立。
 
 ---
 

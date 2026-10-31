@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 spektravideo contributors
-#include "sv/lut3d.hpp"
+// Copyright (C) 2026 SpektraRoll contributors
+#include "sr/lut3d.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace sv {
+namespace sr {
 namespace {
 
 std::string trim(const std::string& s) {
@@ -214,4 +214,4 @@ Rgb mix(Rgb a, Rgb b, float t) {
     return Rgb{a.r + (b.r - a.r) * s, a.g + (b.g - a.g) * s, a.b + (b.b - a.b) * s};
 }
 
-}  // namespace sv
+}  // namespace sr

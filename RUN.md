@@ -8,7 +8,7 @@
 双击：
 
 ```
-X:\agent\spektravideo\scripts\dev-install.cmd
+X:\agent\SpektraRoll\scripts\dev-install.cmd
 ```
 
 它会自动下载 CMake / Ninja / MinGW 编译器，**不需要管理员权限**，不用点 UAC。
@@ -19,7 +19,7 @@ X:\agent\spektravideo\scripts\dev-install.cmd
 双击：
 
 ```
-X:\agent\spektravideo\scripts\build.cmd
+X:\agent\SpektraRoll\scripts\build.cmd
 ```
 
 看到 `OK. Binary:` 就是成功了。
@@ -29,7 +29,7 @@ X:\agent\spektravideo\scripts\build.cmd
 双击：
 
 ```
-X:\agent\spektravideo\scripts\demo.cmd
+X:\agent\SpektraRoll\scripts\demo.cmd
 ```
 
 它会自动生成两张图并打开文件夹：
@@ -50,5 +50,5 @@ X:\agent\spektravideo\scripts\demo.cmd
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
-.\build\spektravideo-cli.exe --help
+.\build\spektra-roll-cli.exe --help
 ```

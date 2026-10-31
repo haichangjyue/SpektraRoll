@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$exe = Join-Path $root "build\spektravideo-cli.exe"
+$exe = Join-Path $root "build\spektra-roll-cli.exe"
 if (-not (Test-Path $exe)) {
     Write-Host "Binary not found, building first..." -ForegroundColor Yellow
     & (Join-Path $PSScriptRoot "build.ps1")

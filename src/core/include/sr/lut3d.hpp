@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 spektravideo contributors
+// Copyright (C) 2026 SpektraRoll contributors
 #pragma once
 
 #include <string>
 #include <vector>
 
-namespace sv {
+namespace sr {
 
 struct Rgb {
     float r = 0.0f;
@@ -51,4 +51,4 @@ private:
 // Blend between the input and the LUT result. strength 0 = input, 1 = full LUT.
 Rgb mix(Rgb a, Rgb b, float t);
 
-}  // namespace sv
+}  // namespace sr

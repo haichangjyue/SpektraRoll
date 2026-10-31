@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 spektravideo contributors
+// Copyright (C) 2026 SpektraRoll contributors
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "sv/image.hpp"
-#include "sv/lut3d.hpp"
+#include "sr/image.hpp"
+#include "sr/lut3d.hpp"
 
 namespace {
 
@@ -18,23 +18,23 @@ constexpr const char* kVersion = "0.1.0";
 
 void printUsage() {
     std::printf(
-        "spektravideo-cli %s\n"
+        "spektra-roll-cli %s\n"
         "\n"
         "Usage:\n"
-        "  spektravideo-cli gen --out <file.png> [--width N] [--height N]\n"
+        "  spektra-roll-cli gen --out <file.png> [--width N] [--height N]\n"
         "      Write the built-in test chart (grey ramp + colour patches).\n"
         "\n"
-        "  spektravideo-cli lut info --lut <file.cube>\n"
+        "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
         "\n"
-        "  spektravideo-cli lut gen --out <file.cube> [--size 33] [--preset warm|invert|identity]\n"
+        "  spektra-roll-cli lut gen --out <file.cube> [--size 33] [--preset warm|invert|identity]\n"
         "      Write a synthetic LUT (demo and smoke test, not a film model).\n"
         "\n"
-        "  spektravideo-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
+        "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1]\n"
         "      Apply a 3D LUT to an image.\n"
         "\n"
-        "  spektravideo-cli version\n"
+        "  spektra-roll-cli version\n"
         "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
@@ -87,15 +87,15 @@ int cmdGen(const Args& args) {
     const int width = std::atoi(args.get("width", "1920").c_str());
     const int height = std::atoi(args.get("height", "1080").c_str());
 
-    const sv::Image image = sv::makeTestChart(width, height);
+    const sr::Image image = sr::makeTestChart(width, height);
     std::string error;
-    if (!sv::saveImage(out, image, error)) return fail(error);
+    if (!sr::saveImage(out, image, error)) return fail(error);
 
     std::printf("wrote %s (%dx%d)\n", out.c_str(), image.width, image.height);
     return 0;
 }
 
-sv::Rgb warmPreset(float r, float g, float b) {
+sr::Rgb warmPreset(float r, float g, float b) {
     // A deliberately simple, film-ish curve so the demo is not a no-op:
     // lifted shadows, slightly rolled highlights, warm crossover.
     const auto curve = [](float v, float lift, float gain) {
@@ -103,7 +103,7 @@ sv::Rgb warmPreset(float r, float g, float b) {
         const float s = v * v * (3.0f - 2.0f * v);  // smoothstep
         return std::min(1.0f, lift + (gain - lift) * (0.55f * v + 0.45f * s));
     };
-    return sv::Rgb{curve(r, 0.03f, 0.97f), curve(g, 0.025f, 0.95f), curve(b, 0.05f, 0.90f)};
+    return sr::Rgb{curve(r, 0.03f, 0.97f), curve(g, 0.025f, 0.95f), curve(b, 0.05f, 0.90f)};
 }
 
 int cmdLutGen(const Args& args) {
@@ -116,7 +116,7 @@ int cmdLutGen(const Args& args) {
     std::FILE* file = std::fopen(path.c_str(), "wb");
     if (file == nullptr) return fail("cannot write LUT file: " + path);
 
-    std::fprintf(file, "TITLE \"spektravideo %s preset\"\n", preset.c_str());
+    std::fprintf(file, "TITLE \"SpektraRoll %s preset\"\n", preset.c_str());
     std::fprintf(file, "LUT_3D_SIZE %d\n", size);
     std::fprintf(file, "DOMAIN_MIN 0.0 0.0 0.0\n");
     std::fprintf(file, "DOMAIN_MAX 1.0 1.0 1.0\n");
@@ -128,7 +128,7 @@ int cmdLutGen(const Args& args) {
                 const float fr = r * scale;
                 const float fg = g * scale;
                 const float fb = b * scale;
-                sv::Rgb v{fr, fg, fb};
+                sr::Rgb v{fr, fg, fb};
                 if (preset == "invert") {
                     v = {1.0f - fr, 1.0f - fg, 1.0f - fb};
                 } else if (preset == "warm") {
@@ -147,7 +147,7 @@ int cmdLutGen(const Args& args) {
 int cmdLutInfo(const Args& args) {    const std::string path = args.get("lut");
     if (path.empty()) return fail("lut info requires --lut <file.cube>");
 
-    sv::Lut3D lut;
+    sr::Lut3D lut;
     std::string error;
     if (!lut.loadCube(path, error)) return fail(error);
 
@@ -167,25 +167,25 @@ int cmdLutApply(const Args& args) {
     if (inPath.empty()) return fail("lut apply requires --in <image>");
     if (outPath.empty()) return fail("lut apply requires --out <image>");
 
-    sv::Lut3D lut;
+    sr::Lut3D lut;
     std::string error;
     if (!lut.loadCube(lutPath, error)) return fail(error);
 
-    sv::Image image;
-    if (!sv::loadImage(inPath, image, error)) return fail(error);
+    sr::Image image;
+    if (!sr::loadImage(inPath, image, error)) return fail(error);
 
     const std::string interpName = args.get("interp", "tetra");
-    const sv::Interp mode =
-        interpName == "tri" ? sv::Interp::Trilinear : sv::Interp::Tetrahedral;
+    const sr::Interp mode =
+        interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
     const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
 
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
     for (size_t i = 0; i < count; ++i) {
         float* px = &image.pixels[i * 3];
-        const sv::Rgb src{px[0], px[1], px[2]};
-        const sv::Rgb mapped = lut.apply(src, mode);
-        const sv::Rgb result = sv::mix(src, mapped, strength);
+        const sr::Rgb src{px[0], px[1], px[2]};
+        const sr::Rgb mapped = lut.apply(src, mode);
+        const sr::Rgb result = sr::mix(src, mapped, strength);
         px[0] = result.r;
         px[1] = result.g;
         px[2] = result.b;
@@ -194,12 +194,12 @@ int cmdLutApply(const Args& args) {
                              std::chrono::steady_clock::now() - started)
                              .count();
 
-    if (!sv::saveImage(outPath, image, error)) return fail(error);
+    if (!sr::saveImage(outPath, image, error)) return fail(error);
 
     std::printf("applied %s (%d^3) to %s\n", lutPath.c_str(), lut.size(), inPath.c_str());
     std::printf("wrote %s (%dx%d, %zu pixels, %.1f ms, %s)\n", outPath.c_str(), image.width,
                 image.height, count, elapsed,
-                mode == sv::Interp::Trilinear ? "trilinear" : "tetrahedral");
+                mode == sr::Interp::Trilinear ? "trilinear" : "tetrahedral");
     return 0;
 }
 
@@ -216,7 +216,7 @@ int main(int argc, char** argv) {
     const std::string& command = args.positional[0];
 
     if (command == "version" || args.has("version")) {
-        std::printf("spektravideo-cli %s\n", kVersion);
+        std::printf("spektra-roll-cli %s\n", kVersion);
         return 0;
     }
     if (command == "help" || args.has("help")) {
