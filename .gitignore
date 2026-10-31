@@ -17,6 +17,10 @@ compile_commands.json
 Thumbs.db
 desktop.ini
 
+# Python (parity tooling)
+__pycache__/
+*.pyc
+
 # Crash dumps / logs
 *.dmp
 *.log

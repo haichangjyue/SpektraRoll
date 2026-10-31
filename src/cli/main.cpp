@@ -5,23 +5,32 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "sr/film_model.hpp"
 #include "sr/image.hpp"
 #include "sr/lut3d.hpp"
+#include "sr/metrics.hpp"
+#include "sr/profile.hpp"
 
 namespace {
 
 constexpr const char* kVersion = "0.1.0";
+
+constexpr const char* kDefaultFilm = "data/profiles/kodak_portra_400.json";
+constexpr const char* kDefaultPaper = "data/profiles/kodak_portra_endura.json";
+constexpr const char* kDefaultFilters = "data/profiles/neutral_print_filters.json";
 
 void printUsage() {
     std::printf(
         "spektra-roll-cli %s\n"
         "\n"
         "Usage:\n"
-        "  spektra-roll-cli gen --out <file.png> [--width N] [--height N]\n"
+        "  spektra-roll-cli gen --out <file.png> [--width N] [--height N] [--bits 8|16]\n"
         "      Write the built-in test chart (grey ramp + colour patches).\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
@@ -30,16 +39,28 @@ void printUsage() {
         "  spektra-roll-cli lut gen --out <file.cube> [--size 33] [--preset warm|invert|identity]\n"
         "      Write a synthetic LUT (demo and smoke test, not a film model).\n"
         "\n"
+        "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
+        "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
+        "                            [--title <text>]\n"
+        "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
+        "      by default) into a .cube LUT. Input and output are display-encoded\n"
+        "      sRGB, so the LUT can be applied directly to a PNG.\n"
+        "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
-        "                             [--interp tetra|tri] [--strength 0..1]\n"
-        "      Apply a 3D LUT to an image.\n"
+        "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
+        "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
+        "\n"
+        "  spektra-roll-cli lut compare --a <reference.cube> --b <test.cube>\n"
+        "                               [--min-psnr 60]\n"
+        "      Compare two LUTs entry by entry (PSNR and CIE76 delta E).\n"
+        "      Exits non-zero when PSNR is below --min-psnr.\n"
         "\n"
         "  spektra-roll-cli version\n"
         "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
-        "  * No colour management yet: pixels are treated as-is, 8-bit in and out.\n"
-        "    This is milestone P0 scaffolding, not the final colour pipeline.\n",
+        "  * The film model is a pure per-pixel function: no grain, halation,\n"
+        "    diffusion or output gamut compression. This is milestone M1.\n",
         kVersion);
 }
 
@@ -52,6 +73,11 @@ struct Args {
     std::string get(const std::string& key, const std::string& fallback = {}) const {
         const auto it = flags.find(key);
         return it == flags.end() ? fallback : it->second;
+    }
+
+    int getInt(const std::string& key, int fallback) const {
+        const auto it = flags.find(key);
+        return it == flags.end() ? fallback : std::atoi(it->second.c_str());
     }
 };
 
@@ -80,18 +106,29 @@ int fail(const std::string& message) {
     return 1;
 }
 
+int requestedBits(const Args& args, int fallback) {
+    if (!args.has("bits")) return fallback;
+    const int bits = args.getInt("bits", fallback);
+    if (bits != 8 && bits != 16) {
+        std::fprintf(stderr, "warning: --bits %d is not supported, using %d\n", bits, fallback);
+        return fallback;
+    }
+    return bits;
+}
+
 int cmdGen(const Args& args) {
     const std::string out = args.get("out");
     if (out.empty()) return fail("gen requires --out <file.png>");
 
     const int width = std::atoi(args.get("width", "1920").c_str());
     const int height = std::atoi(args.get("height", "1080").c_str());
+    const int bits = requestedBits(args, 8);
 
     const sr::Image image = sr::makeTestChart(width, height);
     std::string error;
-    if (!sr::saveImage(out, image, error)) return fail(error);
+    if (!sr::saveImage(out, image, error, bits)) return fail(error);
 
-    std::printf("wrote %s (%dx%d)\n", out.c_str(), image.width, image.height);
+    std::printf("wrote %s (%dx%d, %d-bit)\n", out.c_str(), image.width, image.height, bits);
     return 0;
 }
 
@@ -113,38 +150,33 @@ int cmdLutGen(const Args& args) {
     const int size = std::max(2, std::atoi(args.get("size", "33").c_str()));
     const std::string preset = args.get("preset", "warm");
 
-    std::FILE* file = std::fopen(path.c_str(), "wb");
-    if (file == nullptr) return fail("cannot write LUT file: " + path);
-
-    std::fprintf(file, "TITLE \"SpektraRoll %s preset\"\n", preset.c_str());
-    std::fprintf(file, "LUT_3D_SIZE %d\n", size);
-    std::fprintf(file, "DOMAIN_MIN 0.0 0.0 0.0\n");
-    std::fprintf(file, "DOMAIN_MAX 1.0 1.0 1.0\n");
-
+    std::vector<sr::Rgb> values(static_cast<size_t>(size) * size * size);
     const float scale = 1.0f / static_cast<float>(size - 1);
     for (int b = 0; b < size; ++b) {
         for (int g = 0; g < size; ++g) {
             for (int r = 0; r < size; ++r) {
-                const float fr = r * scale;
-                const float fg = g * scale;
-                const float fb = b * scale;
-                sr::Rgb v{fr, fg, fb};
+                sr::Rgb v{r * scale, g * scale, b * scale};
                 if (preset == "invert") {
-                    v = {1.0f - fr, 1.0f - fg, 1.0f - fb};
+                    v = {1.0f - v.r, 1.0f - v.g, 1.0f - v.b};
                 } else if (preset == "warm") {
-                    v = warmPreset(fr, fg, fb);
+                    v = warmPreset(v.r, v.g, v.b);
                 }
-                std::fprintf(file, "%.6f %.6f %.6f\n", v.r, v.g, v.b);
+                values[(static_cast<size_t>(b) * size + g) * size + r] = v;
             }
         }
     }
-    std::fclose(file);
+
+    const sr::Lut3D lut =
+        sr::Lut3D::fromData(size, std::move(values), "SpektraRoll " + preset + " preset");
+    std::string error;
+    if (!lut.saveCube(path, error)) return fail(error);
 
     std::printf("wrote %s (%d^3, preset %s)\n", path.c_str(), size, preset.c_str());
     return 0;
 }
 
-int cmdLutInfo(const Args& args) {    const std::string path = args.get("lut");
+int cmdLutInfo(const Args& args) {
+    const std::string path = args.get("lut");
     if (path.empty()) return fail("lut info requires --lut <file.cube>");
 
     sr::Lut3D lut;
@@ -156,6 +188,101 @@ int cmdLutInfo(const Args& args) {    const std::string path = args.get("lut");
     std::printf("size:    %d^3 (%d entries)\n", lut.size(), lut.size() * lut.size() * lut.size());
     std::printf("domain:  [%g %g %g] .. [%g %g %g]\n", lut.domainMin().r, lut.domainMin().g,
                 lut.domainMin().b, lut.domainMax().r, lut.domainMax().g, lut.domainMax().b);
+    return 0;
+}
+
+bool parseTriple(const std::string& text, sr::Triple& out) {
+    std::string normalized = text;
+    std::replace(normalized.begin(), normalized.end(), ',', ' ');
+    std::istringstream stream(normalized);
+    return static_cast<bool>(stream >> out[0] >> out[1] >> out[2]);
+}
+
+int cmdLutBake(const Args& args) {
+    const std::string out = args.get("out", "out/portra400_endura_33.cube");
+    const std::string filmPath = args.get("film", kDefaultFilm);
+    const std::string paperPath = args.get("paper", kDefaultPaper);
+    const std::string filtersPath = args.get("filters", kDefaultFilters);
+    const int size = std::max(2, args.getInt("size", 33));
+
+    sr::Profile film;
+    sr::Profile paper;
+    std::string error;
+    if (!sr::loadProfile(filmPath, film, error)) return fail(error);
+    if (!sr::loadProfile(paperPath, paper, error)) return fail(error);
+
+    sr::Triple filters{0.0, 0.0, 0.0};
+    if (args.has("cc")) {
+        if (!parseTriple(args.get("cc"), filters)) {
+            return fail("--cc expects three numbers, e.g. --cc 0,51.57,52.53");
+        }
+    } else if (!sr::loadNeutralFilters(filtersPath, paper.info.stock, film.info.stock, "TH-KG3",
+                                       filters, error)) {
+        return fail(error + " (pass --cc C,M,Y to override)");
+    }
+
+    sr::FilmModel model;
+    if (!model.configure(film, paper, filters, error)) return fail(error);
+
+    std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
+    std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
+    std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
+    std::printf("print exposure:    %.12f\n", model.printExposureFactor());
+
+    const auto started = std::chrono::steady_clock::now();
+    const std::string title =
+        args.get("title", "SpektraRoll " + film.info.stock + " + " + paper.info.stock);
+    const sr::Lut3D lut = model.bake(size, title);
+    if (lut.empty()) return fail("failed to bake the LUT");
+
+    if (!lut.saveCube(out, error)) return fail(error);
+    const auto elapsed =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+            .count();
+
+    const sr::Rgb mid = model.transform({0.5f, 0.5f, 0.5f});
+    const sr::Rgb black = model.transform({0.0f, 0.0f, 0.0f});
+    const sr::Rgb white = model.transform({1.0f, 1.0f, 1.0f});
+
+    std::printf("wrote %s (%d^3, %d entries, %.1f ms)\n", out.c_str(), size,
+                size * size * size, elapsed);
+    std::printf("probe 0.0 -> %.5f %.5f %.5f\n", black.r, black.g, black.b);
+    std::printf("probe 0.5 -> %.5f %.5f %.5f\n", mid.r, mid.g, mid.b);
+    std::printf("probe 1.0 -> %.5f %.5f %.5f\n", white.r, white.g, white.b);
+    return 0;
+}
+
+int cmdLutCompare(const Args& args) {
+    const std::string pathA = args.get("a");
+    const std::string pathB = args.get("b");
+    if (pathA.empty()) return fail("lut compare requires --a <reference.cube>");
+    if (pathB.empty()) return fail("lut compare requires --b <test.cube>");
+
+    sr::Lut3D a;
+    sr::Lut3D b;
+    std::string error;
+    if (!a.loadCube(pathA, error)) return fail(error);
+    if (!b.loadCube(pathB, error)) return fail(error);
+
+    sr::LutComparison result;
+    if (!sr::compareLuts(a, b, result, error)) return fail(error);
+
+    std::printf("reference:  %s\n", pathA.c_str());
+    std::printf("test:       %s\n", pathB.c_str());
+    std::printf("samples:    %zu (%d^3)\n", result.samples, a.size());
+    std::printf("PSNR:       %.2f dB\n", result.psnr);
+    std::printf("max |diff|: %.3e  (at input %.3f %.3f %.3f)\n", result.maxAbs,
+                result.worstInput.r, result.worstInput.g, result.worstInput.b);
+    std::printf("mean|diff|: %.3e\n", result.meanAbs);
+    std::printf("deltaE76:   mean %.4f, p95 %.4f, max %.4f\n", result.meanDeltaE,
+                result.p95DeltaE, result.maxDeltaE);
+
+    const double minPsnr = std::atof(args.get("min-psnr", "60").c_str());
+    if (result.psnr < minPsnr) {
+        std::printf("FAIL: PSNR is below %.1f dB\n", minPsnr);
+        return 1;
+    }
+    std::printf("PASS: PSNR >= %.1f dB\n", minPsnr);
     return 0;
 }
 
@@ -172,12 +299,14 @@ int cmdLutApply(const Args& args) {
     if (!lut.loadCube(lutPath, error)) return fail(error);
 
     sr::Image image;
-    if (!sr::loadImage(inPath, image, error)) return fail(error);
+    int sourceBits = 8;
+    if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
 
     const std::string interpName = args.get("interp", "tetra");
     const sr::Interp mode =
         interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
     const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
+    const int bits = requestedBits(args, sourceBits);
 
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
@@ -194,11 +323,11 @@ int cmdLutApply(const Args& args) {
                              std::chrono::steady_clock::now() - started)
                              .count();
 
-    if (!sr::saveImage(outPath, image, error)) return fail(error);
+    if (!sr::saveImage(outPath, image, error, bits)) return fail(error);
 
     std::printf("applied %s (%d^3) to %s\n", lutPath.c_str(), lut.size(), inPath.c_str());
-    std::printf("wrote %s (%dx%d, %zu pixels, %.1f ms, %s)\n", outPath.c_str(), image.width,
-                image.height, count, elapsed,
+    std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms, %s)\n",
+                outPath.c_str(), image.width, image.height, count, bits, sourceBits, elapsed,
                 mode == sr::Interp::Trilinear ? "trilinear" : "tetrahedral");
     return 0;
 }
@@ -229,7 +358,9 @@ int main(int argc, char** argv) {
         const std::string& sub = args.positional[1];
         if (sub == "info") return cmdLutInfo(args);
         if (sub == "gen") return cmdLutGen(args);
+        if (sub == "bake") return cmdLutBake(args);
         if (sub == "apply") return cmdLutApply(args);
+        if (sub == "compare") return cmdLutCompare(args);
         return fail("unknown lut subcommand: " + sub);
     }
 

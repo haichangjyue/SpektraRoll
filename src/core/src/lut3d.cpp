@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 namespace sr {
 namespace {
@@ -41,6 +43,43 @@ Lut3D Lut3D::identity(int size) {
         }
     }
     return lut;
+}
+
+Lut3D Lut3D::fromData(int size, std::vector<Rgb> data, std::string title) {
+    Lut3D lut;
+    lut.size_ = std::max(2, size);
+    const size_t expected = static_cast<size_t>(lut.size_) * lut.size_ * lut.size_;
+    if (data.size() != expected) return {};
+    lut.data_ = std::move(data);
+    lut.title_ = std::move(title);
+    return lut;
+}
+
+bool Lut3D::saveCube(const std::string& path, std::string& error) const {
+    if (empty()) {
+        error = "refusing to write an empty LUT";
+        return false;
+    }
+    std::FILE* file = std::fopen(path.c_str(), "wb");
+    if (file == nullptr) {
+        error = "cannot write LUT file: " + path;
+        return false;
+    }
+    std::fprintf(file, "TITLE \"%s\"\n", title_.empty() ? "SpektraRoll LUT" : title_.c_str());
+    std::fprintf(file, "LUT_3D_SIZE %d\n", size_);
+    std::fprintf(file, "DOMAIN_MIN %.8f %.8f %.8f\n", domainMin_.r, domainMin_.g, domainMin_.b);
+    std::fprintf(file, "DOMAIN_MAX %.8f %.8f %.8f\n", domainMax_.r, domainMax_.g, domainMax_.b);
+    for (int b = 0; b < size_; ++b) {
+        for (int g = 0; g < size_; ++g) {
+            for (int r = 0; r < size_; ++r) {
+                const Rgb value = at(r, g, b);
+                std::fprintf(file, "%.8f %.8f %.8f\n", value.r, value.g, value.b);
+            }
+        }
+    }
+    const bool ok = std::fclose(file) == 0;
+    if (!ok) error = "cannot finish writing LUT file: " + path;
+    return ok;
 }
 
 bool Lut3D::loadCube(const std::string& path, std::string& error) {

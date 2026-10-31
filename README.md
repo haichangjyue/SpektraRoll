@@ -2,8 +2,9 @@
 
 Open-source spectral film simulation for **motion picture**.
 
-Status: **M0 complete** — a working CLI that applies a baked 3D LUT to images,
-with tests and CI. The spectral film model is not wired in yet.
+Status: **M1 complete** — the spectral colour chain is ported to C++ and bakes a
+real **Kodak Portra 400 + Portra Endura** LUT, with parity against the upstream
+Python model at **PSNR 88 dB** (ΔE76 max 0.0065).
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -31,11 +32,13 @@ Windows:
 ```powershell
 .\scripts\dev-install.ps1   # once, no admin rights needed
 .\scripts\build.ps1
-.\scripts\demo.ps1          # writes out\chart.png and out\chart_warm.png
+.\scripts\demo.ps1          # synthetic LUT smoke test
+.\scripts\demo-m1.ps1       # the real film LUT, before/after images
 ```
 
 Or double-click `scripts\dev-install.cmd`, `scripts\build.cmd`,
-`scripts\demo.cmd`.
+`scripts\demo-m1.cmd`. `scripts\verify-m1.cmd` is the one-button acceptance
+check (build + tests + bake + parity).
 
 macOS / Linux:
 
@@ -43,41 +46,68 @@ macOS / Linux:
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
+# parity needs the upstream checkout and Python; see tools/parity/README.md
 ```
 
 ## Use
 
 ```
-spektra-roll-cli gen --out chart.png --width 1600 --height 900
+# bake the default Kodak Portra 400 + Portra Endura LUT
+spektra-roll-cli lut bake --out portra400_endura.cube --size 33
+
+# apply it to a 16-bit PNG (output stays 16-bit)
+spektra-roll-cli gen --out chart.png --bits 16
+spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded.png
+
+# compare against a reference bake
+spektra-roll-cli lut compare --a reference.cube --b portra400_endura.cube
+
+# M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
-spektra-roll-cli lut apply --lut warm.cube --in chart.png --out chart_warm.png
 ```
+
+`lut bake` defaults to `data/profiles/kodak_portra_400.json` and
+`data/profiles/kodak_portra_endura.json`, and looks the neutral enlarger
+filters up in `data/profiles/neutral_print_filters.json`. Override with
+`--film`, `--paper`, `--filters`, or `--cc C,M,Y`.
+
+LUT domain and range are **display-encoded sRGB**, so `lut apply` works
+directly on ordinary PNGs. The LUT is not linear-light; that conversion is an
+M2/OCIO task.
 
 ## Layout
 
 ```
 src/core/       C++20 library, no UI, no I/O policy
-  lut3d         .cube parsing + tetrahedral/trilinear interpolation
-  image         stb-based image I/O (8-bit for now) + test chart
+  lut3d         .cube parse / write + tetrahedral/trilinear interpolation
+  image         stb decode + 8/16-bit PNG encode + test chart
+  profile       spektrafilm profile JSON -> spectral data
+  film_model    M1 spectral chain: upsampling, curves, print, scan
+  metrics       PSNR and CIE76 delta E for parity checks
 src/cli/        headless entry point (render-farm friendly later)
-tests/          assert-based tests, no framework
-scripts/        build / install / demo for non-developers
+tests/          assert-based tests, no framework; frozen reference LUT
+data/profiles/  upstream CC BY-SA 4.0 film / paper data + NOTICE
+tools/parity/   Python reference chain and upstream cross-check
+scripts/        build / install / demo / verify for non-developers
 .github/        Windows + macOS CI
-docs/           architecture notes
+docs/           architecture and licensing notes
 ```
 
 ## Known limitations (on purpose, for now)
 
-- 8-bit in, 8-bit out. No colour management, no transfer functions.
-- `.cube` only; `.3dl` and OCIO configs come with the bake pipeline.
-- No spectral model yet — `lut gen` writes a synthetic curve, not film.
+- No couplers, grain, halation, diffusion or glare yet (M2+).
+- Output gamut compression is off. Extreme colours can produce out-of-range
+  LUT values, which are clamped when writing an image.
+- 16-bit PNG only; no EXR or OpenImageIO yet.
+- Mallett 2019 spectral upsampling only; hanatos2025 is an M2 option.
+- `.cube` only; `.3dl` and OCIO configs come later.
 - Windows UI does not exist; the CLI is the first deliverable.
 
 ## Licence
 
 GPL-3.0-or-later. Film and paper profiles derived from spektrafilm stay
-CC BY-SA 4.0. See `LICENSE` and `docs/licensing.md`.
+CC BY-SA 4.0; see `data/profiles/NOTICE.md`, `LICENSE` and `docs/licensing.md`.
 
 Spektrafilm is by Andrea Volpato. This project is independent and not
 affiliated with Kodak, Fujifilm or Ilford; stock names are used only to

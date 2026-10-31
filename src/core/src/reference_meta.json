@@ -1,0 +1,15 @@
+{
+  "film": "kodak_portra_400",
+  "paper": "kodak_portra_endura",
+  "print_exposure_factor": 0.8377872562995314,
+  "enlarger_filters": [
+    0.0,
+    51.56801468495496,
+    52.53400422349596
+  ],
+  "viewing_xy": [
+    0.34567459102773423,
+    0.3585103882001676
+  ],
+  "scan_normalization": 24.45126318323417
+}

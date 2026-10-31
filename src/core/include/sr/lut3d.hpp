@@ -25,6 +25,14 @@ public:
     // Returns false and fills `error` when the file cannot be parsed.
     bool loadCube(const std::string& path, std::string& error);
 
+    // Builds a LUT from table values ordered r fastest, then g, then b.
+    // `data` must hold size^3 entries; returns an empty LUT otherwise.
+    static Lut3D fromData(int size, std::vector<Rgb> data, std::string title);
+
+    // Writes a .cube file (8 decimal places, same layout the reference baker
+    // uses, so byte-level diffing of two bakes is meaningful).
+    bool saveCube(const std::string& path, std::string& error) const;
+
     static Lut3D identity(int size);
 
     int size() const { return size_; }

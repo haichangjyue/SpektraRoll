@@ -1,4 +1,4 @@
-# RUN — 三步跑起来
+# RUN — 四步跑起来
 
 > 这份文档是给你看的，不需要懂代码。
 > 所有操作都是**双击**，或者在 PowerShell 里粘贴一行命令。
@@ -24,25 +24,42 @@ X:\agent\SpektraRoll\scripts\build.cmd
 
 看到 `OK. Binary:` 就是成功了。
 
-## 第 3 步：看结果
+## 第 3 步：看 M1 真正的胶片样张（重点）
 
 双击：
 
 ```
-X:\agent\SpektraRoll\scripts\demo.cmd
+X:\agent\SpektraRoll\scripts\demo-m1.cmd
 ```
 
-它会自动生成两张图并打开文件夹：
+它会自己做四件事，然后自动打开两张图：
 
-- `out\chart.png` —— 原始测试图（灰阶 + 色块）
-- `out\chart_warm.png` —— 套了暖调 LUT 之后（注意看右边白色是不是偏暖了）
+1. 烘一张真正的 **Kodak Portra 400 + Portra Endura** LUT（33³）
+2. 生成一张 16-bit 测试图
+3. 把 LUT 套上去
+4. 和 Python 参考实现逐点对比，打印 PSNR / ΔE
 
-**你要做的判断只有一个：第二张有没有"胶片味"，还是死板的三原色。**
-觉得不对就告诉我"太淡了 / 太黄了"，我来调。
+你会看到：
 
-## 出问题了怎么办
+- `out\m1-before.png` —— 原始测试图（灰阶 + 色块）
+- `out\m1-after.png` —— 过完 Portra 400 + Endura 的结果
 
-把窗口截图发给我，或者说一句"跑挂了"。不需要你自己修。
+**你要判断三件事：**
+
+- 上半部的灰阶：暗部是不是偏暖，亮部是不是发灰（不是纯白）
+- 第二排左起第 1 块（肤色）：是不是自然，还是发黄 / 发红
+- 红色和蓝色色块：有没有过饱和或者串色
+
+觉得不对就告诉我"太黄了 / 太灰了 / 肤色太红"，我来调。
+
+### 想确认"它没坏"就双击这个
+
+```
+X:\agent\SpektraRoll\scripts\verify-m1.cmd
+```
+
+它会重新编译、跑单元测试、重新烘 LUT、和冻结的参考 LUT 对比。
+最后一行是 `PASS: M1 全部检查通过.` 就说明一切正常。
 
 ## 第 4 步：第一次推送到 GitHub（只做一次）
 
@@ -57,11 +74,18 @@ X:\agent\SpektraRoll\scripts\push.cmd
 
 以后每次我说"可以推了"，你双击这个文件就行。
 
+## 出问题了怎么办
+
+把窗口截图发给我，或者说一句"跑挂了"。不需要你自己修。
+
 ## 给技术朋友看的命令（你可以忽略）
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
-.\build\spektra-roll-cli.exe --help
+
+# 烘 M1 LUT 并和参考实现对比
+.\build\spektra-roll-cli.exe lut bake --out out\m1.cube
+.\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\m1.cube
 ```

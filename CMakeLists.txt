@@ -17,7 +17,12 @@ option(SR_BUILD_TESTS "Build the test binaries" ON)
 
 add_library(sr_core
     src/core/src/lut3d.cpp
-    src/core/src/image.cpp)
+    src/core/src/image.cpp
+    src/core/src/json.cpp
+    src/core/src/profile.cpp
+    src/core/src/film_model.cpp
+    src/core/src/metrics.cpp
+    src/core/src/spectral_tables.cpp)
 
 target_include_directories(sr_core
     PUBLIC src/core/include)
@@ -46,6 +51,22 @@ if(SR_BUILD_TESTS)
         target_link_options(test_lut3d PRIVATE -static)
     endif()
     add_test(NAME lut3d COMMAND test_lut3d)
+
+    add_executable(test_film_model tests/test_film_model.cpp)
+    target_link_libraries(test_film_model PRIVATE sr_core)
+    target_compile_definitions(test_film_model PRIVATE
+        SR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MINGW)
+        target_link_options(test_film_model PRIVATE -static)
+    endif()
+    add_test(NAME film_model COMMAND test_film_model)
+
+    add_executable(test_image tests/test_image.cpp)
+    target_link_libraries(test_image PRIVATE sr_core)
+    if(MINGW)
+        target_link_options(test_image PRIVATE -static)
+    endif()
+    add_test(NAME image_io COMMAND test_image)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

@@ -9,9 +9,8 @@ namespace sr {
 
 // Interleaved RGB float image, nominally 0..1.
 //
-// MVP limitation: no colour management and no transfer-function handling.
-// Values are decoded exactly as stored and written back the same way.
-// 16-bit / EXR support arrives with OpenImageIO in milestone P1.
+// 8-bit files are scaled by 255, 16-bit files by 65535, so the in-memory
+// representation is identical and precision is only lost at write time.
 struct Image {
     int width = 0;
     int height = 0;
@@ -28,8 +27,12 @@ struct Image {
     }
 };
 
-bool loadImage(const std::string& path, Image& out, std::string& error);
-bool saveImage(const std::string& path, const Image& image, std::string& error);
+// `sourceBits` (optional) receives 8 or 16, the bit depth actually decoded.
+bool loadImage(const std::string& path, Image& out, std::string& error,
+               int* sourceBits = nullptr);
+// `bits` is 8 or 16. 16-bit output is PNG only (stb has no 16-bit writer, so
+// we emit the PNG chunks ourselves; see image.cpp).
+bool saveImage(const std::string& path, const Image& image, std::string& error, int bits = 8);
 
 // Synthetic test chart: grey ramp on top, colour patches below. Used by the
 // `gen` command and by the demo, so there is always something to feed the LUT.
