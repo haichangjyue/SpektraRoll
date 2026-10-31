@@ -44,6 +44,19 @@ X:\agent\SpektraRoll\scripts\demo.cmd
 
 把窗口截图发给我，或者说一句"跑挂了"。不需要你自己修。
 
+## 第 4 步：第一次推送到 GitHub（只做一次）
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\push.cmd
+```
+
+会弹一个浏览器窗口，用你的 GitHub 账号（`haichangjyue`）登录并授权。
+之后代码就出现在 https://github.com/haichangjyue/SpektraRoll
+
+以后每次我说"可以推了"，你双击这个文件就行。
+
 ## 给技术朋友看的命令（你可以忽略）
 
 ```powershell

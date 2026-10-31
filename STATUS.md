@@ -1,10 +1,13 @@
 # STATUS
 
-**最后更新**：2026-11-01 · 里程碑 **M0 完成**
+**最后更新**：2026-11-01 · 里程碑 **M0 完成** · 项目名 **SpektraRoll**
 
 ## 一句话
 
 仓库能编译、测试全绿、双击就能看到效果；下一步把 spektrafilm 的光谱模型接进来，出第一张真正的胶片 LUT。
+
+仓库：https://github.com/haichangjyue/SpektraRoll
+本地：`X:\agent\SpektraRoll`
 
 ## M0 交付清单
 
