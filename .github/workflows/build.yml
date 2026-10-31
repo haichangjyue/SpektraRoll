@@ -19,7 +19,7 @@ jobs:
     name: ${{ matrix.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -41,3 +41,12 @@ jobs:
           "$exe" lut gen --out warm.cube --size 17 --preset warm
           "$exe" lut apply --lut warm.cube --in chart.png --out chart_warm.png
           ls -l chart.png chart_warm.png
+
+      - name: Bake the M1 film LUT and compare with the frozen reference
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          "$exe" lut bake --out m1.cube
+          "$exe" lut compare --a tests/reference/portra400_endura_33.cube --b m1.cube
