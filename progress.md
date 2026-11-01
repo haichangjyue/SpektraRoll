@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-01
-> **当前里程碑**：M1 已完成并自测通过，M2 待启动
+> **当前里程碑**：M1 已完成并推送；M2 = 颜色正确（真实照片 + Apple Log/HDR，D020/D021）待启动
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -114,7 +114,7 @@
 | 印片曝光因子 | 0.837773013976（上游含一次 sRGB→sRGB 往返，0.837787256300） |
 | 产物 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
-**重要推论**：31 ms/0.92 MP 对视频还是太慢（1080p 一帧约 0.3 s），必须上 SIMD / 多线程 / GPU，这是 M2 的任务，不是 bug。
+**重要推论**：31 ms/0.92 MP 对视频还是太慢（1080p 一帧约 0.3 s），必须上 SIMD / 多线程 / GPU，这是 M4 的任务，不是 bug。
 
 ---
 
@@ -130,7 +130,7 @@
 | **D006** | 构建系统 | **CMake ≥3.20 + Ninja + C++20** | Windows 用 MSVC，macOS 用 Clang，CI 两边一致 |
 | **D007** | 产品名 / 仓库名 | **SpektraRoll**（你已拍板，正式生效） | 二进制 `spektra-roll-cli`，命名空间 `sr`，头文件 `sr/` |
 | **D008** | 第一支胶片 / 相纸 | **Kodak Portra 400 + Kodak Portra Endura**（你已拍板） | M1 只对这一对负责；换胶片只需换 profile JSON |
-| **D012** | 光谱上采样 | **Mallett 2019**（81×3 基函数） | 可移植、可复现；hanatos2025 留 M2 |
+| **D012** | 光谱上采样 | **Mallett 2019**（81×3 基函数） | 可移植、可复现；hanatos2025 往后放 |
 | **D013** | LUT 定义域 | **display-encoded sRGB 进 → 出** | `lut apply` 直接吃普通 PNG；不能直接给线性/ACES 工作流 |
 | **D014** | 输出色域压缩 | **M1 关闭** | 极端颜色会出负值/超 1，写图时钳制；M2 再做 CAM16-UCS |
 | **D015** | 耦合剂 | **M1 关闭** | 先保证主链正确；couplers 进 M2 |
@@ -138,9 +138,12 @@
 | **D017** | 16-bit I/O | **stb 读 + 自写 16-bit PNG** | OpenImageIO/EXR 推迟；16-bit 输出仅 `.png` |
 | **D018** | parity 验收 | **PSNR ≥ 60 dB + 报告 ΔE76** | 实测 88.07 dB / ΔE76 max 0.0065 |
 | **D019** | CI 覆盖 M1 | **Windows + macOS 都烘 LUT 并和参考对比** | 光谱链退化会在 CI 直接变红 |
+| **D020** | M2 顺序 | **先色彩（真实照片 + Apple Log/HDR）→ 再视频编解码** | M2 颜色、M3 视频、M4 质感与性能、M5 界面 |
+| **D021** | Apple Log / HDR | **Apple Log 输入 → 线性宽色域 → 胶片模型 → SDR 或 HDR(PQ/HLG) 输出** | HDR 曝光映射做成参数；动态元数据不做 |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
+| **待定 D022** | 视频读写形态 | 独立程序（FFmpeg）还是 Resolve 插件 | 和 D010 一起定，M3 之前必须拍板 |
 
 ### 还有一些"我代你做的技术决定"（也记录在案）
 
@@ -153,31 +156,33 @@
 
 ## 三、未完成的待办
 
-### 🔴 立即要做（M2）
+### 🔴 立即要做（M2 · 颜色正确）
 
-1. **输出色域压缩**：CAM16-UCS + 亮度压缩，把负值和超 1 的结果合法压回 sRGB（D014 的欠账）
-2. **耦合剂（couplers）**：先做 `dir_couplers`，用上游同一套参数
-3. **GPU 颜色 + 空间效果**：颗粒 / 光晕 / 扩散 / 眩光；确定性种子 `seed = f(timecode, layer, sublayer)`
-4. **性能**：SIMD / 多线程 / GPU，把 0.92 MP 的 31 ms 压到视频可用
-5. **16-bit → 浮点 / EXR**：需要 OpenImageIO 的时候再引（D017）
-6. **hanatos2025 上采样**：作为 Mallett 之外的可选项（D012）
+1. **真实照片样张**：demo 里加一张 CC0 真实照片，前/后对比；合成测试图保留做数值校验（D020）
+2. **输出色域压缩**：CAM16-UCS + 亮度压缩，把负值和超 1 的结果合法压回色域（D014 的欠账）
+3. **耦合剂（couplers）**：先做 `dir_couplers`，用上游同一套参数（D015 的欠账）
+4. **Apple Log 输入**：按 Apple 公开公式解码，转到线性宽色域（D021）
+5. **HDR 输出**：PQ / HLG + Rec.2020 + 10-bit，HDR 曝光映射做成参数（D021）
+6. **LUT 形态**：HDR 用 1D shaper + 3D LUT（或 65³）
+
+**M2 前置条件**：你提供的 iPhone Apple Log / ProRes 素材，放到 `X:\agent\footage\`，告诉我文件名即可。
 
 ### 🟡 中期（M2–M5）
 
 | 阶段 | 内容 |
 |---|---|
-| **M2** | 色域压缩、耦合剂、GPU 空间效果、SIMD/多线程、EXR |
-| **M3** | macOS SwiftUI 应用（需要 Mac 或远程验收人，否则只能 CI 编译，看不到画面） |
-| **M4** | Windows WinUI 3 应用（**需要先装 MSVC**，MinGW 做不了 WinUI 3） |
-| **M5** | OFX 插件（DaVinci Resolve 等）+ 渲染农场命令行（帧区间 / 断点续渲） |
+| **M2** | 真实照片样张、色域压缩、耦合剂、Apple Log 输入、HDR 输出（D020/D021） |
+| **M3** | FFmpeg / ProRes 视频读写、时间维度、帧区间批处理；同时拍板 D022（独立程序 vs Resolve 插件） |
+| **M4** | 颗粒 / 光晕 / 扩散 / 眩光、确定性种子、SIMD / 多线程 / GPU、浮点 / EXR |
+| **M5** | Windows WinUI 3（**需要先装 MSVC**）、macOS SwiftUI（需要 Mac）、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
 
 - [ ] **没有 Mac** → macOS 端目前只有"能编译"的证据，没有"画面对不对"的证据
 - [x] ~~8bit 输出~~ → M1 已支持 16-bit PNG；浮点 / EXR 仍未做
-- [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；LUT 是 display-encoded sRGB
+- [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；现在只有 display-encoded sRGB，Apple Log/HDR 是 M2 的任务（D021）
 - [ ] **没有时间维度** → 现在的 CLI 只处理单张图，还不能读视频 / 图像序列
-- [ ] **没有确定性颗粒种子** → 计划 `seed = f(timecode, layer, sublayer)`，M2 实现
+- [ ] **没有确定性颗粒种子** → 计划 `seed = f(timecode, layer, sublayer)`，M4 实现
 - [ ] **Windows 代码签名** → 可选，Azure Trusted Signing 约 $10/月，不签用户会看到"未知发布者"
 - [ ] **法律风险未处理** → 上游 README 声称"直接受其方法启发的作品也算衍生"，若将来想闭源必须先找 Andrea Volpato 谈双授权
 
@@ -251,6 +256,15 @@ tools\parity\README.md                                     怎么跑、当前数
 Python 环境里已装：numpy、scipy、colour-science 0.4.7、opt_einsum、numba、matplotlib、scikit-image。
 导入上游时要 stub 掉 exiv2 / lensfunpy / rawpy / OpenImageIO，`reference_model.py` 已经处理好。
 
+### M2 素材（Apple Log / ProRes）
+
+```
+X:\agent\footage\            你提供的 iPhone 素材放这里（仓库外，不进 git）
+```
+
+M2 的色彩验收需要真素材：至少一段 Apple Log（10-bit HEVC 或 ProRes），
+再尽量有同场景的普通 sRGB 片段做对照。
+
 ---
 
 ## 五、仓库结构速查
@@ -271,7 +285,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D019
+├── DECISIONS.md             决策台账 D001–D021
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -280,7 +294,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D019**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D021**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
@@ -296,6 +310,10 @@ X:\agent\SpektraRoll\
 
 > “读 progress.md，我们从 M2 开始。”
 
-AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，然后按顺序做：
-输出色域压缩 → 耦合剂 → 颗粒/光晕/扩散 → SIMD/多线程/GPU → 浮点/EXR。
+AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，然后按 D020 的顺序做：
+
+1. 真实照片样张（demo 换成照片，测试图保留做数值校验）
+2. 输出色域压缩 → 耦合剂
+3. Apple Log 输入 → HDR（PQ/HLG）输出
+
 每一步都要重新跑 `lut compare`，PSNR 不能从 88 dB 掉下来。

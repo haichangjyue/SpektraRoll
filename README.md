@@ -77,8 +77,8 @@ filters up in `data/profiles/neutral_print_filters.json`. Override with
 `--film`, `--paper`, `--filters`, or `--cc C,M,Y`.
 
 LUT domain and range are **display-encoded sRGB**, so `lut apply` works
-directly on ordinary PNGs. The LUT is not linear-light; that conversion is an
-M2/OCIO task.
+directly on ordinary PNGs. The LUT is not linear-light; that conversion belongs
+to the M2 colour work (D021).
 
 ## Layout
 
@@ -100,11 +100,15 @@ docs/           architecture and licensing notes
 
 ## Known limitations (on purpose, for now)
 
-- No couplers, grain, halation, diffusion or glare yet (M2+).
+- No couplers, grain, halation, diffusion or glare yet (M4 for the spatial ones,
+  M2 for couplers).
+- SDR only today: input is display-encoded sRGB and output is SDR. Apple Log
+  input and HDR (PQ/HLG) output are the M2 colour work (D021).
+- No video file I/O yet: stills only until the M3 FFmpeg/ProRes step.
 - Output gamut compression is off. Extreme colours can produce out-of-range
   LUT values, which are clamped when writing an image.
 - 16-bit PNG only; no EXR or OpenImageIO yet.
-- Mallett 2019 spectral upsampling only; hanatos2025 is an M2 option.
+- Mallett 2019 spectral upsampling only; hanatos2025 is a later option.
 - `.cube` only; `.3dl` and OCIO configs come later.
 - Windows UI does not exist; the CLI is the first deliverable.
 

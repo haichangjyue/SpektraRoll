@@ -38,23 +38,25 @@
 2. 双击 `scripts\demo-m1.cmd` → 自动打开 `out\m1-before.png` 和 `out\m1-after.png`
 3. 看三件事：灰阶暗部是否偏暖、肤色是否自然、红蓝是否过饱和
 
-## 下一步（M2）
+## 下一步（M2 · 颜色正确）
 
-1. 输出色域压缩（CAM16-UCS），把负值和超 1 的结果合法地压回 sRGB
-2. 耦合剂（couplers），先做 `dir_couplers`
-3. 颗粒 / 光晕 / 扩散，确定性种子 `seed = f(timecode, layer, sublayer)`
-4. SIMD / 多线程 / GPU，把 0.92 MP 的 31 ms 压到视频可用
-5. hanatos2025 上采样作为可选项
+1. 真实照片样张（demo 前/后对比，测试图保留做数值校验）
+2. 输出色域压缩（CAM16-UCS），把负值和超 1 的结果合法地压回色域
+3. 耦合剂（couplers），先做 `dir_couplers`
+4. Apple Log 输入（按 Apple 公开公式解码到线性宽色域）
+5. HDR 输出（PQ / HLG + Rec.2020 + 10-bit，HDR 曝光映射做成参数）
+6. 视频编解码（ProRes / FFmpeg）放到 M3；颗粒 / 光晕 / SIMD 顺延到 M4
 
 ## 需要你决定的事
 
 - **D009**：Windows UI 用 WinUI 3 还是 Qt？（建议 WinUI 3，但要先装 MSVC）
 - **D010**：OFX 插件做不做？（建议做，放第二期）
 - **D011**：Apple Developer 账号什么时候买？（建议等有 Mac 再说）
+- **D022**：ProRes 读写走独立程序（FFmpeg）还是 Resolve 插件？（M3 之前定）
 
 ## 风险 / 提醒
 
 - 本机没有 Mac，macOS 端仍然只有 CI 编译证据，**没有画面证据**。
 - M1 的 LUT 是 display-encoded sRGB，不是线性/ACES；调色软件里要放在正确的色彩空间节点。
 - 极端饱和输入会产生负的 LUT 值，写图时被钳制；这是 D014 的已知取舍。
-- 单线程 31 ms/0.92 MP ≈ 1080p 一帧 0.3 s，视频仍需 SIMD/多线程/GPU，这是 M2 的事。
+- 单线程 31 ms/0.92 MP ≈ 1080p 一帧 0.3 s，视频仍需 SIMD/多线程/GPU，这是 M4 的事。

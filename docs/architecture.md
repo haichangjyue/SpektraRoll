@@ -46,9 +46,10 @@ deterministic and the LUT meaningful.
 
 Deliberately off in M1 (each has a decision record):
 
-- output gamut compression (D014)
-- dir couplers (D015)
-- grain, halation, diffusion, glare (M2)
+- output gamut compression (D014) — M2
+- dir couplers (D015) — M2
+- grain, halation, diffusion, glare — M4
+- Apple Log input and HDR (PQ/HLG) output — M2 (D021)
 - hanatos2025 upsampling (D012)
 
 ## Layers
@@ -101,7 +102,7 @@ and CIE76 ΔE over all 33³ entries. Current numbers are in
 |---|---|
 | M0 *(done)* | CLI applies a LUT, tests, CI |
 | M1 *(done)* | spektrafilm model ported, real Portra 400 + Endura LUT, parity harness, 16-bit PNG |
-| M2 | gamut compression, couplers, GPU spatial effects, SIMD/multithreading, EXR |
-| M3 | macOS app |
-| M4 | Windows app |
-| M5 | OFX plugin + render-farm CLI |
+| M2 | colour correctness: real-photo sample, gamut compression, couplers, Apple Log input, HDR (PQ/HLG) output |
+| M3 | video I/O: FFmpeg / ProRes, time dimension, frame ranges; decide standalone vs OFX (D022) |
+| M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, SIMD / threads / GPU, float / EXR |
+| M5 | UI: Windows WinUI 3, macOS SwiftUI, OFX plugin, render-farm CLI |
