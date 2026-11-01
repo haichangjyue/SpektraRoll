@@ -147,6 +147,38 @@ int main() {
         check(slowDelta > 1e-6, "cross-faded grain still moves");
     }
 
+    // The field cache must reproduce the uncached pixels bit for bit while
+    // generating one new field per field index instead of two per frame (D039).
+    {
+        sr::GrainParams params;
+        params.amount = 0.5f;
+        params.seed = 11;
+        params.rate = 3;
+
+        sr::GrainFieldCache cache;
+        for (int frame = 0; frame < 9; ++frame) {
+            params.frame = frame;
+            std::vector<float> uncached = flat(w, h, 0.5f);
+            std::vector<float> cached = uncached;
+            sr::applyGrain(uncached.data(), w, h, params);
+            sr::applyGrain(cached.data(), w, h, params, &cache);
+            check(identical(uncached, cached), "cached grain matches the uncached path");
+        }
+        // Frames 0..8 with rate 3 use field indices 0..3, so four builds happen
+        // instead of the 18 the uncached path performs.
+        check(cache.builds() == 4, "grain cache builds one field per field index");
+
+        // A different seed must not reuse the old fields.
+        params.seed = 12;
+        params.frame = 0;
+        std::vector<float> uncached = flat(w, h, 0.5f);
+        std::vector<float> cached = uncached;
+        sr::applyGrain(uncached.data(), w, h, params);
+        sr::applyGrain(cached.data(), w, h, params, &cache);
+        check(identical(uncached, cached), "cached grain matches after a seed change");
+        check(cache.builds() == 6, "grain cache rebuilds for a new seed");
+    }
+
     // Glare lifts the blacks with a wide veil of light; diffusion softens.
     {
         std::vector<float> image = flat(w, h, 0.05f);

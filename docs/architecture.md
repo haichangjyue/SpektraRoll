@@ -105,13 +105,16 @@ grain.
 
 Grain is cross-faded across frames (D036): two independent fields are mixed over
 `--grain-rate` frames instead of replacing the field every frame, because a
-fresh pattern at 24 fps reads as digital boiling rather than film.
+fresh pattern at 24 fps reads as digital boiling rather than film. Those fields
+are cached between frames (D039): `GrainFieldCache` keeps the two most recently
+used fields keyed by seed, geometry, radius and field index, so a 3-frame
+cross-fade generates one new field per three frames instead of two per frame.
+The pixel code is shared with the uncached path, so output is bit-identical.
 
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2
 - dir couplers (D015) — M2
-- grain, halation, diffusion, glare — M4
 - HDR (PQ/HLG) output — M2 (D021); Apple Log input is now built (D023)
 - hanatos2025 upsampling (D012)
 

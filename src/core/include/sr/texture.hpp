@@ -3,6 +3,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace sr {
 
@@ -54,6 +56,46 @@ struct DiffusionParams {
 void applyHalation(float* pixels, int width, int height, const HalationParams& params);
 void applyGlare(float* pixels, int width, int height, const GlareParams& params);
 void applyDiffusion(float* pixels, int width, int height, const DiffusionParams& params);
-void applyGrain(float* pixels, int width, int height, const GrainParams& params);
+
+// Reuses the generated grain fields between frames. With the default
+// `GrainParams::rate` of 3, a field is on screen for three frames, so without a
+// cache two full noise fields plus four blurs are rebuilt for every frame even
+// though only one field actually changed (D039).
+//
+// Keep one cache alive for the whole sequence that is rendered frame by frame:
+// the two most recently used fields are kept (an LRU pair), which is exactly
+// what the cross-fade needs. It is deliberately not thread-safe; the render
+// loop is sequential per frame.
+class GrainFieldCache {
+public:
+    // Returns the blurred noise field for `index`, generating it on a miss.
+    // The reference stays valid until the next call with a different index.
+    const std::vector<float>& field(unsigned seed, int width, int height, int radius,
+                                    std::uint32_t index);
+
+    // Number of fields generated so far (diagnostics and tests).
+    std::size_t builds() const { return builds_; }
+
+private:
+    struct Entry {
+        bool valid = false;
+        unsigned seed = 0;
+        int width = 0;
+        int height = 0;
+        int radius = -1;
+        std::uint32_t index = 0;
+        std::uint64_t lastUse = 0;
+        std::vector<float> data;
+    };
+    Entry entries_[2];
+    std::uint64_t clock_ = 0;
+    std::size_t builds_ = 0;
+};
+
+// `cache` is optional: pass the same instance for every frame of a sequence to
+// reuse grain fields; omit it for one-off images. Results are identical either
+// way, because the cache stores exactly the fields the uncached path builds.
+void applyGrain(float* pixels, int width, int height, const GrainParams& params,
+                GrainFieldCache* cache = nullptr);
 
 }  // namespace sr

@@ -441,7 +441,8 @@ TextureOptions parseTexture(const Args& args) {
     return texture;
 }
 
-void applyTexture(float* pixels, int width, int height, const TextureOptions& texture, int frame) {
+void applyTexture(float* pixels, int width, int height, const TextureOptions& texture, int frame,
+                  sr::GrainFieldCache* grainCache) {
     if (texture.halation.amount > 0.0f) {
         sr::applyHalation(pixels, width, height, texture.halation);
     }
@@ -454,7 +455,7 @@ void applyTexture(float* pixels, int width, int height, const TextureOptions& te
     if (texture.grain.amount > 0.0f) {
         sr::GrainParams grain = texture.grain;
         grain.frame = frame;
-        sr::applyGrain(pixels, width, height, grain);
+        sr::applyGrain(pixels, width, height, grain, grainCache);
     }
 }
 
@@ -480,6 +481,7 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
     int bits = 16;
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
     const TextureOptions texture = parseTexture(args);
+    sr::GrainFieldCache grainCache;
     for (const auto& path : files) {
         sr::Image image;
         int sourceBits = 8;
@@ -497,7 +499,7 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
             }
         });
         applyTexture(image.pixels.data(), image.width, image.height, texture,
-                     static_cast<int>(frames));
+                     static_cast<int>(frames), &grainCache);
         bits = requestedBits(args, sourceBits);
         const auto outPath = std::filesystem::path(outDir) / path.filename();
         if (!sr::saveImage(outPath.string(), image, error, bits)) return fail(error);
@@ -559,7 +561,7 @@ int cmdLutApply(const Args& args) {
             px[2] = result.b;
         }
     });
-    applyTexture(image.pixels.data(), image.width, image.height, parseTexture(args), 0);
+    applyTexture(image.pixels.data(), image.width, image.height, parseTexture(args), 0, nullptr);
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
@@ -819,6 +821,7 @@ int cmdVideo(const Args& args) {
     const TextureOptions texture = parseTexture(args);
     std::vector<unsigned short> raw(pixels * 3);
     std::vector<float> frame(pixels * 3);
+    sr::GrainFieldCache grainCache;
     const auto started = std::chrono::steady_clock::now();
     size_t frames = 0;
     while (true) {
@@ -836,7 +839,7 @@ int cmdVideo(const Args& args) {
                 px[2] = result.b;
             }
         });
-        applyTexture(frame.data(), width, height, texture, static_cast<int>(frames));
+        applyTexture(frame.data(), width, height, texture, static_cast<int>(frames), &grainCache);
         for (size_t i = 0; i < raw.size(); ++i) {
             const float value = std::min(1.0f, std::max(0.0f, frame[i]));
             raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
@@ -856,6 +859,10 @@ int cmdVideo(const Args& args) {
     closePipe(encoder);
 
     if (frames == 0) return fail("no frames were decoded");
+    if (texture.grain.amount > 0.0f) {
+        std::printf("grain fields: %zu generated for %zu frames (rate %d)\n",
+                    grainCache.builds(), frames, texture.grain.rate);
+    }
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();

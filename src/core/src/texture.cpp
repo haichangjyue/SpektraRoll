@@ -122,7 +122,58 @@ void blurWide(std::vector<float>& buffer, int width, int height, int radius, int
     }
 }
 
+// One blurred noise field. The grain is generated at full resolution and then
+// softened twice with the box blur, which is what turns per-pixel noise into
+// clumps that read as film grain rather than digital hash.
+std::vector<float> buildGrainField(unsigned seed, int width, int height, int radius,
+                                   std::uint32_t index) {
+    const size_t count = static_cast<size_t>(width) * height;
+    std::vector<float> field(count);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            field[static_cast<size_t>(y) * width + x] = noiseAt(seed, index, x, y);
+        }
+    }
+    std::vector<float> scratch(count);
+    for (int pass = 0; pass < 2; ++pass) boxBlur(field, scratch, width, height, radius);
+    return field;
+}
+
 }  // namespace
+
+const std::vector<float>& GrainFieldCache::field(unsigned seed, int width, int height, int radius,
+                                                 std::uint32_t index) {
+    for (Entry& entry : entries_) {
+        if (entry.valid && entry.seed == seed && entry.width == width && entry.height == height &&
+            entry.radius == radius && entry.index == index) {
+            entry.lastUse = ++clock_;
+            return entry.data;
+        }
+    }
+
+    // Evict the least recently used entry. The most recently used one is the
+    // field the caller asked for a moment ago (the cross-fade holds on to it),
+    // so it is never the victim.
+    Entry* victim = nullptr;
+    for (Entry& entry : entries_) {
+        if (!entry.valid) {
+            victim = &entry;
+            break;
+        }
+        if (victim == nullptr || entry.lastUse < victim->lastUse) victim = &entry;
+    }
+
+    victim->valid = true;
+    victim->seed = seed;
+    victim->width = width;
+    victim->height = height;
+    victim->radius = radius;
+    victim->index = index;
+    victim->lastUse = ++clock_;
+    victim->data = buildGrainField(seed, width, height, radius, index);
+    ++builds_;
+    return victim->data;
+}
 
 void applyHalation(float* pixels, int width, int height, const HalationParams& params) {
     if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
@@ -218,7 +269,8 @@ void applyDiffusion(float* pixels, int width, int height, const DiffusionParams&
     });
 }
 
-void applyGrain(float* pixels, int width, int height, const GrainParams& params) {
+void applyGrain(float* pixels, int width, int height, const GrainParams& params,
+                GrainFieldCache* cache) {
     if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
 
     const size_t count = static_cast<size_t>(width) * height;
@@ -233,26 +285,27 @@ void applyGrain(float* pixels, int width, int height, const GrainParams& params)
     const float phase =
         rate > 1 ? static_cast<float>(frame % rate) / static_cast<float>(rate) : 0.0f;
 
-    auto buildField = [&](std::uint32_t index) {
-        std::vector<float> field(count);
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                field[static_cast<size_t>(y) * width + x] = noiseAt(seed, index, x, y);
-            }
-        }
-        std::vector<float> scratch(count);
-        for (int pass = 0; pass < 2; ++pass) boxBlur(field, scratch, width, height, radius);
-        return field;
-    };
+    // Two independent fields mixed 50/50 would lose ~30% of their contrast, so
+    // normalise the blend to keep the grain level steady.
+    const float norm = 1.0f / std::sqrt((1.0f - phase) * (1.0f - phase) + phase * phase);
 
-    std::vector<float> field = buildField(fieldIndex);
-    if (rate > 1) {
-        const std::vector<float> next = buildField(fieldIndex + 1);
-        // Two independent fields mixed 50/50 would lose ~30% of their contrast,
-        // so normalise the blend to keep the grain level steady.
-        const float norm = 1.0f / std::sqrt((1.0f - phase) * (1.0f - phase) + phase * phase);
-        for (size_t i = 0; i < count; ++i) {
-            field[i] = (field[i] * (1.0f - phase) + next[i] * phase) * norm;
+    // The cache keeps the fields between frames (D039). Without one, build the
+    // same two fields locally so single-image results stay identical.
+    std::vector<float> localA;
+    std::vector<float> localB;
+    const float* fieldA = nullptr;
+    const float* fieldB = nullptr;
+    if (cache != nullptr) {
+        fieldA = cache->field(seed, width, height, radius, fieldIndex).data();
+        if (rate > 1) {
+            fieldB = cache->field(seed, width, height, radius, fieldIndex + 1).data();
+        }
+    } else {
+        localA = buildGrainField(seed, width, height, radius, fieldIndex);
+        fieldA = localA.data();
+        if (rate > 1) {
+            localB = buildGrainField(seed, width, height, radius, fieldIndex + 1);
+            fieldB = localB.data();
         }
     }
 
@@ -264,7 +317,10 @@ void applyGrain(float* pixels, int width, int height, const GrainParams& params)
             // Film grain is strongest in the mid-tones and fades in the toe and
             // shoulder, so weight by distance from 0.5.
             const float weight = 1.0f - std::fabs(2.0f * luma - 1.0f);
-            const float delta = field[i] * scale * weight;
+            const float noise = rate > 1
+                                    ? (fieldA[i] * (1.0f - phase) + fieldB[i] * phase) * norm
+                                    : fieldA[i];
+            const float delta = noise * scale * weight;
             for (int c = 0; c < 3; ++c) {
                 px[c] = std::min(1.0f, std::max(0.0f, px[c] + delta));
             }
