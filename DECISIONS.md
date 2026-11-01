@@ -356,6 +356,7 @@
   - 用户机器上需要有 `ffmpeg.exe`（demo 会指到 `J:\ffmpeg\bin\ffmpeg.exe`，也可用 `--ffmpeg` 或 `SPEKTRA_FFMPEG` 指定）
   - 好处：不用把 100 MB 的 FFmpeg 链进构建、Windows/macOS 行为一致、升级 FFmpeg 不用重编
   - 代价：exe 不再是"单文件零依赖"；以后要单文件分发时再切换成链接 libav*
+  - **教训（issue #1）**：POSIX `popen()` 只接受 `"r"/"w"`，`"rb"/"wb"` 在 macOS 上直接返回 NULL。今后所有"只在一个平台跑"的路径都要想办法进 CI，否则等于没测
   - D010（OFX 插件）仍然待定，但不再和 M3 绑在一起
 
 ---
