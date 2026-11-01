@@ -47,7 +47,7 @@ void printUsage() {
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
         "                            [--input srgb|apple-log] [--exposure EV]\n"
-        "                            [--scan print|negative] [--contrast 1.0]\n"
+        "                            [--scan print|negative] [--contrast 1.15]\n"
         "                            [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
@@ -56,7 +56,8 @@ void printUsage() {
         "      and --exposure shifts scene exposure in stops before the film model.\n"
         "      --scan negative scans the negative itself (inverted against the film\n"
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
-        "      --contrast pivots at 18% grey (1.0 = film curve only, 1.2 = punchier).\n"
+        "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
+        "      pass 1.0 for the flat film curve only).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -248,7 +249,6 @@ int cmdLutBake(const Args& args) {
         }
     }
     options.exposureEv = args.getDouble("exposure", 0.0);
-    options.contrast = args.getDouble("contrast", 1.0);
 
     if (args.has("scan")) {
         const std::string mode = args.get("scan");
@@ -258,6 +258,10 @@ int cmdLutBake(const Args& args) {
             return fail("--scan expects 'print' or 'negative'");
         }
     }
+    // Negative scans default to a little contrast (D026); the print path ignores
+    // this value entirely.
+    options.contrast =
+        args.getDouble("contrast", options.scan == sr::ScanMode::Negative ? 1.15 : 1.0);
 
     std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
     std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());

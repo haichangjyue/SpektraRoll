@@ -64,7 +64,8 @@ black, then neutralise mid-grey with a per-channel power (a first-order stand-in
 for a dye-correction matrix). That path has much more latitude, looks flatter
 and has no upstream counterpart to compare against. `--contrast` (D025) pivots
 on the scan's own 18% grey and scales all channels together, so it adds punch
-without shifting hue.
+without shifting hue; negative scans default to 1.15 (D026), and 1.0 keeps the
+flat film curve for grading later.
 
 Deliberately off so far (each has a decision record):
 

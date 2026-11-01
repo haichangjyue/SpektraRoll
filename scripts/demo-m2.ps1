@@ -77,17 +77,17 @@ Write-Host "4/5  套上 Portra 400 (印片, 高对比)..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "5/5  扫描负片 (保留高光和暗部)..." -ForegroundColor Cyan
+Write-Host "5/5  扫描负片 (默认反差 1.15)..." -ForegroundColor Cyan
 & $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\m2-applelog-negative.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $exe lut apply --lut "out\m2-applelog-negative.cube" --in "out\m2-frame-applelog.png" --out "out\m2-negative.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "5b   负片 + 一点反差 (对比用)..." -ForegroundColor Cyan
-& $exe lut bake --input apple-log --exposure $Exposure --scan negative --contrast 1.15 --out "out\m2-applelog-negative-c115.cube"
+Write-Host "5b   负片, 不加反差 (留全部余量, 对比用)..." -ForegroundColor Cyan
+& $exe lut bake --input apple-log --exposure $Exposure --scan negative --contrast 1.0 --out "out\m2-applelog-negative-flat.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $exe lut apply --lut "out\m2-applelog-negative-c115.cube" --in "out\m2-frame-applelog.png" --out "out\m2-negative-contrast.png"
+& $exe lut apply --lut "out\m2-applelog-negative-flat.cube" --in "out\m2-frame-applelog.png" --out "out\m2-negative-flat.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
@@ -98,13 +98,13 @@ Write-Host "  * 彩色招牌和墙面: 是不是过饱和或者串色" -Foregrou
 Write-Host "  * 印片 vs 负片: 印片更像一张洗出来的照片, 负片更平但两头都留得住" -ForegroundColor Green
 Write-Host ""
 Write-Host "四张图已经生成:" -ForegroundColor Green
-Write-Host "  $root\out\m2-before.png    (只解码, 对照)"
-Write-Host "  $root\out\m2-after.png     (印片: Portra 400 + Endura)"
-Write-Host "  $root\out\m2-negative.png  (扫描负片: 高光/暗部都保住)"
-Write-Host "  $root\out\m2-negative-contrast.png  (负片 + 1.15 反差)"
+Write-Host "  $root\out\m2-before.png         (只解码, 对照)"
+Write-Host "  $root\out\m2-after.png          (印片: Portra 400 + Endura)"
+Write-Host "  $root\out\m2-negative.png       (扫描负片: 默认反差 1.15)"
+Write-Host "  $root\out\m2-negative-flat.png  (扫描负片: 不加反差, 留余量)"
 Write-Host ""
 
 if (-not $NoOpen) {
     Start-Process (Join-Path $root "out\m2-negative.png")
-    Start-Process (Join-Path $root "out\m2-negative-contrast.png")
+    Start-Process (Join-Path $root "out\m2-negative-flat.png")
 }

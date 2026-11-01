@@ -76,8 +76,8 @@ spektra-roll-cli lut apply --lut applelog.cube --in frame.png --out frame_portra
 # scan the negative instead of printing it: more latitude, flatter look
 spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --out neg.cube
 spektra-roll-cli lut apply --lut neg.cube --in frame.png --out frame_negative.png
-# add some contrast on top (1.0 = film curve only)
-spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --contrast 1.15 --out neg15.cube
+# negative scans default to --contrast 1.15; pass 1.0 for the flat, full-latitude version
+spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --contrast 1.0 --out neg_flat.cube
 
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
