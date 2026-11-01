@@ -108,6 +108,28 @@ X:\agent\SpektraRoll\scripts\push.cmd
 
 以后每次我说"可以推了"，你双击这个文件就行。
 
+## 看胶片质感（颗粒 + 光晕）
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-m3.cmd
+```
+
+它会出三样东西：
+
+- `out\m3-clean.png` —— 不带质感的同一帧
+- `out\m3-texture.png` —— 加了颗粒和光晕
+- `out\m3-texture.mov` —— 整段视频，带声音，颗粒逐帧变化
+
+**你要判断三件事**（图片建议放大到 100% 看）：
+
+- 颗粒是不是"细而不脏"，暗部和亮部应该比中灰少
+- 播放视频时颗粒有没有在动（不是一张贴图）
+- 高光边缘有没有一点点暖色晕开（不是发光泛滥）
+
+参数可以改：`demo-m3.cmd -Grain 0.2 -Halation 0.4`，0 就是关掉。
+
 ## 在 Mac 上验证（可选）
 
 你的 MacBook Air M1 也能跑这个程序。把仓库拷到 Mac 上，双击：

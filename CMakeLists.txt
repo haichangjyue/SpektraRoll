@@ -24,7 +24,8 @@ add_library(sr_core
     src/core/src/metrics.cpp
     src/core/src/spectral_tables.cpp
     src/core/src/transfer.cpp
-    src/core/src/gamut.cpp)
+    src/core/src/gamut.cpp
+    src/core/src/texture.cpp)
 
 target_include_directories(sr_core
     PUBLIC src/core/include)
@@ -83,6 +84,13 @@ if(SR_BUILD_TESTS)
         target_link_options(test_gamut PRIVATE -static)
     endif()
     add_test(NAME gamut COMMAND test_gamut)
+
+    add_executable(test_texture tests/test_texture.cpp)
+    target_link_libraries(test_texture PRIVATE sr_core)
+    if(MINGW)
+        target_link_options(test_texture PRIVATE -static)
+    endif()
+    add_test(NAME texture COMMAND test_texture)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

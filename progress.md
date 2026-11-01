@@ -154,6 +154,7 @@
 | **D022** | 视频读写形态 | **独立程序 + FFmpeg 子进程**（你选的） | `spektra-roll-cli video` 直接吃 .mov；不把 FFmpeg 链进 exe |
 | **D031** | 帧区间 / ProRes | **`--start/--frames/--duration` + `--codec prores`（422 HQ）** | 音画同步；ProRes 120 MB / 4.1 s |
 | **D032** | 多线程（提前） | **`parallelChunks` + `--threads`，0=自动** | 套 LUT 96→17 ms；视频 268→214 ms/帧（瓶颈转编码） |
+| **D033** | 胶片质感 | **确定性颗粒 + 暖色光晕，逐帧叠加（不进 LUT）** | 同 seed/帧可复现；视频 +97 ms/帧；光晕半径仍是画幅比例 |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -185,6 +186,7 @@
 - [x] **M3 第一步**（D022）：`spektra-roll-cli video` 直接读 `.mov`、逐帧套 LUT、带原声编码；99 帧约 30 秒
 - [x] **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
 - [x] **多线程**（D032，提前做）：套 LUT 96→17 ms；视频 268→214 ms/帧
+- [x] **胶片质感**（D033）：`--grain` / `--halation`，颗粒逐帧变化、可复现；`scripts\demo-m3.cmd`
 - [x] **macOS 修复**（issue #1）：POSIX `popen` 只接受 `"r"/"w"`，我们传了 `"rb"/"wb"`，macOS 直接返回 NULL → 视频命令起不来。已修，CI 现在两个平台都跑视频冒烟
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 
@@ -320,7 +322,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D029
+├── DECISIONS.md             决策台账 D001–D033
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -329,7 +331,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D029**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D033**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）

@@ -23,6 +23,7 @@
 #include "sr/metrics.hpp"
 #include "sr/parallel.hpp"
 #include "sr/profile.hpp"
+#include "sr/texture.hpp"
 
 namespace {
 
@@ -50,6 +51,7 @@ void printUsage() {
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
+        "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
         "                         [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
@@ -87,6 +89,7 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
+        "                             [--grain 0..1] [--halation 0..1]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
@@ -411,6 +414,34 @@ int cmdLutCompare(const Args& args) {
     return 0;
 }
 
+// Spatial effects (D033): parsed once, applied per frame after the LUT.
+struct TextureOptions {
+    sr::GrainParams grain;
+    sr::HalationParams halation;
+};
+
+TextureOptions parseTexture(const Args& args) {
+    TextureOptions texture;
+    texture.grain.amount = static_cast<float>(args.getDouble("grain", 0.0));
+    texture.grain.size = static_cast<float>(args.getDouble("grain-size", 1.2));
+    texture.grain.seed = static_cast<unsigned>(args.getInt("seed", 1));
+    texture.halation.amount = static_cast<float>(args.getDouble("halation", 0.0));
+    texture.halation.radius = static_cast<float>(args.getDouble("halation-radius", 0.006));
+    texture.halation.threshold = static_cast<float>(args.getDouble("halation-threshold", 0.72));
+    return texture;
+}
+
+void applyTexture(float* pixels, int width, int height, const TextureOptions& texture, int frame) {
+    if (texture.halation.amount > 0.0f) {
+        sr::applyHalation(pixels, width, height, texture.halation);
+    }
+    if (texture.grain.amount > 0.0f) {
+        sr::GrainParams grain = texture.grain;
+        grain.frame = frame;
+        sr::applyGrain(pixels, width, height, grain);
+    }
+}
+
 int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
                    const std::string& inDir, const std::string& outDir, const Args& args) {
     if (inDir.empty() || outDir.empty()) return fail("--in-dir and --out-dir go together");
@@ -432,6 +463,7 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
     std::string error;
     int bits = 16;
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
+    const TextureOptions texture = parseTexture(args);
     for (const auto& path : files) {
         sr::Image image;
         int sourceBits = 8;
@@ -448,6 +480,8 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
                 px[2] = result.b;
             }
         });
+        applyTexture(image.pixels.data(), image.width, image.height, texture,
+                     static_cast<int>(frames));
         bits = requestedBits(args, sourceBits);
         const auto outPath = std::filesystem::path(outDir) / path.filename();
         if (!sr::saveImage(outPath.string(), image, error, bits)) return fail(error);
@@ -509,6 +543,7 @@ int cmdLutApply(const Args& args) {
             px[2] = result.b;
         }
     });
+    applyTexture(image.pixels.data(), image.width, image.height, parseTexture(args), 0);
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
@@ -574,8 +609,7 @@ std::string runCapture(const std::string& command) {
     return out;
 }
 
-std::string ffmpegPath(const Args& args) {
-    if (args.has("ffmpeg")) return args.get("ffmpeg");
+std::string ffmpegPath(const Args& args) {    if (args.has("ffmpeg")) return args.get("ffmpeg");
     if (const char* env = std::getenv("SPEKTRA_FFMPEG")) return env;
     return "ffmpeg";
 }
@@ -744,6 +778,7 @@ int cmdVideo(const Args& args) {
 
     const size_t pixels = static_cast<size_t>(width) * height;
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
+    const TextureOptions texture = parseTexture(args);
     std::vector<unsigned short> raw(pixels * 3);
     std::vector<float> frame(pixels * 3);
     const auto started = std::chrono::steady_clock::now();
@@ -763,6 +798,7 @@ int cmdVideo(const Args& args) {
                 px[2] = result.b;
             }
         });
+        applyTexture(frame.data(), width, height, texture, static_cast<int>(frames));
         for (size_t i = 0; i < raw.size(); ++i) {
             const float value = std::min(1.0f, std::max(0.0f, frame[i]));
             raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));

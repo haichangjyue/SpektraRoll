@@ -92,6 +92,11 @@ straight through. No intermediate files, no frame sequence on disk. `--start`
 /`--frames`/`--duration` seek both the video pipe and the audio input so they
 stay in sync, and `--codec prores` swaps the encoder for ProRes 422 HQ (D031).
 
+Grain and halation (D033) run after the LUT, per frame, because they are
+spatial: grain is a seeded hash field blurred into clumps and weighted toward
+mid-tones, halation is a thresholded highlight mask blurred three times and
+tinted warm. The seed and frame index make the field reproducible.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2

@@ -89,6 +89,10 @@ spektra-roll-cli video --lut hdr.cube --in clip.mov --out graded.mov --trc pq
 spektra-roll-cli video --lut hdr.cube --in clip.mov --out trimmed.mov --trc pq \
     --start 00:00:12.5 --frames 24 --codec prores
 
+# film texture: grain and halation are spatial, so they run per frame
+spektra-roll-cli video --lut film.cube --in clip.mov --out textured.mov --trc srgb \
+    --grain 0.35 --halation 0.6
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
@@ -129,8 +133,9 @@ docs/           architecture and licensing notes
 
 ## Known limitations (on purpose, for now)
 
-- No grain, halation, diffusion or glare yet (M4); DIR couplers are in for
-  Apple Log input (`--couplers on|off`, D028).
+- No glare, diffusion or grain-size variation per layer yet; grain and halation
+  are in (D033), but halation uses a display-space blur rather than a physical
+  micron-scale point spread.
 - Output gamut compression is on for Apple Log input (`--gamut oklch`, D027) and
   off by default for sRGB input so the M1 reference stays bit-identical.
 - Apple Log input works, with two ways out: print (`--scan print`, the M1
