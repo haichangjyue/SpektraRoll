@@ -196,6 +196,7 @@
 CMake   C:\Program Files\CMake\bin\cmake.exe      (4.4.4)
 Ninja   X:\agent\tools\ninja\ninja.exe            (1.13.2)
 GCC     X:\agent\tools\mingw64\bin\g++.exe        (16.2.0 ucrt posix-seh)
+ffmpeg  J:\ffmpeg\bin\ffmpeg.exe                  M2 起用来从 .mov 抽帧验收
 ```
 
 ### ⚠️ 三个已知陷阱
@@ -264,6 +265,7 @@ X:\agent\footage\            你提供的 iPhone 素材放这里（仓库外，�
 
 M2 的色彩验收需要真素材：至少一段 Apple Log（10-bit HEVC 或 ProRes），
 再尽量有同场景的普通 sRGB 片段做对照。
+C++ 目前还不能读 `.mov`，M2 阶段先用 `ffmpeg` 抽一张 16-bit PNG 做验收，不动视频链路。
 
 ---
 
