@@ -17,9 +17,10 @@
 - [x] 99 帧 2.6 MP 素材约 30 秒（268 ms/帧，单线程）
 - [x] 帧区间：`--start 00:00:12 --frames 240`（音画同步）
 - [x] ProRes 422 HQ 输出：`--codec prores`（SDR 和 HDR 都有）
-- [x] macOS 本机验收脚本：`scripts/verify-macos.command`（等你在 Air 上跑一次）
+- [x] macOS 本机验收脚本：`scripts/verify-macos.command`（**已在 Mac 上跑通**：编译、5/5 测试、LUT parity 全过；ffmpeg 未装，视频路径待验）
+- [x] 多线程（D032）：套 LUT 96→17 ms，视频 268→214 ms/帧
 - [ ] 断点续渲 / 时间码轨道
-- [ ] 多线程提速（M4）
+- [ ] 视频速度仍受编码器限制（M4：crf/preset 或硬件编码）
 
 ## 这次交付（M1）
 

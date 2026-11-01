@@ -108,8 +108,8 @@
 | CMake | 4.4.4（`C:\Program Files\CMake\bin\cmake.exe`） |
 | Ninja | 1.13.2（`X:\agent\tools\ninja\ninja.exe`） |
 | 单元测试 | 4/4 程序通过（LUT 6 组 + 胶片模型 + 图像 I/O + Apple Log） |
-| 33³ LUT 烘焙 | **约 245 ms**（单线程） |
-| 0.92 MP 套 33³ LUT（16-bit） | **约 31 ms**（单线程） |
+| 33³ LUT 烘焙 | **约 108 ms**（多线程，含写文件）；单线程 198 ms |
+| 0.92 MP 套 33³ LUT（16-bit） | **约 17 ms**（2.6 MP 实测，多线程）；单线程 96 ms |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，max \\|diff\\| 4.57e-4，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | 2.6 MP 帧，max \\|diff\\| **1.53e-5**（= 16-bit 1 LSB），mean 1.9e-8 |
 | Apple Log 素材 | 2160x1214，24p，HEVC 10-bit 4:2:2，BT.2020 |
@@ -118,7 +118,7 @@
 | 印片曝光因子 | 0.837773013976（上游含一次 sRGB→sRGB 往返，0.837787256300） |
 | 产物 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
-**重要推论**：31 ms/0.92 MP 对视频还是太慢（1080p 一帧约 0.3 s），必须上 SIMD / 多线程 / GPU，这是 M4 的任务，不是 bug。
+**重要推论**：套 LUT 已经压到 17 ms/2.6 MP，视频剩下的时间几乎都在 x265 编码上（214 ms/帧里约 180 ms）。下一步提速只能换编码器设置或硬件编码，那是 M4 的事。
 
 ---
 
@@ -153,6 +153,7 @@
 | **D029** | HDR 输出 | **PQ / HLG 末端编码，白色 = `--peak` 尼特（默认 1000）** | 1.0 → PQ 0.75183；Air 是 SDR 屏，验收要靠 iPhone |
 | **D022** | 视频读写形态 | **独立程序 + FFmpeg 子进程**（你选的） | `spektra-roll-cli video` 直接吃 .mov；不把 FFmpeg 链进 exe |
 | **D031** | 帧区间 / ProRes | **`--start/--frames/--duration` + `--codec prores`（422 HQ）** | 音画同步；ProRes 120 MB / 4.1 s |
+| **D032** | 多线程（提前） | **`parallelChunks` + `--threads`，0=自动** | 套 LUT 96→17 ms；视频 268→214 ms/帧（瓶颈转编码） |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -183,6 +184,7 @@
 - [x] **HDR 输出**（D029）：`--hdr pq|hlg --peak 1000`，demo 出 16-bit PQ PNG + HEVC 10-bit 片段
 - [x] **M3 第一步**（D022）：`spektra-roll-cli video` 直接读 `.mov`、逐帧套 LUT、带原声编码；99 帧约 30 秒
 - [x] **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
+- [x] **多线程**（D032，提前做）：套 LUT 96→17 ms；视频 268→214 ms/帧
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 
 还没做：

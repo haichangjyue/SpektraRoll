@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "sr/lut3d.hpp"
+#include "sr/parallel.hpp"
 #include "sr/profile.hpp"
 #include "sr/transfer.hpp"
 #include "sr/gamut.hpp"
@@ -41,6 +42,8 @@ struct BakeOptions {
     // white to `peakNits` cd/m2, so the highlights actually reach that level.
     HdrMode hdr = HdrMode::Off;
     double peakNits = 1000.0;
+    // 0 = auto (hardware threads minus one).
+    int threads = 0;
 };
 
 struct FilmModelOptions {

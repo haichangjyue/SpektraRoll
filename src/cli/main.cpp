@@ -21,6 +21,7 @@
 #include "sr/image.hpp"
 #include "sr/lut3d.hpp"
 #include "sr/metrics.hpp"
+#include "sr/parallel.hpp"
 #include "sr/profile.hpp"
 
 namespace {
@@ -48,7 +49,7 @@ void printUsage() {
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
-        "                         [--interp tetra|tri] [--strength 0..1]\n"
+        "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
@@ -67,7 +68,7 @@ void printUsage() {
         "                            [--scan print|negative] [--contrast 1.15]\n"
         "                            [--gamut oklch|off] [--couplers on|off]\n"
         "                            [--hdr pq|hlg] [--peak 1000]\n"
-        "                            [--title <text>]\n"
+        "                            [--threads N] [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
         "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
@@ -276,6 +277,7 @@ int cmdLutBake(const Args& args) {
         }
     }
     options.exposureEv = args.getDouble("exposure", 0.0);
+    options.threads = args.getInt("threads", 0);
 
     if (args.has("scan")) {
         const std::string mode = args.get("scan");
@@ -429,20 +431,23 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
     size_t pixels = 0;
     std::string error;
     int bits = 16;
+    const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
     for (const auto& path : files) {
         sr::Image image;
         int sourceBits = 8;
         if (!sr::loadImage(path.string(), image, error, &sourceBits)) return fail(error);
         const size_t count = static_cast<size_t>(image.width) * image.height;
-        for (size_t i = 0; i < count; ++i) {
-            float* px = &image.pixels[i * 3];
-            const sr::Rgb src{px[0], px[1], px[2]};
-            const sr::Rgb mapped = lut.apply(src, mode);
-            const sr::Rgb result = sr::mix(src, mapped, strength);
-            px[0] = result.r;
-            px[1] = result.g;
-            px[2] = result.b;
-        }
+        sr::parallelChunks(count, threads, [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                float* px = &image.pixels[i * 3];
+                const sr::Rgb src{px[0], px[1], px[2]};
+                const sr::Rgb mapped = lut.apply(src, mode);
+                const sr::Rgb result = sr::mix(src, mapped, strength);
+                px[0] = result.r;
+                px[1] = result.g;
+                px[2] = result.b;
+            }
+        });
         bits = requestedBits(args, sourceBits);
         const auto outPath = std::filesystem::path(outDir) / path.filename();
         if (!sr::saveImage(outPath.string(), image, error, bits)) return fail(error);
@@ -492,15 +497,18 @@ int cmdLutApply(const Args& args) {
 
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
-    for (size_t i = 0; i < count; ++i) {
-        float* px = &image.pixels[i * 3];
-        const sr::Rgb src{px[0], px[1], px[2]};
-        const sr::Rgb mapped = lut.apply(src, mode);
-        const sr::Rgb result = sr::mix(src, mapped, strength);
-        px[0] = result.r;
-        px[1] = result.g;
-        px[2] = result.b;
-    }
+    const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
+    sr::parallelChunks(count, threads, [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            float* px = &image.pixels[i * 3];
+            const sr::Rgb src{px[0], px[1], px[2]};
+            const sr::Rgb mapped = lut.apply(src, mode);
+            const sr::Rgb result = sr::mix(src, mapped, strength);
+            px[0] = result.r;
+            px[1] = result.g;
+            px[2] = result.b;
+        }
+    });
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
@@ -731,6 +739,7 @@ int cmdVideo(const Args& args) {
     const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
 
     const size_t pixels = static_cast<size_t>(width) * height;
+    const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
     std::vector<unsigned short> raw(pixels * 3);
     std::vector<float> frame(pixels * 3);
     const auto started = std::chrono::steady_clock::now();
@@ -739,15 +748,17 @@ int cmdVideo(const Args& args) {
         const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
         if (got < raw.size()) break;
         for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
-        for (size_t i = 0; i < pixels; ++i) {
-            float* px = &frame[i * 3];
-            const sr::Rgb src{px[0], px[1], px[2]};
-            const sr::Rgb mapped = lut.apply(src, mode);
-            const sr::Rgb result = sr::mix(src, mapped, strength);
-            px[0] = result.r;
-            px[1] = result.g;
-            px[2] = result.b;
-        }
+        sr::parallelChunks(pixels, threads, [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                float* px = &frame[i * 3];
+                const sr::Rgb src{px[0], px[1], px[2]};
+                const sr::Rgb mapped = lut.apply(src, mode);
+                const sr::Rgb result = sr::mix(src, mapped, strength);
+                px[0] = result.r;
+                px[1] = result.g;
+                px[2] = result.b;
+            }
+        });
         for (size_t i = 0; i < raw.size(); ++i) {
             const float value = std::min(1.0f, std::max(0.0f, frame[i]));
             raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));

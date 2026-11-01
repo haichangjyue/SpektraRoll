@@ -550,14 +550,18 @@ Lut3D FilmModel::bake(int size, const std::string& title, const BakeOptions& opt
     size = std::max(2, size);
     std::vector<Rgb> values(static_cast<size_t>(size) * size * size);
     const float scale = 1.0f / static_cast<float>(size - 1);
-    for (int b = 0; b < size; ++b) {
-        for (int g = 0; g < size; ++g) {
-            for (int r = 0; r < size; ++r) {
-                values[(static_cast<size_t>(b) * size + g) * size + r] =
-                    transformFrom(options, Rgb{r * scale, g * scale, b * scale});
-            }
+    const size_t total = values.size();
+    const size_t plane = static_cast<size_t>(size) * size;
+    parallelChunks(total, resolveThreadCount(options.threads), [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            const size_t b = i / plane;
+            const size_t rest = i % plane;
+            const size_t g = rest / size;
+            const size_t r = rest % size;
+            values[i] = transformFrom(
+                options, Rgb{r * scale, g * scale, b * scale});
         }
-    }
+    });
     return Lut3D::fromData(size, std::move(values), title);
 }
 
