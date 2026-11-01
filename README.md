@@ -97,6 +97,9 @@ spektra-roll-cli video --lut film.cube --in clip.mov --out textured.mov --trc sr
 spektra-roll-cli video --lut film.cube --in clip.mov --out fast.mov --trc srgb \
     --crf 22 --preset fast
 
+# hardware encode on Intel GPUs (--encoder qsv); ProRes always uses the software encoder
+spektra-roll-cli video --lut film.cube --in clip.mov --out gpu.mov --trc pq --encoder qsv
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube

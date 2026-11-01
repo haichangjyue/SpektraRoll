@@ -50,7 +50,7 @@ void printUsage() {
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
-        "                         [--crf 16] [--preset medium]\n"
+        "                         [--crf 16] [--preset medium] [--encoder sw|qsv]\n"
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
         "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
@@ -745,9 +745,17 @@ int cmdVideo(const Args& args) {
         return fail("--codec expects 'hevc', 'h264' or 'prores'");
     }
 
+    // Encoder: software (x264/x265) or Intel Quick Sync (D038).
+    const std::string encoderMode = args.get("encoder", "sw");
+    if (encoderMode != "sw" && encoderMode != "qsv") {
+        return fail("--encoder expects 'sw' or 'qsv'");
+    }
+    const bool qsv = encoderMode == "qsv" && codec != "prores";
+
     const bool prores = codec == "prores";
-    const std::string outFormat =
-        prores ? "yuv422p10le" : (hdr ? "yuv420p10le" : "yuv420p");
+    const std::string outFormat = prores ? "yuv422p10le"
+                                         : (qsv ? (hdr ? "p010le" : "nv12")
+                                                : (hdr ? "yuv420p10le" : "yuv420p"));
     const std::string matrix = hdr ? "bt2020nc" : "bt709";
     const std::string transfer = hdr ? (trc == "pq" ? "smpte2084" : "arib-std-b67") : "bt709";
     const std::string primaries = hdr ? "bt2020" : "bt709";
@@ -757,6 +765,11 @@ int cmdVideo(const Args& args) {
     const std::string preset = args.get("preset", "medium");
     if (prores) {
         codecArgs = " -c:v prores_ks -profile:v 3 -vendor apl0";
+    } else if (qsv) {
+        // Intel Quick Sync: global_quality is QSV's quality knob (lower = better).
+        codecArgs = std::string(" -c:v ") + (hdr ? "hevc_qsv" : "h264_qsv") +
+                    " -global_quality " + formatNumber(crf + 4.0) + " -preset " + preset;
+        if (hdr) codecArgs += " -profile:v main10";
     } else if (hdr) {
         codecArgs = " -c:v libx265 -crf " + formatNumber(crf) + " -preset " + preset +
                     " -x265-params " +
