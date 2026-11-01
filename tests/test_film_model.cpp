@@ -147,6 +147,22 @@ int main() {
     const sr::Rgb darkPunchy = model.transformFrom(punchy, {0.3f, 0.3f, 0.3f});
     check(darkPunchy.g < darkBase.g, "contrast above 1 darkens shadows");
 
+    // DIR couplers (D028): parity anchors from the upstream reference bake
+    // (out/couplers_ref_33.cube, PSNR 80.75 dB against this implementation).
+    sr::FilmModelOptions couplerOptions;
+    couplerOptions.couplers = true;
+    sr::FilmModel couplerModel;
+    check(couplerModel.configure(film, paper, filters, error, couplerOptions),
+          "coupler chain configures");
+    checkRgb(couplerModel.transform({0.5f, 0.5f, 0.5f}), {0.501f, 0.507f, 0.498f}, 1e-3,
+             "couplers probe 0.5");
+    checkRgb(couplerModel.transform({0.8125f, 0.1875f, 0.1875f}), {0.664f, 0.073f, 0.107f},
+             1e-3, "couplers probe warm red");
+    checkRgb(couplerModel.transform({0.1875f, 0.5f, 0.1875f}), {0.014f, 0.41f, 0.109f}, 1e-3,
+             "couplers probe green");
+    check(model.transform({0.5f, 0.5f, 0.5f}).g != couplerModel.transform({0.5f, 0.5f, 0.5f}).g,
+          "couplers change the result");
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

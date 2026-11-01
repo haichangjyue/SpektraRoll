@@ -73,6 +73,13 @@ is bounded by construction, so the compression is a no-op there. It defaults on
 for Apple Log input and off for sRGB input, which keeps the M1 reference
 byte-identical.
 
+DIR couplers (D028) add interlayer inhibition during development: the film's
+published curves are the end result, so the bake pre-computes the curves before
+inhibition and subtracts the inhibitor amount from exposure before looking them
+up. This is per-pixel chemistry only; the spatial diffusion of inhibitors stays
+in the M4 GPU pass. It matches the upstream reference bake to PSNR 80.75 dB and
+defaults on for Apple Log input.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2

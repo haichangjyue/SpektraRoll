@@ -48,7 +48,8 @@ void printUsage() {
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
         "                            [--input srgb|apple-log] [--exposure EV]\n"
         "                            [--scan print|negative] [--contrast 1.15]\n"
-        "                            [--gamut oklch|off] [--title <text>]\n"
+        "                            [--gamut oklch|off] [--couplers on|off]\n"
+        "                            [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
         "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
@@ -60,6 +61,8 @@ void printUsage() {
         "      pass 1.0 for the flat film curve only).\n"
         "      --gamut oklch maps out-of-gamut colour back into sRGB by reducing\n"
         "      OkLCh chroma; negative scans default to it, print keeps it off.\n"
+        "      --couplers on adds DIR interlayer inhibition (Apple Log defaults\n"
+        "      to on, the sRGB reference keeps it off).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -241,9 +244,6 @@ int cmdLutBake(const Args& args) {
         return fail(error + " (pass --cc C,M,Y to override)");
     }
 
-    sr::FilmModel model;
-    if (!model.configure(film, paper, filters, error)) return fail(error);
-
     sr::BakeOptions options;
     if (args.has("input")) {
         if (!sr::parseInputTransfer(args.get("input"), options.input)) {
@@ -280,6 +280,25 @@ int cmdLutBake(const Args& args) {
         }
     }
 
+    // DIR couplers default on for Apple Log and off for the sRGB reference
+    // (D028); `--couplers off` turns them back off.
+    bool couplers = options.input == sr::InputTransfer::AppleLog;
+    if (args.has("couplers")) {
+        const std::string value = args.get("couplers");
+        if (value == "on") {
+            couplers = true;
+        } else if (value == "off") {
+            couplers = false;
+        } else {
+            return fail("--couplers expects 'on' or 'off'");
+        }
+    }
+
+    sr::FilmModel model;
+    sr::FilmModelOptions modelOptions;
+    modelOptions.couplers = couplers;
+    if (!model.configure(film, paper, filters, error, modelOptions)) return fail(error);
+
     std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
     std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
     std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
@@ -291,6 +310,7 @@ int cmdLutBake(const Args& args) {
                 options.scan == sr::ScanMode::Negative ? "negative (no paper)" : "print");
     if (options.contrast != 1.0) std::printf("contrast:          %.2f\n", options.contrast);
     std::printf("gamut:             %s\n", options.gamutCompress ? "oklch" : "off");
+    std::printf("couplers:          %s\n", couplers ? "on" : "off");
 
     const auto started = std::chrono::steady_clock::now();
     const std::string title =

@@ -35,6 +35,12 @@ struct BakeOptions {
     bool gamutCompress = false;
 };
 
+struct FilmModelOptions {
+    // DIR couplers (interlayer inhibition during development). Off for the M1
+    // reference so it stays byte-identical, on for Apple Log bakes (D028).
+    bool couplers = false;
+};
+
 // The M1 colour chain: display-encoded sRGB in, display-encoded sRGB out.
 //
 //   sRGB -> Mallett 2019 spectral upsampling -> film sensitivity
@@ -51,7 +57,8 @@ public:
     // `neutralFilters` are Kodak CC units in CMY order, looked up from
     // spektrafilm's neutral_print_filters.json for this film/paper pair.
     bool configure(const Profile& film, const Profile& paper,
-                   const std::array<double, 3>& neutralFilters, std::string& error);
+                   const std::array<double, 3>& neutralFilters, std::string& error,
+                   const FilmModelOptions& options = {});
 
     bool valid() const { return valid_; }
 
@@ -97,6 +104,12 @@ private:
     std::vector<double> filmLogExposure_;
     std::vector<Triple> filmCurves_;   // normalized to a zero toe
     std::vector<Triple> filmCurvesRaw_;
+    // With couplers on: the curve before interlayer inhibition, plus the
+    // donor/receiver matrix and the shifted exposure axis (D028).
+    std::vector<Triple> filmCurvesCoupler_;
+    double couplersMatrix_[3][3] = {};
+    bool couplersActive_ = false;
+    bool filmIsPositive_ = false;
 
     std::vector<double> paperLogExposure_;
     std::vector<Triple> paperCurves_;

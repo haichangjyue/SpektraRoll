@@ -21,8 +21,10 @@ double normCdf(double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); }
 }  // namespace
 
 bool FilmModel::configure(const Profile& film, const Profile& paper,
-                          const std::array<double, 3>& neutralFilters, std::string& error) {
+                          const std::array<double, 3>& neutralFilters, std::string& error,
+                          const FilmModelOptions& options) {
     valid_ = false;
+    couplersActive_ = false;
 
     if (film.info.support != "film") {
         error = "expected a film profile, got support '" + film.info.support + "'";
@@ -102,6 +104,85 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
         for (Triple& row : filmCurves_) row[static_cast<size_t>(c)] -= minimum;
     }
 
+    // Maximum film CMY densities (also used to invert a negative scan).
+    for (int c = 0; c < 3; ++c) {
+        double maximum = 0.0;
+        for (const Triple& row : filmCurves_) {
+            const double value = row[static_cast<size_t>(c)];
+            if (!std::isnan(value)) maximum = std::max(maximum, value);
+        }
+        filmMaxCmy_[c] = maximum;
+    }
+
+    // DIR couplers (D028). Upstream's gamma table for negative stocks; the
+    // self/inhibition/amount factors are all 1.0 in the LUT path. The curves
+    // stored here are the ones measured *before* interlayer inhibition, so a
+    // grey ramp still matches the profile.
+    couplersActive_ = options.couplers;
+    filmIsPositive_ = film.info.type == "positive";
+    if (couplersActive_) {
+        double sameLayer[3];
+        double rToGb[2];
+        double gToRb[2];
+        double bToRg[2];
+        if (filmIsPositive_) {
+            sameLayer[0] = 0.12;
+            sameLayer[1] = 0.08;
+            sameLayer[2] = 0.06;
+            rToGb[0] = 0.12;
+            rToGb[1] = 0.06;
+            gToRb[0] = 0.08;
+            gToRb[1] = 0.06;
+            bToRg[0] = 0.06;
+            bToRg[1] = 0.06;
+        } else {
+            sameLayer[0] = 0.336;
+            sameLayer[1] = 0.319;
+            sameLayer[2] = 0.273;
+            rToGb[0] = 0.353;
+            rToGb[1] = 0.302;
+            gToRb[0] = 0.154;
+            gToRb[1] = 0.353;
+            bToRg[0] = 0.168;
+            bToRg[1] = 0.226;
+        }
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) couplersMatrix_[i][j] = 0.0;
+        }
+        for (int i = 0; i < 3; ++i) couplersMatrix_[i][i] = sameLayer[i];
+        couplersMatrix_[0][1] = rToGb[0];
+        couplersMatrix_[0][2] = rToGb[1];
+        couplersMatrix_[1][0] = gToRb[0];
+        couplersMatrix_[1][2] = gToRb[1];
+        couplersMatrix_[2][0] = bToRg[0];
+        couplersMatrix_[2][1] = bToRg[1];
+
+        const size_t rows = filmCurves_.size();
+        std::vector<Triple> shifted(rows);
+        for (size_t i = 0; i < rows; ++i) {
+            double silver[3];
+            for (int k = 0; k < 3; ++k) {
+                silver[k] = filmIsPositive_
+                                ? filmMaxCmy_[k] - filmCurves_[i][static_cast<size_t>(k)]
+                                : filmCurves_[i][static_cast<size_t>(k)];
+            }
+            for (int m = 0; m < 3; ++m) {
+                double sum = 0.0;
+                for (int k = 0; k < 3; ++k) sum += silver[k] * couplersMatrix_[k][m];
+                shifted[i][static_cast<size_t>(m)] = filmLogExposure_[i] - sum;
+            }
+        }
+        filmCurvesCoupler_ = filmCurves_;
+        for (int c = 0; c < 3; ++c) {
+            std::vector<double> axis(rows);
+            for (size_t i = 0; i < rows; ++i) axis[i] = shifted[i][static_cast<size_t>(c)];
+            for (size_t i = 0; i < rows; ++i) {
+                filmCurvesCoupler_[i][static_cast<size_t>(c)] =
+                    interpolate(filmLogExposure_[i], axis, filmCurves_, c);
+            }
+        }
+    }
+
     // Paper characteristic curves, evaluated at the profile's log exposure.
     // `profile_type` flips the CDF for positive stocks; M1 papers are negative.
     paperCurves_.resize(paperLogExposure_.size());
@@ -163,16 +244,6 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
     scanNormalization_ = 0.0;
     for (int l = 0; l < kN; ++l) {
         scanNormalization_ += viewingIlluminant_[static_cast<size_t>(l)] * data::kCmfs[l * 3 + 1];
-    }
-
-    // Maximum film CMY densities, so a negative scan can be inverted.
-    for (int c = 0; c < 3; ++c) {
-        double maximum = 0.0;
-        for (const Triple& row : filmCurves_) {
-            const double value = row[static_cast<size_t>(c)];
-            if (!std::isnan(value)) maximum = std::max(maximum, value);
-        }
-        filmMaxCmy_[c] = maximum;
     }
 
     // Negative scan: invert the film's dye densities (no base density, so the
@@ -317,9 +388,27 @@ Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
 void FilmModel::filmCmy(const double linear[3], double cmy[3]) const {
     double raw[3];
     filmRaw(linear, raw);
+    double logRaw[3];
     for (int c = 0; c < 3; ++c) {
-        const double logRaw = std::log10(std::max(raw[c], 0.0) + 1e-10);
-        cmy[c] = interpolate(logRaw, filmLogExposure_, filmCurves_, c);
+        logRaw[c] = std::log10(std::max(raw[c], 0.0) + 1e-10);
+        cmy[c] = interpolate(logRaw[c], filmLogExposure_, filmCurves_, c);
+    }
+    if (!couplersActive_) return;
+
+    // Dense layers release inhibitors that hold back the other layers, so the
+    // effective exposure drops by the coupler amount before the final curves.
+    double silver[3];
+    for (int k = 0; k < 3; ++k) {
+        silver[k] = filmIsPositive_ ? filmMaxCmy_[k] - cmy[k] : cmy[k];
+    }
+    double corrected[3];
+    for (int m = 0; m < 3; ++m) {
+        double correction = 0.0;
+        for (int k = 0; k < 3; ++k) correction += silver[k] * couplersMatrix_[k][m];
+        corrected[m] = logRaw[m] - correction;
+    }
+    for (int m = 0; m < 3; ++m) {
+        cmy[m] = interpolate(corrected[m], filmLogExposure_, filmCurvesCoupler_, m);
     }
 }
 

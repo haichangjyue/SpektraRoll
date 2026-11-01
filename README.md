@@ -119,8 +119,8 @@ docs/           architecture and licensing notes
 
 ## Known limitations (on purpose, for now)
 
-- No couplers, grain, halation, diffusion or glare yet (M4 for the spatial ones,
-  M2 for couplers).
+- No grain, halation, diffusion or glare yet (M4); DIR couplers are in for
+  Apple Log input (`--couplers on|off`, D028).
 - Output gamut compression is on for Apple Log input (`--gamut oklch`, D027) and
   off by default for sRGB input so the M1 reference stays bit-identical.
 - Apple Log input works, with two ways out: print (`--scan print`, the M1
