@@ -146,10 +146,10 @@ gpu/
   metal/     MSL kernels
   d3d12/     HLSL kernels (or Slang, one source → both)
 
-app_mac/     SwiftUI shell + AppKit + Metal canvas
-app_win/     WinUI 3 (C++/WinRT) + SwapChainPanel + D3D12
+ui-qt/       Qt 6 Widgets shell (D009): drives the CLI, no pipeline code
+             — ships on Windows now, same source can build on macOS
 ofx/         OpenFX plugin (second phase)
-cli/         headless renders, frame ranges, resume
+cli/         headless renders, frame ranges, segment/resume, timecode
 ```
 
 ## Determinism rules
@@ -180,4 +180,4 @@ and CIE76 ΔE over all 33³ entries. Current numbers are in
 | M2 | colour correctness: real-photo sample, gamut compression (done), couplers (done), Apple Log input (done), scanned negative (done), HDR PQ/HLG output (done) |
 | M3 | video I/O: FFmpeg / ProRes, time dimension, frame ranges; decide standalone vs OFX (D022) |
 | M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, SIMD / threads / GPU, float / EXR |
-| M5 | UI: Windows WinUI 3, macOS SwiftUI, OFX plugin, render-farm CLI |
+| M5 | UI: Qt 6 Widgets (D009), macOS build, OFX plugin, render-farm CLI |

@@ -14,6 +14,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(SR_BUILD_TESTS "Build the test binaries" ON)
+option(SR_BUILD_QT_UI "Build the Qt 6 desktop UI (D009)" OFF)
 
 add_library(sr_core
     src/core/src/lut3d.cpp
@@ -43,6 +44,17 @@ target_link_libraries(spektra-roll-cli PRIVATE sr_core)
 # Ship one self-contained .exe: no MinGW runtime DLLs to hunt for.
 if(MINGW)
     target_link_options(spektra-roll-cli PRIVATE -static)
+endif()
+
+if(SR_BUILD_QT_UI)
+    find_package(Qt6 6.5 COMPONENTS Widgets REQUIRED)
+    add_executable(spektra-roll-ui WIN32 src/ui-qt/main.cpp)
+    target_link_libraries(spektra-roll-ui PRIVATE sr_core Qt6::Widgets)
+    target_compile_options(spektra-roll-ui PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /utf-8>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>)
+    # The UI must not -static link: Qt ships as DLLs and is deployed next to the
+    # executable by windeployqt (scripts/build-ui.cmd).
 endif()
 
 if(SR_BUILD_TESTS)

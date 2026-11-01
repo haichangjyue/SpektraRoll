@@ -4,15 +4,17 @@
 
 Open-source spectral film simulation for **motion picture**.
 
-Status: **M4 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
+Status: **M5 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
 + Portra Endura** LUT with parity against the upstream Python model at
 **PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log** footage (BT.2020,
 log-encoded) as input, can either print it (`--scan print`) or scan the
 negative (`--scan negative`, much more latitude), writes SDR or **HDR
 (PQ/HLG)**, and renders clips in resumable segments while keeping the camera
-timecode.
+timecode. A **Qt 6 desktop UI** wraps the same pipeline.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
+
+![SpektraRoll Qt UI](docs/ui-preview.png)
 
 ## What this will become
 
@@ -28,8 +30,8 @@ scene → [camera + film] → latent image → [development] → negative densit
 ```
 
 The colour part of that chain is baked into a 3D LUT and evaluated per pixel;
-the spatial parts (grain, halation, diffusion, glare) run as GPU passes and
-stay out of the LUT. That split is what makes video tractable.
+the spatial parts (grain, halation, diffusion, glare) run per frame and stay
+out of the LUT. That split is what makes video tractable.
 
 ## Build
 
@@ -56,6 +58,21 @@ ctest --test-dir build --output-on-failure
 # re-running the full parity against the upstream Python model needs the
 # upstream checkout and Python, see tools/parity/README.md
 ```
+
+## Desktop UI (Qt 6)
+
+The Windows shell is Qt 6 Widgets (D009); the CLI keeps working without it.
+It only drives `spektra-roll-cli` — preview extracts one frame with ffmpeg and
+grades it with `lut apply`, Render streams the CLI log and progress — so the UI
+cannot drift from the pipeline CI tests.
+
+```powershell
+.\scripts\build-ui.cmd          # configure + build + windeployqt + launch
+```
+
+Qt 6.8.3 and MinGW 13.1 are expected under `X:\agent\tools\qt` (installed with
+`aqtinstall`, not vendored). Qt is dynamically linked (LGPL-3.0/GPL-3.0);
+`windeployqt` copies the runtime next to the executable.
 
 ## Use
 

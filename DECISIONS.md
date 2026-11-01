@@ -524,8 +524,25 @@
 
 ---
 
+## D009 · Windows / 桌面 UI 技术栈
+
+- **日期**：2026-11-02
+- **背景**：命令行和渲染链已经稳定，下一步需要一个非程序员能用的界面；之前一直悬着没有拍板。
+- **选项**：
+  - A. WinUI 3（C++/WinRT，Windows 原生观感）
+  - B. **Qt 6（Qt Widgets）**
+- **你的决定**：**B · Qt 6**
+- **后果**：
+  - 不再要求安装 MSVC：Qt 官方提供 MinGW 构建，和现有 MinGW 工具链同一路线
+  - 同一套 UI 代码以后可以直接编译到 macOS（Qt Widgets 跨平台），Windows 先交付
+  - Qt 采用 LGPLv3 / GPLv3 双授权；本项目 GPL-3.0-or-later，用动态链接的 Qt 完全兼容（不分发闭源二进制）
+  - 安装体积大：Qt 运行时 + MinGW 工具链约 1–2 GB，放在 `X:\agent\tools\qt`，不进仓库
+  - 界面只做壳：预览和渲染仍调用同一套 C++ 核心与 `spektra-roll-cli`，不复制颜色/质感逻辑
+  - 首版范围：选素材 → 选/烘 LUT → 调曝光与质感 → 预览一帧 → 渲染整段（带日志、进度、分段续渲）
+
+---
+
 ## 待决策（还没问你）
 
-- D009：Windows UI 用 WinUI 3 还是 Qt（建议 WinUI 3）
 - D010：是否做 OFX 插件（建议做，第二期）
 - D011：Apple Developer 账号什么时候买

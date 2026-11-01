@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-02
-> **当前里程碑**：**M4 进行中**（颗粒场缓存、分段渲染、断点续渲、时间码已完成）；下一步界面、真实扩散核或浮点/EXR
+> **当前里程碑**：**M5 启动**（D009 已定 Qt 6）；M4 的颗粒缓存、分段/续渲/时间码已完成
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -46,6 +46,7 @@
 7. **速度**：宽模糊降采样（D037）、`--crf/--preset`、`--encoder qsv`（D038）
 8. **颗粒场缓存**（D039）：一个噪声场跨帧复用，全质感 **476.5 → 358.7 ms/帧**，整段 47.2 → 35.5 秒
 9. **分段渲染 + 断点续渲 + 时间码**（D040）：`--segment` / `--resume`，中断后只补缺失段；输出保留相机 timecode
+10. **Qt 6 桌面界面首版**（D009）：选素材 → 烘 LUT → 调质感 → 预览一帧 → 渲染整段；`scripts\build-ui.cmd` 一键编译启动
 
 **你亲自验收过的**：
 - MacBook Air M1 上 `scripts\verify-macos.command` 全过（含视频路径）
@@ -181,6 +182,8 @@
 | 分段渲染 | 4 s 素材 / 1 s 段 = 5 段；合并后 99 帧 / 4.125 s / 原声 / timecode 15:38:35:00 |
 | 断点续渲 | 删掉第 4 段后重跑：3 段跳过，只渲 1 段（约 5 s，整段约 35 s） |
 | 分段 vs 整段 | 逐帧 PSNR 约 46 dB（差异来自强制关键帧），边界无跳变 |
+| Qt UI 预览 | 2160×1214 @ 1.5 s，抽取 + 套 LUT + 质感约 1 s |
+| Qt UI 整段渲染 | 99 帧 / 329.2 ms/帧 / 32.6 s（与 CLI 同一路径） |
 | 颗粒时间稳定性 | 帧间差 0.0025（rate 1）→ **0.0014**（rate 3） |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，max \\|diff\\| 4.57e-4，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | 2.6 MP 帧，max \\|diff\\| **1.53e-5**（= 16-bit 1 LSB），mean 1.9e-8 |
@@ -191,6 +194,24 @@
 | 产物 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
 **重要推论**：套 LUT 已经压到 17 ms/2.6 MP；颗粒场缓存把质感从 290 ms 降到约 172 ms。现在整帧的剩余开销主要落在光晕/眩光/扩散三个宽模糊和管道/格式转换上，编码器仍不是瓶颈。
+
+### 9. M5 Qt 6 桌面界面（首版，D009）
+
+| 项 | 状态 |
+|---|---|
+| Qt 6.8.3 + MinGW 13.1 便携安装（`X:\agent\tools\qt`，不进仓库） | ✅ `aqtinstall` 安装 |
+| `spektra-roll-ui` 目标（`-DSR_BUILD_QT_UI=ON`） | ✅ 与 CLI 共用 `sr_core` / 同一套命令 |
+| 素材、LUT、曝光、负片/印片、反差、SDR/HDR 选择 | ✅ |
+| 颗粒 / 光晕 / 眩光 / 扩散 / 颗粒稳定度 | ✅ |
+| **预览一帧**（ffmpeg 抽帧 → `lut apply` → 窗口显示） | ✅ 2160×1214 @ 1.5 s 实测 |
+| **烘焙 LUT**（Apple Log/SDR，HDR 自动带 PQ/HLG） | ✅ |
+| **渲染整段**（编码、起始、帧数、分段、续渲） | ✅ 日志、进度条、取消 |
+| 渲染完成询问是否打开文件夹 | ✅ |
+| 关闭时保存路径/参数/窗口位置，下次恢复 | ✅ |
+| `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动 | ✅ |
+| 截图 `docs/ui-preview.png` | ✅ |
+
+界面原则：**UI 不复制颜色/质感逻辑**，预览和渲染都调用 `spektra-roll-cli`；Qt 动态链接并随 exe 部署，符合 GPL/LGPL。
 
 ---
 
@@ -234,7 +255,7 @@
 | **D038** | 硬件编码 | **`--encoder qsv`**（hevc_qsv / h264_qsv） | 2.6 MP 下 200 vs 214 ms，收益有限；瓶颈在管道 |
 | **D039** | 颗粒场缓存 | **LRU 保留最近两个场，按 seed/尺寸/半径/序号复用** | 全质感 476.5→358.7 ms/帧；输出与无缓存逐位一致 |
 | **D040** | 分段渲染 / 续渲 / 时间码 | **`--segment` 写视频-only 分段，`--resume` 复用带标记的段，音频最后复制一次，timecode 按帧偏移** | 中断只重渲缺失段；99 帧输出保留 15:38:35:00，分段边界无跳变 |
-| **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
+| **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
 
@@ -251,7 +272,7 @@
 
 ### 🔴 下一步（按建议顺序）
 
-1. **界面**：需要先拍板 D009（WinUI 3 还是 Qt）
+1. **界面（M5，D009 = Qt 6）**：选素材 → 烘/选 LUT → 调曝光与质感 → 预览一帧 → 渲染整段（日志、进度、分段续渲）
 2. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应该换成微米级、随分辨率缩放的核
 3. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付
 4. **并行的场生成**：颗粒噪声 + 模糊仍是单线程，可再吃掉几十毫秒（可选，先看长片是否需要）
@@ -262,7 +283,7 @@
 | 阶段 | 内容 |
 |---|---|
 | **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码；待做：真实扩散核、SIMD/GPU、浮点/EXR、多段并行 |
-| **M5** | Windows WinUI 3（**需要先装 MSVC**）、macOS SwiftUI、OFX 插件、渲染农场命令行 |
+| **M5** | Qt 6 桌面界面（**D009 已定**）、macOS 同套 Qt、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
 
@@ -290,9 +311,11 @@ CMake   C:\Program Files\CMake\bin\cmake.exe      (4.4.4)
 Ninja   X:\agent\tools\ninja\ninja.exe            (1.13.2)
 GCC     X:\agent\tools\mingw64\bin\g++.exe        (16.2.0 ucrt posix-seh)
 ffmpeg  J:\ffmpeg\bin\ffmpeg.exe                  M2 起用来从 .mov 抽帧验收
+Qt      X:\agent\tools\qt\6.8.3\mingw_64          Qt 6.8.3 (Widgets)
+Qt GCC  X:\agent\tools\qt\Tools\mingw1310_64      13.1.0，只给 UI 构建用
 ```
 
-### ⚠️ 三个已知陷阱
+### ⚠️ 几个已知陷阱
 
 1. **`X:\agent\tools\mingw64\bin` 里有 `cmake.exe` 和 `ninja.exe` 会"抢名字"**
    → 脚本里必须写绝对路径 `C:\Program Files\CMake\bin\cmake.exe` 和 `X:\agent\tools\ninja\ninja.exe`，不能靠 `Get-Command cmake`。
@@ -301,10 +324,13 @@ ffmpeg  J:\ffmpeg\bin\ffmpeg.exe                  M2 起用来从 .mov 抽帧验
    → 所有给用户的入口都是 `.cmd`，内部用 `powershell -NoProfile -ExecutionPolicy Bypass -File`。不要直接叫用户跑 `.ps1`。
 
 3. **MinGW 编译的 exe 默认依赖运行时 DLL，直接双击会报 0xc0000135**
-   → CMake 里已经给所有可执行目标加了 `-static`，新加目标也要加。
+   → CLI 和测试目标已经加 `-static`；**Qt UI 例外**，它必须动态链接 Qt，靠 `windeployqt` 把 DLL 放到 exe 旁边。
 
 4. **ffprobe 7+ 遇到 timecode 轨会把同一个 stream 打印两遍**（`stream_groups` 和 `streams` 各一次）
    → 所有解析 ffprobe 文本输出的地方都要只取第一行（`firstLine()`），CI 里的断言也要 `| head -n 1`。这是 2026-11-02 CI 变红的直接原因。
+
+5. **Qt 自带的 MinGW 需要把它的 `bin` 放进 PATH**
+   → `g++.exe` 本身能启动，但它调用的 `cc1plus.exe` 在 libexec 里，找不到同目录的 `libstdc++-6.dll` 会静默返回 0xC0000135。`build-ui.ps1` 已经先 `$env:PATH = "$mingw\bin;$qt\bin;..."`。
 
 ### 标准构建命令（脚本已经封装，这是底层等价写法）
 
@@ -327,6 +353,7 @@ scripts\demo-m1.cmd             M1 胶片样张（前后对比）
 scripts\demo-m2.cmd             Apple Log → 印片 / 负片 / HDR 片段
 scripts\demo-m3.cmd             胶片质感（干净帧 / 质感帧 / 整段视频）
 scripts\demo-m4.cmd             分段渲染 + 模拟崩溃 + 断点续渲 + timecode
+scripts\build-ui.cmd            编译 Qt 6 界面、部署 DLL 并启动（首次约 1–2 分钟）
 scripts\verify-m1.cmd           一键验收：编译 + 测试 + 烘 LUT + 和参考对比
 scripts\demo.cmd                M0 的合成 LUT 冒烟测试（不是胶片）
 scripts\push.cmd                登录 GitHub 并推送
@@ -397,6 +424,7 @@ X:\agent\SpektraRoll\
 ├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, transfer, gamut, texture, parallel, spectral_data）
 ├── src/core/src/            实现 + 生成的 spectral_tables.cpp
 ├── src/cli/main.cpp         命令行入口（gen / convert / video / lut bake|apply|compare|info / version）
+├── src/ui-qt/main.cpp       Qt 6 桌面界面（D009），调用 CLI，不复制管线
 ├── tests/                   6 个测试程序 + reference/ 冻结参考 LUT
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
@@ -429,6 +457,9 @@ X:\agent\SpektraRoll\
 - ❌ **不要在分段渲染里逐段编码音频**：音频只从源文件复制一次（D040），否则 AAC 接缝和 A/V 漂移会回来
 - ❌ **不要把分段里的颗粒帧号改回每段从 0 开始**，那会在段边界闪一下（D040）
 - ❌ **不要在没有基准数字的情况下改质感默认值**，颗粒/眩光都是按你的反馈调过的（D034/D036）
+- ❌ **不要在 Qt UI 里重新实现颜色/质感管线**：预览和渲染都调 `spektra-roll-cli`，否则 UI 和 CI 会漂移（D009）
+- ❌ **不要把 Qt 静态链接或只发一个 exe**：Qt 必须动态链接并用 `windeployqt` 带 DLL（LGPL 合规）
+- ❌ **不要把 `X:\agent\tools\qt` 提交进仓库**：它只在本机工具链里
 - ❌ **不要偷懒改品牌**，SpektraRoll 已定案，改一次要动二进制名/CI/文档
 
 ---
@@ -444,6 +475,7 @@ AI 就应该：
 1. 先跑 `scripts\verify-m1.cmd -NoOpen` 确认 M1 parity 还是 88.07 dB
 2. 再跑 `scripts\demo-m3.cmd -NoOpen` 确认视频 + 质感链路没坏（约 40 秒）
 3. 再跑 `scripts\demo-m4.cmd -NoOpen` 确认分段 + 续渲 + timecode（约 20 秒）
-4. 看 §三 的"下一步"，先问是否拍板 D009（界面）
+4. 跑 `scripts\build-ui.cmd -NoLaunch` 确认 Qt 界面还能编译部署
+5. 看 §三 的"下一步"（D009 已定 Qt，界面首版已交付）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 6 个测试程序。

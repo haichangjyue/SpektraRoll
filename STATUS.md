@@ -1,10 +1,10 @@
 # STATUS
 
-**最后更新**：2026-11-02 · 里程碑 **M4 进行中**（分段/续渲/时间码已完成） · 项目名 **SpektraRoll**
+**最后更新**：2026-11-02 · 里程碑 **M5 启动（D009 = Qt 6）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。4 秒 99 帧素材约 35.5 秒跑完；长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。4 秒 99 帧素材约 35.5 秒跑完；长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。现在也有 **Qt 6 桌面界面**：选素材、烘 LUT、调质感、预览一帧、渲染整段。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -32,6 +32,21 @@
 - [x] 音频只在最后从源文件复制一次，分段边界没有 AAC 接缝
 - [x] `scripts\demo-m4.cmd`：渲染 → 模拟崩溃 → 续渲
 - [ ] 多段并行渲染
+
+## M5 已开始：Qt 6 桌面界面（首版）
+
+- [x] **D009 拍板 Qt 6**（Qt Widgets），不再走 WinUI 3 / MSVC
+- [x] Qt 6.8.3 + MinGW 13.1 安装在 `X:\agent\tools\qt`（不进仓库）
+- [x] `spektra-roll-ui`：素材、LUT、曝光、负片/印片、反差、SDR/HDR、颗粒/光晕/眩光/扩散
+- [x] **预览一帧**：ffmpeg 抽帧 → 套 LUT + 质感 → 窗口显示（2160×1214 实测）
+- [x] **烘焙 LUT** 按钮（Apple Log / SDR，HDR 自动带 PQ/HLG）
+- [x] **渲染整段**：编码、起始、帧数、分段、续渲；日志、进度条、取消
+- [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
+- [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
+- [x] 截图：`docs/ui-preview.png`
+- [ ] 时间线拖动预览、批量队列、macOS 打包
+
+![Qt UI](docs/ui-preview.png)
 
 ## 这次交付（M1）
 
@@ -86,19 +101,20 @@
 2. 双击 `scripts\demo-m1.cmd` → 自动打开 `out\m1-before.png` 和 `out\m1-after.png`
 3. 看三件事：灰阶暗部是否偏暖、肤色是否自然、红蓝是否过饱和
 
-## 下一步（M4 收尾 / M5）
+## 下一步（M5）
 
-1. **界面**：先拍板 D009（WinUI 3 还是 Qt）
+1. **界面打磨**：时间线拖动预览、渲染队列、拖放素材
 2. **真实点扩散核**：眩光 / 光晕 / 扩散现在是画幅比例 + 盒状模糊
 3. **浮点 / EXR**（D017 欠账）
 4. **并行的场生成**：颗粒噪声 + 模糊还是单线程，可再省几十毫秒
-5. **多段并行渲染**：现在分段是顺序跑的
+5. **多段并行渲染 / macOS Qt 打包**
 
 ## 需要你决定的事
 
-- **D009**：Windows UI 用 WinUI 3 还是 Qt？（建议 WinUI 3，但要先装 MSVC）
 - **D010**：OFX 插件做不做？（建议做，放第二期）
 - **D011**：Apple Developer 账号什么时候买？（建议等有 Mac 再说）
+
+> D009 已拍板：**Qt 6**（Qt Widgets），不用 WinUI 3。
 
 ## 风险 / 提醒
 
@@ -106,3 +122,4 @@
 - M1 的 LUT 是 display-encoded sRGB，不是线性/ACES；调色软件里要放在正确的色彩空间节点。
 - 极端饱和输入会产生负的 LUT 值；Apple Log 路径已开 OkLCh 压缩，sRGB 路径仍靠钳制（保 parity）。
 - 视频速度瓶颈在质感计算与管道，不在编码器；颗粒场缓存已做（D039），分段/续渲/时间码已做（D040）。
+- Qt 界面不能只拷 exe：`build-ui` 里由 `windeployqt` 放好的 Qt DLL 和 `platforms\` 要一起带走（D009）。

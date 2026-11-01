@@ -64,7 +64,8 @@ disclaimer of non-affiliation, and never in the product name, logo or domain.
 | colour-science (numeric tables only) | BSD-3-Clause | CMFs, D55/D50, Mallett basis, XYZ→sRGB matrix embedded in `spectral_tables.cpp` |
 | OpenColorIO (planned) | BSD-3-Clause | check LICENCE at the pinned tag |
 | OpenImageIO (planned) | Apache-2.0 | |
-| FFmpeg (planned) | LGPL-2.1+ by default | avoid `--enable-gpl` builds if we can |
+| FFmpeg (subprocess) | LGPL-2.1+ by default | decoded/encoded by a child process; avoid shipping an `--enable-gpl` build |
+| Qt 6 (Widgets) | LGPL-3.0 / GPL-3.0 (commercial available) | dynamically linked, deployed as DLLs; must ship the LGPL notice and keep the DLLs replaceable |
 | LibRaw (planned) | LGPL-2.1 / CDDL | |
 | Metal-cpp / D3D12 headers | Apache-2.0 / MIT | |
 
