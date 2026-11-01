@@ -111,6 +111,14 @@ used fields keyed by seed, geometry, radius and field index, so a 3-frame
 cross-fade generates one new field per three frames instead of two per frame.
 The pixel code is shared with the uncached path, so output is bit-identical.
 
+Long renders are split into video-only parts (D040): `--segment` writes
+`<out>.parts/part-NNNNN.mov`, `--resume` skips parts with a matching `.done`
+marker, and every part carries the frame index of the whole range so grain stays
+continuous across the cut. Audio is not encoded per part; once the parts are
+concatenated (`-c copy`) the source audio is copied in one go, which avoids AAC
+seams and A/V drift. The source timecode is read once and stamped on the final
+file, offset by `--start`.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2

@@ -4,11 +4,13 @@
 
 Open-source spectral film simulation for **motion picture**.
 
-Status: **M2 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
+Status: **M4 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
 + Portra Endura** LUT with parity against the upstream Python model at
 **PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log** footage (BT.2020,
-log-encoded) as input, and can either print it (`--scan print`) or scan the
-negative (`--scan negative`, much more latitude). HDR output is the next step.
+log-encoded) as input, can either print it (`--scan print`) or scan the
+negative (`--scan negative`, much more latitude), writes SDR or **HDR
+(PQ/HLG)**, and renders clips in resumable segments while keeping the camera
+timecode.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -100,6 +102,11 @@ spektra-roll-cli video --lut film.cube --in clip.mov --out fast.mov --trc srgb \
 # hardware encode on Intel GPUs (--encoder qsv); ProRes always uses the software encoder
 spektra-roll-cli video --lut film.cube --in clip.mov --out gpu.mov --trc pq --encoder qsv
 
+# long render: 10 s chunks in <out>.parts; rerun the same command to resume after
+# a crash (finished chunks are skipped) — the source timecode is copied along
+spektra-roll-cli video --lut film.cube --in clip.mov --out graded.mov --trc srgb \
+    --segment 10 --resume
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
@@ -152,10 +159,12 @@ docs/           architecture and licensing notes
 - SDR output is the default; HDR (PQ/HLG, `--hdr`, D029) works and the demo
   writes an HEVC Main10 HDR clip, but seeing it needs an HDR display.
 - No video file I/O in the library yet: `video` drives `ffmpeg` as a child process
-  (D022), so a clip can be graded in one command, but trimming/timecode and
-  ProRes output are not there.
-- Output gamut compression is off. Extreme colours can produce out-of-range
-  LUT values, which are clamped when writing an image.
+  (D022), so a clip can be graded, trimmed, rendered as ProRes or HDR, and
+  resumed from completed segments in one command.
+- Output gamut compression is off by default for sRGB input; extreme colours can
+  produce out-of-range LUT values, which are clamped when writing an image.
+- Source timecode is copied and offset by `--start`; drop-frame sources are
+  offset in nominal frames, so they can drift by a few frames per hour.
 - 16-bit PNG only; no EXR or OpenImageIO yet.
 - Mallett 2019 spectral upsampling only; hanatos2025 is a later option.
 - `.cube` only; `.3dl` and OCIO configs come later.

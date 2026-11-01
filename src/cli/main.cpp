@@ -3,10 +3,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <map>
 #include <sstream>
 #include <string>
@@ -15,6 +18,8 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#else
+#include <sys/wait.h>
 #endif
 
 #include "sr/film_model.hpp"
@@ -54,11 +59,16 @@ void printUsage() {
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
         "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
+        "                         [--segment SEC] [--resume] [--keep-parts]\n"
+        "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
         "                         [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
         "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
-        "      tags.\n"
+        "      tags. --segment renders in chunks under <out>.parts and --resume\n"
+        "      skips the chunks that already finished, so an interrupted long\n"
+        "      render continues where it stopped. The source timecode is copied\n"
+        "      to the output unless --no-timecode is given.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -649,6 +659,306 @@ std::string siblingTool(const std::string& ffmpeg) {
     return ffmpeg.substr(0, slash + 1) + name;
 }
 
+// ---- timecode ------------------------------------------------------------
+// Cameras write a start timecode into the clip. Copying it to the render keeps
+// the result lined up with the camera report and with proxies made elsewhere.
+struct Timecode {
+    int hours = 0;
+    int minutes = 0;
+    int seconds = 0;
+    int frames = 0;
+    bool dropFrame = false;
+    bool valid = false;
+};
+
+Timecode parseTimecode(const std::string& text) {
+    Timecode tc;
+    if (text.empty()) return tc;
+    const char separator = text.find(';') != std::string::npos ? ';' : ':';
+    std::istringstream stream(text);
+    std::string part;
+    int values[4] = {0, 0, 0, 0};
+    int count = 0;
+    while (count < 4 && std::getline(stream, part, separator)) {
+        values[count++] = std::atoi(part.c_str());
+    }
+    if (count != 4) return tc;
+    tc.hours = values[0];
+    tc.minutes = values[1];
+    tc.seconds = values[2];
+    tc.frames = values[3];
+    if (tc.hours < 0 || tc.minutes < 0 || tc.minutes > 59 || tc.seconds < 0 ||
+        tc.seconds > 59 || tc.frames < 0 || tc.frames > 59 || tc.hours > 99) {
+        return tc;
+    }
+    tc.dropFrame = separator == ';';
+    tc.valid = true;
+    return tc;
+}
+
+std::string formatTimecode(const Timecode& tc) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d%c%02d", tc.hours, tc.minutes,
+                  tc.seconds, tc.dropFrame ? ';' : ':', tc.frames);
+    return buffer;
+}
+
+// Non-drop counting. Drop-frame sources keep their separator and are shipped as
+// the offset in nominal frames; the drift is a few frames per hour.
+Timecode addFrames(Timecode tc, long offset, double fps) {
+    if (!tc.valid || offset == 0) return tc;
+    const int nominal = std::max(1, static_cast<int>(std::lround(fps)));
+    long total = (static_cast<long>(tc.hours) * 3600 + tc.minutes * 60 + tc.seconds) * nominal +
+                 tc.frames + offset;
+    const long perDay = 24L * 3600 * nominal;
+    total %= perDay;
+    if (total < 0) total += perDay;
+    tc.hours = static_cast<int>(total / (3600L * nominal));
+    total %= 3600L * nominal;
+    tc.minutes = static_cast<int>(total / (60L * nominal));
+    total %= 60L * nominal;
+    tc.seconds = static_cast<int>(total / nominal);
+    tc.frames = static_cast<int>(total % nominal);
+    return tc;
+}
+
+std::string probeTimecode(const std::string& ffprobe, const std::string& input) {
+    const std::string text =
+        runCapture(shellQuote(ffprobe) +
+                   " -v error -show_entries format_tags=timecode:stream_tags=timecode"
+                   " -of default=noprint_wrappers=1:nokey=1 " +
+                   shellQuote(input));
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (line.find(':') != std::string::npos || line.find(';') != std::string::npos) return line;
+    }
+    return {};
+}
+
+// Frame count of the video stream; falls back to duration x fps when the
+// container does not count frames.
+long probeFrameCount(const std::string& ffprobe, const std::string& input, double fps) {
+    const std::string text =
+        runCapture(shellQuote(ffprobe) +
+                   " -v error -select_streams v:0 -show_entries stream=nb_frames,duration"
+                   " -of csv=p=0 " +
+                   shellQuote(input));
+    std::istringstream stream(text);
+    std::string token;
+    std::vector<std::string> parts;
+    while (std::getline(stream, token, ',')) parts.push_back(token);
+    // ffprobe prints fields in declaration order, not request order: a value
+    // with a dot is the duration, a plain integer is nb_frames.
+    long frames = 0;
+    double duration = 0.0;
+    for (const std::string& part : parts) {
+        if (part.find('.') != std::string::npos) {
+            duration = std::atof(part.c_str());
+        } else {
+            const long value = std::atol(part.c_str());
+            if (value > 0) frames = value;
+        }
+    }
+    if (frames <= 0 && duration > 0.0) frames = static_cast<long>(std::lround(duration * fps));
+    return frames;
+}
+
+int runCommand(const std::string& command) {
+    FILE* pipe = openPipe(command, "r");
+    if (!pipe) return -1;
+    char buffer[512];
+    while (std::fgets(buffer, sizeof(buffer), pipe)) std::fputs(buffer, stderr);
+#ifdef _WIN32
+    return _pclose(pipe);
+#else
+    const int status = pclose(pipe);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+}
+
+std::string zeroPad(long value, int digits) {
+    std::string text = std::to_string(value);
+    if (static_cast<int>(text.size()) < digits) {
+        text.insert(0, static_cast<size_t>(digits) - text.size(), '0');
+    }
+    return text;
+}
+
+// ---- video rendering -----------------------------------------------------
+
+struct VideoRender {
+    std::string ffmpeg;
+    std::string inPath;
+    int width = 0;
+    int height = 0;
+    double fps = 24.0;
+    const sr::Lut3D* lut = nullptr;
+    sr::Interp interp = sr::Interp::Tetrahedral;
+    float strength = 1.0f;
+    int threads = 1;
+    TextureOptions texture;
+    std::string codecArgs;
+    std::string outFormat;
+    std::string inMatrix;
+    std::string matrix;
+    std::string transfer;
+    std::string primaries;
+};
+
+// Content hash of a small file (LUTs are ~130 KB), used to notice that the
+// recipe changed since the parts were rendered.
+std::string fileHash(const std::string& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return "missing";
+    std::uint64_t hash = 1469598103934665603ULL;
+    char byte = 0;
+    while (input.get(byte)) {
+        hash ^= static_cast<unsigned char>(byte);
+        hash *= 1099511628211ULL;
+    }
+    std::ostringstream text;
+    text << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return text.str();
+}
+
+// Everything that would make an old part incompatible with the new render.
+// Resuming across a codec, LUT or texture change would silently mix looks.
+std::string renderSignature(const VideoRender& job, const std::string& lutPath, long startFrame,
+                            long totalFrames, long segmentFrames) {
+    std::ostringstream signature;
+    signature << std::setprecision(9) << "spektra-roll video v1\n"
+              << "input " << job.inPath << "\n"
+              << "size " << job.width << "x" << job.height << " fps " << job.fps << "\n"
+              << "lut " << fileHash(lutPath) << "\n"
+              << "start " << startFrame << " total " << totalFrames << " segment "
+              << segmentFrames << "\n"
+              << "encode " << job.codecArgs << "\n"
+              << "format " << job.outFormat << " " << job.matrix << " " << job.transfer << " "
+              << job.primaries << "\n"
+              << "texture " << job.texture.grain.amount << " " << job.texture.grain.size << " "
+              << job.texture.grain.seed << " " << job.texture.grain.rate << " "
+              << job.texture.halation.amount << " " << job.texture.halation.radius << " "
+              << job.texture.halation.threshold << " " << job.texture.glare.amount << " "
+              << job.texture.glare.radius << " " << job.texture.diffusion.amount << " "
+              << job.texture.diffusion.radius << "\n";
+    return signature.str();
+}
+
+// Renders `frameCount` frames from source frame `startFrame` into one video-only
+// file. Audio is muxed once from the source at the end, so a segment never
+// re-encodes audio and A/V sync cannot drift between parts. `rangeFrameBase` is
+// the frame index within the requested range and keeps grain continuous across
+// segment boundaries.
+bool renderRange(const VideoRender& job, long startFrame, long frameCount, long rangeFrameBase,
+                 const std::string& outPath, sr::GrainFieldCache* grainCache, long rangeTotal,
+                 size_t* rendered, std::string& error) {
+    const double start = static_cast<double>(startFrame) / job.fps;
+    const std::string seek = start > 0.0 ? " -ss " + formatSeconds(start) : "";
+    const std::string limit = frameCount > 0 ? " -frames:v " + std::to_string(frameCount) : "";
+    const std::string decodeCmd =
+        shellQuote(job.ffmpeg) + " -v error" + seek + " -i " + shellQuote(job.inPath) + limit +
+        " -vf " +
+        shellQuote("scale=in_color_matrix=" + job.inMatrix + ":in_range=tv:out_range=full") +
+        " -pix_fmt rgb48le -f rawvideo -";
+
+    const std::string encodeCmd =
+        shellQuote(job.ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
+        std::to_string(job.width) + "x" + std::to_string(job.height) + " -r " +
+        std::to_string(job.fps) + " -i - -an -vf " +
+        shellQuote("scale=out_color_matrix=" + job.matrix + ":out_range=tv,format=" +
+                   job.outFormat) +
+        job.codecArgs + " -color_primaries " + job.primaries + " -color_trc " + job.transfer +
+        " -colorspace " + job.matrix + " " + shellQuote(outPath);
+
+    FILE* decoder = openPipe(decodeCmd, "rb");
+    if (!decoder) {
+        error = "failed to start ffmpeg decoder";
+        return false;
+    }
+    FILE* encoder = openPipe(encodeCmd, "wb");
+    if (!encoder) {
+        closePipe(decoder);
+        error = "failed to start ffmpeg encoder";
+        return false;
+    }
+
+    const size_t pixels = static_cast<size_t>(job.width) * job.height;
+    std::vector<unsigned short> raw(pixels * 3);
+    std::vector<float> frame(pixels * 3);
+    size_t frames = 0;
+    bool writeError = false;
+    while (frameCount <= 0 || frames < static_cast<size_t>(frameCount)) {
+        const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
+        if (got < raw.size()) break;
+        for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
+        sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                float* px = &frame[i * 3];
+                const sr::Rgb src{px[0], px[1], px[2]};
+                const sr::Rgb mapped = job.lut->apply(src, job.interp);
+                const sr::Rgb result = sr::mix(src, mapped, job.strength);
+                px[0] = result.r;
+                px[1] = result.g;
+                px[2] = result.b;
+            }
+        });
+        applyTexture(frame.data(), job.width, job.height, job.texture,
+                     static_cast<int>(rangeFrameBase + static_cast<long>(frames)), grainCache);
+        for (size_t i = 0; i < raw.size(); ++i) {
+            const float value = std::min(1.0f, std::max(0.0f, frame[i]));
+            raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
+        }
+        if (std::fwrite(raw.data(), sizeof(unsigned short), raw.size(), encoder) != raw.size()) {
+            writeError = true;
+            break;
+        }
+        ++frames;
+        if (frames % 24 == 0) {
+            if (rangeTotal > 0) {
+                std::printf("  %ld/%ld frames...\n",
+                            rangeFrameBase + static_cast<long>(frames), rangeTotal);
+            } else {
+                std::printf("  %zu frames...\n", frames);
+            }
+            std::fflush(stdout);
+        }
+    }
+    closePipe(decoder);
+    closePipe(encoder);
+
+    if (rendered != nullptr) *rendered = frames;
+    if (writeError) {
+        error = "encoder closed the pipe early";
+        return false;
+    }
+    if (frames == 0) {
+        error = "no frames were decoded";
+        return false;
+    }
+    return true;
+}
+
+// Copies the audio once and stamps the source start timecode on the result.
+bool finishVideo(const std::string& ffmpeg, const std::string& videoInput,
+                 const std::string& inPath, long startFrame, long totalFrames, double fps,
+                 const std::string& timecode, const std::string& outPath, std::string& error) {
+    const double start = static_cast<double>(startFrame) / fps;
+    std::string command = shellQuote(ffmpeg) + " -v error -y" + videoInput;
+    if (start > 0.0) command += " -ss " + formatSeconds(start);
+    if (totalFrames > 0) command += " -t " + formatSeconds(static_cast<double>(totalFrames) / fps);
+    command += " -i " + shellQuote(inPath) +
+               " -map 0:v:0 -map 1:a:0? -c copy" +
+               (timecode.empty() ? "" : " -timecode " + timecode) +
+               " -movflags +faststart " + shellQuote(outPath);
+    if (runCommand(command) != 0) {
+        error = "ffmpeg could not mux the final file";
+        return false;
+    }
+    return true;
+}
+
 int cmdVideo(const Args& args) {
     const std::string inPath = args.get("in");
     const std::string outPath = args.get("out");
@@ -710,35 +1020,33 @@ int cmdVideo(const Args& args) {
     const bool hdr = trc == "pq" || trc == "hlg";
     const std::string inMatrix = args.get("in-matrix", "bt2020");
 
-    // Time range (D031): seconds or HH:MM:SS.mmm, plus an optional frame count.
+    // Time range (D031) and segmentation (D040).
     const double start = parseSeconds(args.get("start", "0"));
+    const long startFrame = std::max(0L, static_cast<long>(std::lround(start * fps)));
     double framesWanted = 0.0;
     if (args.has("frames")) {
         framesWanted = std::atof(args.get("frames").c_str());
     } else if (args.has("duration")) {
         framesWanted = std::floor(parseSeconds(args.get("duration")) * fps + 0.5);
     }
-
-    std::string seekDecode;
-    std::string seekAudio;
-    if (start > 0.0) {
-        const std::string s = formatSeconds(start);
-        seekDecode = " -ss " + s;
-        seekAudio = " -ss " + s;
-    }
-    std::string limitDecode;
-    std::string limitAudio;
+    const long probedFrames = probeFrameCount(ffprobe, inPath, fps);
+    long totalFrames = 0;
     if (framesWanted >= 1.0) {
-        const std::string dur = formatSeconds(framesWanted / fps);
-        limitDecode = " -frames:v " + std::to_string(static_cast<long>(framesWanted));
-        limitAudio = " -t " + dur;
+        totalFrames = static_cast<long>(std::llround(framesWanted));
+    } else if (probedFrames > 0) {
+        totalFrames = std::max(0L, probedFrames - startFrame);
     }
 
-    const std::string decodeCmd =
-        shellQuote(ffmpeg) + " -v error" + seekDecode + " -i " + shellQuote(inPath) +
-        limitDecode + " -vf " +
-        shellQuote("scale=in_color_matrix=" + inMatrix + ":in_range=tv:out_range=full") +
-        " -pix_fmt rgb48le -f rawvideo -";
+    // Timecode (D040): copy the source start unless overridden or disabled.
+    std::string timecode;
+    if (!args.has("no-timecode")) {
+        timecode = args.get("timecode");
+        if (timecode.empty()) timecode = probeTimecode(ffprobe, inPath);
+    }
+    Timecode base = parseTimecode(timecode);
+    if (!timecode.empty() && !base.valid) {
+        std::printf("warning: ignoring unreadable timecode '%s'\n", timecode.c_str());
+    }
 
     // Codec: HEVC for HDR, H.264 for SDR, or ProRes 422 HQ on request.
     std::string codec = args.get("codec", hdr ? "hevc" : "h264");
@@ -782,92 +1090,193 @@ int cmdVideo(const Args& args) {
         codecArgs = " -c:v libx264 -crf " + formatNumber(crf) + " -preset " + preset;
     }
 
-    const std::string encodeCmd =
-        shellQuote(ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
-        std::to_string(width) + "x" + std::to_string(height) + " -r " +
-        std::to_string(fps) + " -i -" + seekAudio + limitAudio + " -i " + shellQuote(inPath) +
-        " -map 0:v:0 -map 1:a:0? -c:a copy -vf " +
-        shellQuote("scale=out_color_matrix=" + matrix + ":out_range=tv,format=" + outFormat) +
-        codecArgs + " -color_primaries " + primaries + " -color_trc " + transfer +
-        " -colorspace " + matrix + " -movflags +faststart " + shellQuote(outPath);
+    const std::string interpName = args.get("interp", "tetra");
+    const sr::Interp mode =
+        interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
+    const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
+    const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
+    const TextureOptions texture = parseTexture(args);
+
+    VideoRender job;
+    job.ffmpeg = ffmpeg;
+    job.inPath = inPath;
+    job.width = width;
+    job.height = height;
+    job.fps = fps;
+    job.lut = &lut;
+    job.interp = mode;
+    job.strength = strength;
+    job.threads = threads;
+    job.texture = texture;
+    job.codecArgs = codecArgs;
+    job.outFormat = outFormat;
+    job.inMatrix = inMatrix;
+    job.matrix = matrix;
+    job.transfer = transfer;
+    job.primaries = primaries;
+
+    // Segments keep finished parts on disk so an interrupted render resumes
+    // (D040). --resume alone picks a 10 s chunk.
+    const bool resume = args.has("resume");
+    double segmentSeconds = args.getDouble("segment", 0.0);
+    if (segmentSeconds <= 0.0 && resume) segmentSeconds = 10.0;
+    const bool segmented = segmentSeconds > 0.0;
+    if (segmented && totalFrames <= 0) {
+        return fail("--segment needs a known length: add --frames or --duration");
+    }
 
     std::printf("input:  %s (%dx%d @ %.3f fps)\n", inPath.c_str(), width, height, fps);
-    if (start > 0.0 || framesWanted >= 1.0) {
-        std::printf("range:  start %.3f s, %s\n", start,
-                    framesWanted >= 1.0
-                        ? (std::to_string(static_cast<long>(framesWanted)) + " frames").c_str()
-                        : "to the end");
+    if (startFrame > 0 || totalFrames > 0) {
+        std::printf("range:  start %.3f s, ", static_cast<double>(startFrame) / fps);
+        if (totalFrames > 0) {
+            std::printf("%ld frames\n", totalFrames);
+        } else {
+            std::printf("to the end\n");
+        }
+    }
+    if (base.valid) {
+        std::printf("timecode: %s -> %s\n", formatTimecode(base).c_str(),
+                    formatTimecode(addFrames(base, startFrame, fps)).c_str());
     }
     const char* codecName = prores ? "ProRes 422 HQ"
                                    : (codec == "hevc" ? "HEVC Main10" : "H.264");
     std::printf("output: %s (%s, %s)\n", outPath.c_str(), codecName,
                 hdr ? (trc == "pq" ? "PQ" : "HLG") : "SDR");
 
-    FILE* decoder = openPipe(decodeCmd, "rb");
-    if (!decoder) return fail("failed to start ffmpeg decoder");
-    FILE* encoder = openPipe(encodeCmd, "wb");
-    if (!encoder) {
-        closePipe(decoder);
-        return fail("failed to start ffmpeg encoder");
-    }
+    const std::filesystem::path outFile(outPath);
+    std::string extension = outFile.extension().string();
+    if (extension.empty()) extension = ".mov";
+    const std::filesystem::path workDir(outPath + ".parts");
 
-    const std::string interpName = args.get("interp", "tetra");
-    const sr::Interp mode =
-        interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
-    const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
-
-    const size_t pixels = static_cast<size_t>(width) * height;
-    const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
-    const TextureOptions texture = parseTexture(args);
-    std::vector<unsigned short> raw(pixels * 3);
-    std::vector<float> frame(pixels * 3);
     sr::GrainFieldCache grainCache;
     const auto started = std::chrono::steady_clock::now();
-    size_t frames = 0;
-    while (true) {
-        const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
-        if (got < raw.size()) break;
-        for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
-        sr::parallelChunks(pixels, threads, [&](size_t begin, size_t end) {
-            for (size_t i = begin; i < end; ++i) {
-                float* px = &frame[i * 3];
-                const sr::Rgb src{px[0], px[1], px[2]};
-                const sr::Rgb mapped = lut.apply(src, mode);
-                const sr::Rgb result = sr::mix(src, mapped, strength);
-                px[0] = result.r;
-                px[1] = result.g;
-                px[2] = result.b;
-            }
-        });
-        applyTexture(frame.data(), width, height, texture, static_cast<int>(frames), &grainCache);
-        for (size_t i = 0; i < raw.size(); ++i) {
-            const float value = std::min(1.0f, std::max(0.0f, frame[i]));
-            raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
-        }
-        if (std::fwrite(raw.data(), sizeof(unsigned short), raw.size(), encoder) != raw.size()) {
-            closePipe(decoder);
-            closePipe(encoder);
-            return fail("encoder closed the pipe early");
-        }
-        ++frames;
-        if (frames % 24 == 0) {
-            std::printf("  %zu frames...\n", frames);
-            std::fflush(stdout);
-        }
-    }
-    closePipe(decoder);
-    closePipe(encoder);
+    size_t renderedFrames = 0;
+    size_t partCount = 1;
+    std::string videoInput;
+    std::string tempVideo;
 
-    if (frames == 0) return fail("no frames were decoded");
-    if (texture.grain.amount > 0.0f) {
+    if (segmented) {
+        const long segmentFrames =
+            std::max(1L, static_cast<long>(std::llround(segmentSeconds * fps)));
+        const long partTotal = (totalFrames + segmentFrames - 1) / segmentFrames;
+        std::error_code ec;
+        if (!resume) std::filesystem::remove_all(workDir, ec);
+        ec.clear();
+        std::filesystem::create_directories(workDir, ec);
+        if (ec) return fail("cannot create " + workDir.string() + ": " + ec.message());
+
+        // Never mix parts from a different codec, LUT or texture setting.
+        const std::string signature =
+            renderSignature(job, lutPath, startFrame, totalFrames, segmentFrames);
+        const std::filesystem::path configPath = workDir / "config.txt";
+        std::string existingSignature;
+        {
+            std::ifstream config(configPath);
+            std::ostringstream text;
+            text << config.rdbuf();
+            existingSignature = text.str();
+        }
+        if (resume && !existingSignature.empty() && existingSignature != signature) {
+            std::printf("settings changed since the last run: starting the parts over\n");
+            std::filesystem::remove_all(workDir, ec);
+            ec.clear();
+            std::filesystem::create_directories(workDir, ec);
+            if (ec) return fail("cannot create " + workDir.string() + ": " + ec.message());
+        }
+        {
+            std::ofstream config(configPath, std::ios::trunc);
+            config << signature;
+        }
+
+        std::printf("segments: %ld frames in %ld parts of up to %ld frames%s\n", totalFrames,
+                    partTotal, segmentFrames, resume ? ", resuming" : "");
+        std::vector<std::filesystem::path> parts;
+        parts.reserve(static_cast<size_t>(partTotal));
+        for (long index = 0; index < partTotal; ++index) {
+            const long offset = index * segmentFrames;
+            const long count = std::min(segmentFrames, totalFrames - offset);
+            const std::filesystem::path part =
+                workDir / ("part-" + zeroPad(index, 5) + extension);
+            const std::filesystem::path marker(part.string() + ".done");
+
+            bool done = false;
+            if (resume) {
+                std::ifstream state(marker);
+                long savedStart = -1;
+                long savedCount = -1;
+                if (state >> savedStart >> savedCount) {
+                    done = savedStart == startFrame + offset && savedCount == count &&
+                           std::filesystem::exists(part);
+                }
+            }
+            if (done) {
+                std::printf("part %ld/%ld: already done\n", index + 1, partTotal);
+                parts.push_back(part);
+                continue;
+            }
+
+            std::printf("part %ld/%ld: frames %ld..%ld\n", index + 1, partTotal,
+                        startFrame + offset, startFrame + offset + count - 1);
+            size_t partFrames = 0;
+            std::string partError;
+            if (!renderRange(job, startFrame + offset, count, offset, part.string(), &grainCache,
+                             totalFrames, &partFrames, partError)) {
+                return fail(partError + " (finished parts are kept for --resume)");
+            }
+            renderedFrames += partFrames;
+            std::ofstream state(marker, std::ios::trunc);
+            state << (startFrame + offset) << " " << count << "\n";
+            parts.push_back(part);
+        }
+
+        // One concat list; the audio is copied once into the final file. Paths
+        // are relative to the list, which sits in the parts directory.
+        const std::filesystem::path listPath = workDir / "parts.txt";
+        std::ofstream list(listPath, std::ios::trunc);
+        for (const auto& part : parts) {
+            list << "file '" << part.filename().string() << "'\n";
+        }
+        list.close();
+        videoInput = " -f concat -safe 0 -i " + shellQuote(listPath.string());
+        partCount = parts.size();
+    } else {
+        tempVideo = outPath + ".video" + extension;
+        std::string renderError;
+        if (!renderRange(job, startFrame, totalFrames, 0, tempVideo, &grainCache, totalFrames,
+                         &renderedFrames, renderError)) {
+            return fail(renderError);
+        }
+        videoInput = " -i " + shellQuote(tempVideo);
+    }
+
+    const std::string stamp = base.valid ? formatTimecode(addFrames(base, startFrame, fps)) : "";
+    std::string finishError;
+    if (!finishVideo(ffmpeg, videoInput, inPath, startFrame, totalFrames, fps, stamp, outPath,
+                     finishError)) {
+        return fail(finishError);
+    }
+
+    std::error_code cleanupError;
+    if (!tempVideo.empty()) std::filesystem::remove(tempVideo, cleanupError);
+    if (segmented && !args.has("keep-parts")) {
+        std::filesystem::remove_all(workDir, cleanupError);
+    }
+
+    if (texture.grain.amount > 0.0f && renderedFrames > 0) {
         std::printf("grain fields: %zu generated for %zu frames (rate %d)\n",
-                    grainCache.builds(), frames, texture.grain.rate);
+                    grainCache.builds(), renderedFrames, texture.grain.rate);
     }
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
-    std::printf("wrote %s: %zu frames, %.1f ms/frame, %.2f s total\n", outPath.c_str(), frames,
-                elapsed / frames, elapsed / 1000.0);
+    if (renderedFrames == 0) {
+        std::printf("resumed %s: all %zu parts were already done, %.2f s total\n",
+                    outPath.c_str(), partCount, elapsed / 1000.0);
+    } else {
+        std::printf("wrote %s: %zu frames in %zu part%s, %.1f ms/frame, %.2f s total\n",
+                    outPath.c_str(), renderedFrames, partCount, partCount == 1 ? "" : "s",
+                    elapsed / static_cast<double>(renderedFrames), elapsed / 1000.0);
+    }
     return 0;
 }
 

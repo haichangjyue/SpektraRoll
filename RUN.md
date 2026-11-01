@@ -130,6 +130,28 @@ X:\agent\SpektraRoll\scripts\demo-m3.cmd
 
 参数可以改：`demo-m3.cmd -Grain 0.2 -Glare 0.1`，0 就是关掉。四个都有：`-Grain`、`-Halation`、`-Glare`、`-Diffusion`；颗粒的稳定度用 `-GrainRate`（默认 3，越大越稳，1 = 每帧全新颗粒）。
 
+## 看分段渲染 + 断点续渲 + 时间码
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-m4.cmd
+```
+
+它会自动做四步：
+
+1. 烘一张 SDR 负片 LUT
+2. 把 2 秒素材拆成 1 秒一段渲染（`out\m4-resume.mov.parts\`）
+3. **故意删掉最后一段**，模拟渲染中途崩溃
+4. 用 `--resume` 重跑同一条命令
+
+**你要看两件事**：
+
+- 第二次运行的日志里，第一段显示 `already done`，只渲染了被删掉的那段（几秒钟，不是整段重来）
+- 最后打印的 `timecode` 应该是 `15:38:35:00`（片段原本的相机时间码），不是空的
+
+长片用同样的办法：加 `--segment 10 --resume`，10 秒一段；中断后重跑同一条命令即可。`--keep-parts` 可以保留分段文件，`--no-timecode` 可以不要时间码。
+
 ## 在 Mac 上验证（可选）
 
 你的 MacBook Air M1 也能跑这个程序。把仓库拷到 Mac 上，双击：
