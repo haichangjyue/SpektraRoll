@@ -1,10 +1,10 @@
 # STATUS
 
-**最后更新**：2026-11-01 · 里程碑 **M2 进行中（Apple Log + 扫描负片已通）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-01 · 里程碑 **M2 完成** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-现在能烘出**真正的柯达 Portra 400 + Portra Endura LUT**，能直接吃 iPhone 的 **Apple Log** 素材，并且有两条出片方式：**印片**（像洗出来的照片，对比强）和**扫描负片**（高光暗部都能留住，留调色余量）。
+现在能读 iPhone 的 **Apple Log** 素材，用真正的 Portra 400 光谱模型出**扫描负片**（高光暗部都留住），再输出 **SDR 或 HDR（PQ/HLG）**；M1 的印片 parity 仍是 88 dB。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`

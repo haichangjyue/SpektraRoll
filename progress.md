@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-01
-> **当前里程碑**：M1 已完成并推送；M2 进行中（Apple Log 输入 + 扫描负片已通，HDR 输出待做）
+> **当前里程碑**：M2 已完成（Apple Log 输入、扫描负片、反差、色域压缩、耦合剂、HDR 输出）；M3 = 视频读写待启动
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -336,12 +336,11 @@ X:\agent\SpektraRoll\
 
 你说一句：
 
-> “读 progress.md，我们从 M2 开始。”
+> “读 progress.md，我们从 M3 开始。”
 
 AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，再跑一遍
-`scripts\demo-m2.cmd -NoOpen` 确认 Apple Log 和扫描负片链路没坏，然后按顺序做：
+`scripts\demo-m2.cmd -NoOpen` 确认 Apple Log / 负片 / HDR 链路没坏，然后做 M3：
 
-1. 输出色域压缩（D014）→ 耦合剂（D015）
-2. HDR 输出：PQ / HLG + Rec.2020 + 10-bit + LUT shaper（D021）
-
-每一步都要重新跑 `lut compare`，PSNR 不能从 88 dB 掉下来。
+1. 先拍板 D022（独立程序 + FFmpeg，还是 Resolve 插件）
+2. 视频读写：FFmpeg / ProRes、时间维度、帧区间批处理
+3. 回归：`lut compare` 的 M1 parity 不能从 88 dB 掉下来
