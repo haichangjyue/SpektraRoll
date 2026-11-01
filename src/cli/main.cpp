@@ -535,7 +535,11 @@ void closePipe(FILE* pipe) {
 }
 #else
 FILE* openPipe(const std::string& command, const char* mode) {
-    return popen(command.c_str(), mode);
+    // POSIX popen() only knows "r" and "w"; glibc tolerates a trailing 'b' as a
+    // no-op, but the BSD libc on macOS rejects the whole string with EINVAL, so
+    // "rb"/"wb" returned NULL and the video pipes never started (issue #1).
+    // There is no text/binary distinction on POSIX, so pass the bare mode.
+    return popen(command.c_str(), mode[0] == 'w' ? "w" : "r");
 }
 void closePipe(FILE* pipe) {
     if (pipe) pclose(pipe);
