@@ -28,6 +28,7 @@
 - [x] **分段渲染**（D040）：`--segment 10` 写成 `<out>.parts/`
 - [x] **断点续渲**（D040）：`--resume` 只补缺失段；删掉中间段重跑验证过
 - [x] **时间码**（D040）：复制源 timecode，`--start` 自动偏移；`--timecode` / `--no-timecode` 可覆盖
+- [x] CI 两平台跑分段 + 时间码冒烟（Windows + macOS 绿）
 - [x] 音频只在最后从源文件复制一次，分段边界没有 AAC 接缝
 - [x] `scripts\demo-m4.cmd`：渲染 → 模拟崩溃 → 续渲
 - [ ] 多段并行渲染

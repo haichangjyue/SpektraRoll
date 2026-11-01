@@ -146,7 +146,7 @@
 | 时间码：读源 `timecode`，`--start` 时按帧偏移 | ✅ 15:38:35:00 → `--start 1` 得 15:38:36:00 |
 | `--timecode` 覆盖 / `--no-timecode` 关闭 | ✅ |
 | 分段 vs 整段逐帧对比 | ✅ PSNR 约 46 dB，边界无跳变 |
-| CI 两平台跑分段 + 时间码冒烟 | ✅ 已加入 workflow |
+| CI 两平台跑分段 + 时间码冒烟 | ✅ Windows + macOS 绿（run 37） |
 | `scripts\demo-m4.cmd`（渲染 → 模拟崩溃 → 续渲） | ✅ |
 
 ### 7. 改名与上线
@@ -302,6 +302,9 @@ ffmpeg  J:\ffmpeg\bin\ffmpeg.exe                  M2 起用来从 .mov 抽帧验
 
 3. **MinGW 编译的 exe 默认依赖运行时 DLL，直接双击会报 0xc0000135**
    → CMake 里已经给所有可执行目标加了 `-static`，新加目标也要加。
+
+4. **ffprobe 7+ 遇到 timecode 轨会把同一个 stream 打印两遍**（`stream_groups` 和 `streams` 各一次）
+   → 所有解析 ffprobe 文本输出的地方都要只取第一行（`firstLine()`），CI 里的断言也要 `| head -n 1`。这是 2026-11-02 CI 变红的直接原因。
 
 ### 标准构建命令（脚本已经封装，这是底层等价写法）
 
