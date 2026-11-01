@@ -122,6 +122,45 @@ int main() {
         check(!identical(image, before), "halation changes the image");
     }
 
+    // Glare lifts the blacks with a wide veil of light; diffusion softens.
+    {
+        std::vector<float> image = flat(w, h, 0.05f);
+        float* corner = &image[0];
+        corner[0] = corner[1] = corner[2] = 1.0f;  // one bright pixel
+        sr::GlareParams glare;
+        glare.amount = 0.5f;
+        glare.radius = 0.3f;
+        std::vector<float> before = image;
+        sr::applyGlare(image.data(), w, h, glare);
+        check(!identical(image, before), "glare changes the image");
+        const float far = image[(static_cast<size_t>(h - 1) * w + (w - 1)) * 3];
+        check(far > 0.05f, "glare lifts the far corner");
+        check(far < 0.5f, "glare stays subtle");
+
+        std::vector<float> smooth = flat(w, h, 0.05f);
+        sr::DiffusionParams diffusion;
+        diffusion.amount = 0.0f;
+        sr::applyDiffusion(smooth.data(), w, h, diffusion);
+        check(identical(smooth, flat(w, h, 0.05f)), "diffusion 0 is a no-op");
+
+        diffusion.amount = 0.8f;
+        diffusion.radius = 0.1f;
+        std::vector<float> edge = flat(w, h, 0.0f);
+        for (int y = 0; y < h; ++y) {
+            for (int x = w / 2; x < w; ++x) {
+                float* px = &edge[(static_cast<size_t>(y) * w + x) * 3];
+                px[0] = px[1] = px[2] = 1.0f;
+            }
+        }
+        std::vector<float> edgeBefore = edge;
+        sr::applyDiffusion(edge.data(), w, h, diffusion);
+        const float leftOfEdge = edge[(static_cast<size_t>(h / 2) * w + (w / 2 - 2)) * 3];
+        check(leftOfEdge > 0.0f, "diffusion bleeds across the edge");
+        check(edge[(static_cast<size_t>(h / 2) * w + (w / 2 + 2)) * 3] < 1.0f,
+              "diffusion softens the bright side too");
+        check(!identical(edge, edgeBefore), "diffusion changes the image");
+    }
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

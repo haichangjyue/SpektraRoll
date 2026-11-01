@@ -133,9 +133,8 @@ docs/           architecture and licensing notes
 
 ## Known limitations (on purpose, for now)
 
-- No glare, diffusion or grain-size variation per layer yet; grain and halation
-  are in (D033), but halation uses a display-space blur rather than a physical
-  micron-scale point spread.
+- No per-layer grain and no physical point-spread functions: glare, diffusion
+  and halation are display-space blurs (D033/D035).
 - Output gamut compression is on for Apple Log input (`--gamut oklch`, D027) and
   off by default for sRGB input so the M1 reference stays bit-identical.
 - Apple Log input works, with two ways out: print (`--scan print`, the M1

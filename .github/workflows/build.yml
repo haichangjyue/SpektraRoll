@@ -86,5 +86,5 @@ jobs:
           ffmpeg -y -v error -f lavfi -i testsrc2=size=160x90:rate=24 -t 0.5 -pix_fmt yuv420p ci_src.mov
           "$exe" video --lut m1.cube --in ci_src.mov --out ci_out.mov --trc srgb --in-matrix bt709
           "$exe" video --lut m1.cube --in ci_src.mov --out ci_trim.mov --trc srgb --in-matrix bt709 --start 0.1 --frames 6 --codec prores
-          "$exe" video --lut m1.cube --in ci_src.mov --out ci_texture.mov --trc srgb --in-matrix bt709 --grain 0.3 --halation 0.4
+          "$exe" video --lut m1.cube --in ci_src.mov --out ci_texture.mov --trc srgb --in-matrix bt709 --grain 0.3 --halation 0.4 --glare 0.2 --diffusion 0.1
           ffprobe -v error -show_entries stream=codec_name,nb_frames -of default=noprint_wrappers=1 ci_trim.mov

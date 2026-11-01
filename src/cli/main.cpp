@@ -52,6 +52,7 @@ void printUsage() {
         "                         [--codec hevc|h264|prores]\n"
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
+        "                         [--glare 0..1] [--diffusion 0..1]\n"
         "                         [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
@@ -90,6 +91,7 @@ void printUsage() {
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
+        "                             [--glare 0..1] [--diffusion 0..1]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
@@ -106,8 +108,8 @@ void printUsage() {
         "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
-        "  * The film model is a pure per-pixel function: no grain, halation,\n"
-        "    diffusion or output gamut compression. This is milestone M1.\n",
+        "  * The film model is a pure per-pixel function (no grain, halation,\n"
+        "    glare or diffusion); those run per frame in `video` and `lut apply`.\n",
         kVersion);
 }
 
@@ -418,6 +420,8 @@ int cmdLutCompare(const Args& args) {
 struct TextureOptions {
     sr::GrainParams grain;
     sr::HalationParams halation;
+    sr::GlareParams glare;
+    sr::DiffusionParams diffusion;
 };
 
 TextureOptions parseTexture(const Args& args) {
@@ -428,12 +432,22 @@ TextureOptions parseTexture(const Args& args) {
     texture.halation.amount = static_cast<float>(args.getDouble("halation", 0.0));
     texture.halation.radius = static_cast<float>(args.getDouble("halation-radius", 0.006));
     texture.halation.threshold = static_cast<float>(args.getDouble("halation-threshold", 0.72));
+    texture.glare.amount = static_cast<float>(args.getDouble("glare", 0.0));
+    texture.glare.radius = static_cast<float>(args.getDouble("glare-radius", 0.02));
+    texture.diffusion.amount = static_cast<float>(args.getDouble("diffusion", 0.0));
+    texture.diffusion.radius = static_cast<float>(args.getDouble("diffusion-radius", 0.004));
     return texture;
 }
 
 void applyTexture(float* pixels, int width, int height, const TextureOptions& texture, int frame) {
     if (texture.halation.amount > 0.0f) {
         sr::applyHalation(pixels, width, height, texture.halation);
+    }
+    if (texture.glare.amount > 0.0f) {
+        sr::applyGlare(pixels, width, height, texture.glare);
+    }
+    if (texture.diffusion.amount > 0.0f) {
+        sr::applyDiffusion(pixels, width, height, texture.diffusion);
     }
     if (texture.grain.amount > 0.0f) {
         sr::GrainParams grain = texture.grain;

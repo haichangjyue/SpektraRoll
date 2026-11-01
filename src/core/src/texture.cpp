@@ -108,8 +108,67 @@ void applyHalation(float* pixels, int width, int height, const HalationParams& p
     });
 }
 
-void applyGrain(float* pixels, int width, int height, const GrainParams& params) {
+void applyGlare(float* pixels, int width, int height, const GlareParams& params) {
     if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
+
+    const size_t count = static_cast<size_t>(width) * height;
+    const int radius =
+        std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
+    std::vector<float> veil(count);
+    std::vector<float> scratch(count);
+    for (size_t i = 0; i < count; ++i) {
+        const float* px = &pixels[i * 3];
+        veil[i] = 0.2126f * px[0] + 0.7152f * px[1] + 0.0722f * px[2];
+    }
+    // Veiling glare in a lens is essentially neutral, so one wide blur of the
+    // luminance is enough; a slight warm tint keeps it from looking digital.
+    for (int pass = 0; pass < 3; ++pass) boxBlur(veil, scratch, width, height, radius);
+
+    const float amount = std::min(1.0f, params.amount);
+    const float tint[3] = {1.0f, 0.96f, 0.92f};
+    sr::parallelChunks(count, resolveThreadCount(0), [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            float* px = &pixels[i * 3];
+            for (int c = 0; c < 3; ++c) {
+                const float veiling = amount * veil[i] * tint[c];
+                // Screen blend: light adds, blacks lift, highlights barely move.
+                px[c] = std::min(1.0f, 1.0f - (1.0f - px[c]) * (1.0f - veiling));
+            }
+        }
+    });
+}
+
+void applyDiffusion(float* pixels, int width, int height, const DiffusionParams& params) {
+    if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
+
+    const size_t count = static_cast<size_t>(width) * height;
+    const int radius =
+        std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
+    std::vector<float> blurred(count);
+    std::vector<float> scratch(count);
+    for (size_t i = 0; i < count; ++i) {
+        const float* px = &pixels[i * 3];
+        blurred[i] = 0.2126f * px[0] + 0.7152f * px[1] + 0.0722f * px[2];
+    }
+    for (int pass = 0; pass < 2; ++pass) boxBlur(blurred, scratch, width, height, radius);
+
+    // Add the local luminance difference back to every channel: bright areas
+    // soften and dark areas next to them pick up a little light, while hue is
+    // untouched because the same offset goes to R, G and B.
+    const float amount = std::min(1.0f, params.amount);
+    sr::parallelChunks(count, resolveThreadCount(0), [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            float* px = &pixels[i * 3];
+            const float luma = 0.2126f * px[0] + 0.7152f * px[1] + 0.0722f * px[2];
+            const float offset = (blurred[i] - luma) * amount;
+            for (int c = 0; c < 3; ++c) {
+                px[c] = std::min(1.0f, std::max(0.0f, px[c] + offset));
+            }
+        }
+    });
+}
+
+void applyGrain(float* pixels, int width, int height, const GrainParams& params) {    if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
 
     const size_t count = static_cast<size_t>(width) * height;
     std::vector<float> field(count);

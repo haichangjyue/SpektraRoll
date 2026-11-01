@@ -119,7 +119,7 @@ X:\agent\SpektraRoll\scripts\demo-m3.cmd
 它会出三样东西：
 
 - `out\m3-clean.png` —— 不带质感的同一帧
-- `out\m3-texture.png` —— 加了颗粒和光晕（默认 0.4 / 0.45，D034）
+- `out\m3-texture.png` —— 加了颗粒、光晕、眩光、扩散（默认 0.4 / 0.45 / 0.2 / 0.1）
 - `out\m3-texture.mov` —— 整段视频，带声音，颗粒逐帧变化
 
 **你要判断三件事**（图片建议放大到 100% 看）：
@@ -128,7 +128,7 @@ X:\agent\SpektraRoll\scripts\demo-m3.cmd
 - 播放视频时颗粒有没有在动（不是一张贴图）
 - 高光边缘有没有一点点暖色晕开（不是发光泛滥）
 
-参数可以改：`demo-m3.cmd -Grain 0.2 -Halation 0.4`，0 就是关掉。
+参数可以改：`demo-m3.cmd -Grain 0.2 -Glare 0.1`，0 就是关掉。四个都有：`-Grain`、`-Halation`、`-Glare`、`-Diffusion`。
 
 ## 在 Mac 上验证（可选）
 

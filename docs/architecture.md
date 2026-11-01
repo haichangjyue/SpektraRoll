@@ -97,6 +97,12 @@ spatial: grain is a seeded hash field blurred into clumps and weighted toward
 mid-tones, halation is a thresholded highlight mask blurred three times and
 tinted warm. The seed and frame index make the field reproducible.
 
+Glare and diffusion (D035) follow: glare blurs the whole luminance very widely
+and screens it back (veiling light, so blacks lift and highlights stay), while
+diffusion adds the blurred-minus-original luminance back to all three channels,
+softening detail without shifting hue. Order is halation, glare, diffusion,
+grain.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2

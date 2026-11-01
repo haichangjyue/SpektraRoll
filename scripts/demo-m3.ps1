@@ -10,7 +10,9 @@ param(
     [double]$Time = 1.5,
     [double]$Exposure = 0.7,
     [double]$Grain = 0.4,
-    [double]$Halation = 0.45
+    [double]$Halation = 0.45,
+    [double]$Glare = 0.2,
+    [double]$Diffusion = 0.1
 )
 
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
@@ -66,13 +68,13 @@ Write-Host "3/4  同一帧: 干净版 vs 颗粒+光晕版..." -ForegroundColor C
 & $exe lut apply --lut "out\m3-applelog-sdr.cube" --in "out\m3-frame.png" --out "out\m3-clean.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $exe lut apply --lut "out\m3-applelog-sdr.cube" --in "out\m3-frame.png" --out "out\m3-texture.png" `
-    --grain $Grain --halation $Halation
+    --grain $Grain --halation $Halation --glare $Glare --diffusion $Diffusion
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "4/4  整段渲染 (带颗粒和光晕)..." -ForegroundColor Cyan
 & $exe video --lut "out\m3-applelog-sdr.cube" --in $Footage --out "out\m3-texture.mov" `
-    --trc srgb --grain $Grain --halation $Halation --ffmpeg $ffmpeg
+    --trc srgb --grain $Grain --halation $Halation --glare $Glare --diffusion $Diffusion --ffmpeg $ffmpeg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
