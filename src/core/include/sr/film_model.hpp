@@ -8,8 +8,17 @@
 
 #include "sr/lut3d.hpp"
 #include "sr/profile.hpp"
+#include "sr/transfer.hpp"
 
 namespace sr {
+
+struct BakeOptions {
+    InputTransfer input = InputTransfer::Srgb;
+    // Exposure in stops, applied in linear light before the film model. Only
+    // meaningful for scene-referred inputs such as Apple Log, where the code
+    // range can hold several stops above diffuse white.
+    double exposureEv = 0.0;
+};
 
 // The M1 colour chain: display-encoded sRGB in, display-encoded sRGB out.
 //
@@ -35,15 +44,22 @@ public:
     // clamped on input). The result is display-encoded sRGB.
     Rgb transform(Rgb srgb) const;
 
-    // Bake a size^3 LUT over the sRGB cube. Entries are ordered r fastest,
+    // Same chain, but the input is decoded according to `options.input`.
+    // Apple Log input is decoded to linear BT.2020, converted to linear sRGB,
+    // clamped to >= 0 and exposed; gamut mapping proper is still M2 work.
+    Rgb transformFrom(const BakeOptions& options, Rgb value) const;
+
+    // Bake a size^3 LUT over the input cube. Entries are ordered r fastest,
     // then g, then b, as .cube expects.
     Lut3D bake(int size, const std::string& title) const;
+    Lut3D bake(int size, const std::string& title, const BakeOptions& options) const;
 
     double printExposureFactor() const { return printExposureFactor_; }
     // Neutral print-filter values used, for reporting.
     std::array<double, 3> neutralFilters() const { return neutralFilters_; }
 
 private:
+    Rgb transformLinear(const double linear[3]) const;
     void filmRaw(const double rgb[3], double raw[3]) const;
     void simpleRgbToDensitySpectral(double value, double density[81]) const;
     double interpolate(double x, const std::vector<double>& axis,

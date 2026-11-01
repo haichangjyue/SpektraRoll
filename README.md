@@ -4,9 +4,11 @@
 
 Open-source spectral film simulation for **motion picture**.
 
-Status: **M1 complete** — the spectral colour chain is ported to C++ and bakes a
-real **Kodak Portra 400 + Portra Endura** LUT, with parity against the upstream
-Python model at **PSNR 88 dB** (ΔE76 max 0.0065).
+Status: **M2 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
++ Portra Endura** LUT with parity against the upstream Python model at
+**PSNR 88 dB** (ΔE76 max 0.0065), and now accepts **Apple Log** footage
+(BT.2020, log-encoded) as input, decoded to the same chain (D023). HDR output
+is the next step.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -66,10 +68,20 @@ spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out grad
 # compare against a reference bake
 spektra-roll-cli lut compare --a reference.cube --b portra400_endura.cube
 
+# Apple Log input: the LUT domain is Apple Log code values (BT.2020 primaries)
+spektra-roll-cli lut bake --input apple-log --exposure 0.7 --out applelog.cube
+spektra-roll-cli convert --in frame.png --out frame_sdr.png --from apple-log --exposure 0.7
+spektra-roll-cli lut apply --lut applelog.cube --in frame.png --out frame_portra.png
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
 ```
+
+Apple Log frames have to be extracted from the clip first; the demo uses
+`ffmpeg` and keeps the log code values intact (`scale=in_color_matrix=bt2020`).
+`--exposure` shifts scene exposure in stops before the film model, which is
+what decides how bright the shaded scene prints.
 
 `lut bake` defaults to `data/profiles/kodak_portra_400.json` and
 `data/profiles/kodak_portra_endura.json`, and looks the neutral enlarger
@@ -89,6 +101,7 @@ src/core/       C++20 library, no UI, no I/O policy
   profile       spektrafilm profile JSON -> spectral data
   film_model    M1 spectral chain: upsampling, curves, print, scan
   metrics       PSNR and CIE76 delta E for parity checks
+  transfer      sRGB / Apple Log OETF, BT.2020 -> sRGB (M2)
 src/cli/        headless entry point (render-farm friendly later)
 tests/          assert-based tests, no framework; frozen reference LUT
 data/profiles/  upstream CC BY-SA 4.0 film / paper data + NOTICE
@@ -102,8 +115,8 @@ docs/           architecture and licensing notes
 
 - No couplers, grain, halation, diffusion or glare yet (M4 for the spatial ones,
   M2 for couplers).
-- SDR only today: input is display-encoded sRGB and output is SDR. Apple Log
-  input and HDR (PQ/HLG) output are the M2 colour work (D021).
+- Apple Log input works; SDR output only. HDR (PQ/HLG) output, and proper
+  gamut mapping for out-of-sRGB colours, are the rest of M2 (D014/D021).
 - No video file I/O yet: stills only until the M3 FFmpeg/ProRes step.
 - Output gamut compression is off. Extreme colours can produce out-of-range
   LUT values, which are clamped when writing an image.

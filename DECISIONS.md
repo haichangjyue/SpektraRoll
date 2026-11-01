@@ -236,6 +236,24 @@
 
 ---
 
+## D023 · Apple Log 输入的落地方式
+
+- **日期**：2026-11-01
+- **背景**：Apple Log 是 BT.2020 基底 + 对数曲线，不是 sRGB。需要一种不推翻 D013（LUT 域是编码值）和 D018（parity 门槛）的接入方式。
+- **决定**：
+  - 新增输入传输函数开关：`srgb`（默认，M1 行为一字不改）与 `apple-log`
+  - `lut bake --input apple-log` 的 LUT 定义域改为 **Apple Log 码值立方体**；内部按 Apple 公开公式解码 → 线性 BT.2020 → 线性 sRGB → 胶片模型 → 编码 sRGB
+  - 曝光用 `--exposure <EV>` 在进入胶片模型前施加（默认 0，演示用 +0.7）
+  - 新增 `convert --from apple-log`，输出"只解码、不上胶片"的 SDR 对照图
+  - 超 sRGB 色域产生的负线性值暂时钳制到 0（D014 的色域压缩仍未做）
+- **后果**：
+  - Apple Log 解码与 colour-science 0.4.7 逐点一致（16-bit 输出误差 ≤ 1 LSB）
+  - 18% 中灰在 Apple Log 里编码为 **0.4882724585**，解码回来正好 0.18
+  - 输出仍是 SDR sRGB；HDR（PQ/HLG）是 D021 的下一步
+  - 素材不进入仓库，验收时用 ffmpeg 抽一帧 16-bit PNG；视频读写仍是 M3
+
+---
+
 ## 待决策（还没问你）
 
 - D009：Windows UI 用 WinUI 3 还是 Qt（建议 WinUI 3）

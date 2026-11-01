@@ -1,10 +1,10 @@
 # STATUS
 
-**最后更新**：2026-11-01 · 里程碑 **M1 完成** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-01 · 里程碑 **M2 进行中（Apple Log 已通）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-现在能烘出一张**真正的柯达 Portra 400 + Portra Endura LUT**，双击就能看前后对比；和上游 Python 逐点对比 PSNR 88 dB，人眼完全看不出差别。
+现在能烘出一张**真正的柯达 Portra 400 + Portra Endura LUT**，也能直接吃 iPhone 拍的 **Apple Log** 素材：双击 `demo-m2.cmd` 就能看到"只解码"和"过 Portra"的两张真实画面。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -18,21 +18,37 @@
 - [x] parity harness：`lut compare`（PSNR + CIE76 ΔE），并冻结参考 LUT
 - [x] 16-bit PNG 读写：`gen --bits 16`，`lut apply` 自动保持位深
 - [x] 双击验收：`scripts\demo-m1.cmd`、`scripts\verify-m1.cmd`
-- [x] 单元测试 3 个程序全绿（LUT / 胶片模型 / 图像 I/O）
+- [x] 单元测试 4 个程序全绿（LUT / 胶片模型 / 图像 I/O / Apple Log）
 - [x] 已推送 `main`，GitHub Actions Windows + macOS 双平台绿（CI 也会烘 LUT 并和参考对比）
+
+## 这次交付（M2 · 进行中）
+
+- [x] **Apple Log 输入**：`lut bake --input apple-log`，LUT 定义域就是 Apple Log 码值（D023）
+- [x] Apple Log 解码和 colour-science 逐点一致：16-bit 输出误差 ≤ 1 LSB
+- [x] `convert --from apple-log`：只解码、不上胶片的 SDR 对照图
+- [x] **真实画面样张**：`scripts\demo-m2.cmd` 从你的 `.mov` 抽帧，出 before / after 两张
+- [ ] 输出色域压缩（D014 欠账）
+- [ ] 耦合剂（D015 欠账）
+- [ ] HDR 输出：PQ / HLG + Rec.2020 + 10-bit（D021）
+
+## 怎么验收（M2）
+
+1. 双击 `scripts\demo-m2.cmd` → 自动打开 `out\m2-before.png`（只解码）和 `out\m2-after.png`（过 Portra 400）
+2. 看四件事：天空/窗户高光有没有被压住、暗部有没有死黑、彩色招牌有没有串色、整体像不像胶片
 
 ## 实测数据（本机）
 
 | 项 | 结果 |
 |---|---|
 | 编译器 | MinGW-w64 GCC 16.2.0 (ucrt, posix-seh) |
-| 单元测试 | 3/3 通过 |
+| 单元测试 | 4/4 通过 |
 | 33³ LUT 烘焙 | **约 245 ms**（单线程） |
 | 0.92 MP 套 LUT（16-bit） | **约 31 ms** |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，ΔE76 max 0.0065 |
+| Apple Log 解码 vs colour-science | max 1.53e-5（16-bit 1 LSB），mean 1.9e-8 |
 | 可执行文件 | `build\spektra-roll-cli.exe`，静态链接 |
 
-## 怎么验收
+## 怎么验收（M1）
 
 1. 双击 `scripts\verify-m1.cmd` → 最后应出现 `PASS: M1 全部检查通过.`
 2. 双击 `scripts\demo-m1.cmd` → 自动打开 `out\m1-before.png` 和 `out\m1-after.png`

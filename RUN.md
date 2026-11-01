@@ -52,6 +52,28 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 
 觉得不对就告诉我"太黄了 / 太灰了 / 肤色太红"，我来调。
 
+### 看 Apple Log 真实素材（M2）
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-m2.cmd
+```
+
+它会用 `ffmpeg` 从 `X:\agent\footage\` 里的 `.mov` 抽一帧，然后出两张图：
+
+- `out\m2-before.png` —— 只解码，不上胶片（对照）
+- `out\m2-after.png` —— 过 Kodak Portra 400 + Endura
+
+**你要判断四件事：**
+
+- 天空和窗户：高光是被压住了，还是糊成一片白
+- 暗部：是不是偏暖，有没有死黑
+- 彩色招牌和墙面：有没有过饱和或者串色
+- 整体：像不像胶片拍的，还是像手机直出
+
+觉得不对就告诉我"太黄了 / 太暗了 / 高光糊了"，我来调曝光或曲线。
+
 ### 想确认"它没坏"就双击这个
 
 ```
@@ -88,4 +110,9 @@ ctest --test-dir build --output-on-failure
 # 烘 M1 LUT 并和参考实现对比
 .\build\spektra-roll-cli.exe lut bake --out out\m1.cube
 .\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\m1.cube
+
+# Apple Log 输入（LUT 定义域是 Apple Log 码值，曝光 +0.7 EV）
+.\build\spektra-roll-cli.exe lut bake --input apple-log --exposure 0.7 --out out\applelog.cube
+.\build\spektra-roll-cli.exe convert --in frame.png --out frame_sdr.png --from apple-log --exposure 0.7
+.\build\spektra-roll-cli.exe lut apply --lut out\applelog.cube --in frame.png --out frame_portra.png
 ```

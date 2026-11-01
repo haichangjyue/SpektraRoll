@@ -33,6 +33,11 @@ void printUsage() {
         "  spektra-roll-cli gen --out <file.png> [--width N] [--height N] [--bits 8|16]\n"
         "      Write the built-in test chart (grey ramp + colour patches).\n"
         "\n"
+        "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log]\n"
+        "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
+        "      Decode an image to display-encoded sRGB without the film model. Used\n"
+        "      to render an Apple Log frame as a plain SDR reference.\n"
+        "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
         "\n"
@@ -41,10 +46,13 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
+        "                            [--input srgb|apple-log] [--exposure EV]\n"
         "                            [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
-        "      by default) into a .cube LUT. Input and output are display-encoded\n"
-        "      sRGB, so the LUT can be applied directly to a PNG.\n"
+        "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
+        "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
+        "      primaries (e.g. a frame decoded from an iPhone ProRes/HEVC clip),\n"
+        "      and --exposure shifts scene exposure in stops before the film model.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -78,6 +86,11 @@ struct Args {
     int getInt(const std::string& key, int fallback) const {
         const auto it = flags.find(key);
         return it == flags.end() ? fallback : std::atoi(it->second.c_str());
+    }
+
+    double getDouble(const std::string& key, double fallback) const {
+        const auto it = flags.find(key);
+        return it == flags.end() ? fallback : std::atof(it->second.c_str());
     }
 };
 
@@ -224,15 +237,26 @@ int cmdLutBake(const Args& args) {
     sr::FilmModel model;
     if (!model.configure(film, paper, filters, error)) return fail(error);
 
+    sr::BakeOptions options;
+    if (args.has("input")) {
+        if (!sr::parseInputTransfer(args.get("input"), options.input)) {
+            return fail("--input expects 'srgb' or 'apple-log'");
+        }
+    }
+    options.exposureEv = args.getDouble("exposure", 0.0);
+
     std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
     std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
     std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
     std::printf("print exposure:    %.12f\n", model.printExposureFactor());
+    std::printf("input:             %s", sr::inputTransferName(options.input));
+    if (options.exposureEv != 0.0) std::printf(" (%+.2f EV)", options.exposureEv);
+    std::printf("\n");
 
     const auto started = std::chrono::steady_clock::now();
     const std::string title =
         args.get("title", "SpektraRoll " + film.info.stock + " + " + paper.info.stock);
-    const sr::Lut3D lut = model.bake(size, title);
+    const sr::Lut3D lut = model.bake(size, title, options);
     if (lut.empty()) return fail("failed to bake the LUT");
 
     if (!lut.saveCube(out, error)) return fail(error);
@@ -240,9 +264,9 @@ int cmdLutBake(const Args& args) {
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
             .count();
 
-    const sr::Rgb mid = model.transform({0.5f, 0.5f, 0.5f});
-    const sr::Rgb black = model.transform({0.0f, 0.0f, 0.0f});
-    const sr::Rgb white = model.transform({1.0f, 1.0f, 1.0f});
+    const sr::Rgb mid = model.transformFrom(options, {0.5f, 0.5f, 0.5f});
+    const sr::Rgb black = model.transformFrom(options, {0.0f, 0.0f, 0.0f});
+    const sr::Rgb white = model.transformFrom(options, {1.0f, 1.0f, 1.0f});
 
     std::printf("wrote %s (%d^3, %d entries, %.1f ms)\n", out.c_str(), size,
                 size * size * size, elapsed);
@@ -332,6 +356,59 @@ int cmdLutApply(const Args& args) {
     return 0;
 }
 
+int cmdConvert(const Args& args) {
+    const std::string inPath = args.get("in");
+    const std::string outPath = args.get("out");
+    if (inPath.empty()) return fail("convert requires --in <image>");
+    if (outPath.empty()) return fail("convert requires --out <image>");
+
+    sr::InputTransfer from = sr::InputTransfer::Srgb;
+    if (args.has("from") && !sr::parseInputTransfer(args.get("from"), from)) {
+        return fail("--from expects 'srgb' or 'apple-log'");
+    }
+    if (args.has("to") && args.get("to") != "srgb") {
+        return fail("--to currently supports 'srgb' only (HDR output is M2 work)");
+    }
+    const double exposureEv = args.getDouble("exposure", 0.0);
+
+    sr::Image image;
+    int sourceBits = 8;
+    std::string error;
+    if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
+    const int bits = requestedBits(args, sourceBits);
+
+    const auto started = std::chrono::steady_clock::now();
+    const size_t count = static_cast<size_t>(image.width) * image.height;
+    const double gain = std::exp2(exposureEv);
+    for (size_t i = 0; i < count; ++i) {
+        float* px = &image.pixels[i * 3];
+        double linear[3];
+        if (from == sr::InputTransfer::AppleLog) {
+            const double code[3] = {px[0], px[1], px[2]};
+            double lin2020[3];
+            for (int c = 0; c < 3; ++c) lin2020[c] = sr::appleLogDecode(code[c]);
+            sr::bt2020ToSrgb(lin2020, linear);
+            for (int c = 0; c < 3; ++c) linear[c] = std::max(0.0, linear[c]);
+        } else {
+            for (int c = 0; c < 3; ++c) linear[c] = sr::srgbDecode(px[c]);
+        }
+        for (int c = 0; c < 3; ++c) {
+            px[c] = static_cast<float>(sr::srgbEncode(std::min(1.0, std::max(0.0, linear[c] * gain))));
+        }
+    }
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+
+    if (!sr::saveImage(outPath, image, error, bits)) return fail(error);
+
+    std::printf("converted %s (%s -> srgb, %+.2f EV) to %s\n", inPath.c_str(),
+                sr::inputTransferName(from), exposureEv, outPath.c_str());
+    std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
+                outPath.c_str(), image.width, image.height, count, bits, sourceBits, elapsed);
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -353,6 +430,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (command == "gen") return cmdGen(args);
+    if (command == "convert") return cmdConvert(args);
 
     if (command == "lut" && args.positional.size() >= 2) {
         const std::string& sub = args.positional[1];

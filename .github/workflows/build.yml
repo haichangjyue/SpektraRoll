@@ -50,3 +50,12 @@ jobs:
           if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
           "$exe" lut bake --out m1.cube
           "$exe" lut compare --a tests/reference/portra400_endura_33.cube --b m1.cube
+
+      - name: Bake the Apple Log variant of the same LUT
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          "$exe" lut bake --input apple-log --exposure 0.7 --out applelog.cube
+          "$exe" lut info --lut applelog.cube

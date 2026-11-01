@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-01
-> **当前里程碑**：M1 已完成并推送；M2 = 颜色正确（真实照片 + Apple Log/HDR，D020/D021）待启动
+> **当前里程碑**：M1 已完成并推送；M2 进行中（Apple Log 输入已通，HDR 输出待做）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -77,7 +77,7 @@
 | `lut compare`（PSNR + CIE76 ΔE，逐点 35,937 个） | ✅ |
 | 16-bit PNG 读 / 写（自己拼 IHDR/IDAT/CRC，复用 stb deflate） | ✅ |
 | `gen --bits 16`、`lut apply` 自动保持位深 | ✅ |
-| 单元测试：LUT / 胶片模型 / 图像 I/O，3 个程序全绿 | ✅ |
+| 单元测试：LUT / 胶片模型 / 图像 I/O / 传输函数，4 个程序全绿 | ✅ |
 | 双击验收：`scripts\demo-m1.cmd`、`scripts\verify-m1.cmd` | ✅ |
 | parity：PSNR **88.07 dB**，ΔE76 max **0.0065** | ✅ |
 | CI：Windows + macOS 都跑 `lut bake` + `lut compare`（D019） | ✅ 两个 job 绿 |
@@ -107,10 +107,12 @@
 | 编译器 | MinGW-w64 GCC 16.2.0（便携版，无管理员权限） |
 | CMake | 4.4.4（`C:\Program Files\CMake\bin\cmake.exe`） |
 | Ninja | 1.13.2（`X:\agent\tools\ninja\ninja.exe`） |
-| 单元测试 | 3/3 程序通过（LUT 6 组 + 胶片模型 + 图像 I/O） |
+| 单元测试 | 4/4 程序通过（LUT 6 组 + 胶片模型 + 图像 I/O + Apple Log） |
 | 33³ LUT 烘焙 | **约 245 ms**（单线程） |
 | 0.92 MP 套 33³ LUT（16-bit） | **约 31 ms**（单线程） |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，max \\|diff\\| 4.57e-4，ΔE76 max 0.0065 |
+| Apple Log 解码 vs colour-science | 2.6 MP 帧，max \\|diff\\| **1.53e-5**（= 16-bit 1 LSB），mean 1.9e-8 |
+| Apple Log 素材 | 2160x1214，24p，HEVC 10-bit 4:2:2，BT.2020 |
 | 印片曝光因子 | 0.837773013976（上游含一次 sRGB→sRGB 往返，0.837787256300） |
 | 产物 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
@@ -140,6 +142,7 @@
 | **D019** | CI 覆盖 M1 | **Windows + macOS 都烘 LUT 并和参考对比** | 光谱链退化会在 CI 直接变红 |
 | **D020** | M2 顺序 | **先色彩（真实照片 + Apple Log/HDR）→ 再视频编解码** | M2 颜色、M3 视频、M4 质感与性能、M5 界面 |
 | **D021** | Apple Log / HDR | **Apple Log 输入 → 线性宽色域 → 胶片模型 → SDR 或 HDR(PQ/HLG) 输出** | HDR 曝光映射做成参数；动态元数据不做 |
+| **D023** | Apple Log 输入落地 | **LUT 定义域改为 Apple Log 码值，内部解码到线性 BT.2020 → sRGB** | 与 colour-science 逐点一致（≤1 LSB）；负值暂时钳制 |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -158,14 +161,18 @@
 
 ### 🔴 立即要做（M2 · 颜色正确）
 
-1. **真实照片样张**：demo 里加一张 CC0 真实照片，前/后对比；合成测试图保留做数值校验（D020）
-2. **输出色域压缩**：CAM16-UCS + 亮度压缩，把负值和超 1 的结果合法压回色域（D014 的欠账）
-3. **耦合剂（couplers）**：先做 `dir_couplers`，用上游同一套参数（D015 的欠账）
-4. **Apple Log 输入**：按 Apple 公开公式解码，转到线性宽色域（D021）
-5. **HDR 输出**：PQ / HLG + Rec.2020 + 10-bit，HDR 曝光映射做成参数（D021）
-6. **LUT 形态**：HDR 用 1D shaper + 3D LUT（或 65³）
+已完成：
 
-**M2 前置条件**：你提供的 iPhone Apple Log / ProRes 素材，放到 `X:\agent\footage\`，告诉我文件名即可。
+- [x] **Apple Log 输入**（D023）：`lut bake --input apple-log`、`convert --from apple-log`，和 colour-science 逐点一致（16-bit 误差 ≤ 1 LSB）
+- [x] **真实画面样张**：`scripts\demo-m2.cmd` 直接从你的 `.mov` 抽帧，出"只解码 / 过 Portra"两张图
+- [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
+
+还没做：
+
+1. **输出色域压缩**：CAM16-UCS + 亮度压缩，把负值和超 1 的结果合法压回色域（D014 的欠账）
+2. **耦合剂（couplers）**：先做 `dir_couplers`，用上游同一套参数（D015 的欠账）
+3. **HDR 输出**：PQ / HLG + Rec.2020 + 10-bit，HDR 曝光映射做成参数（D021）
+4. **LUT 形态**：HDR 用 1D shaper + 3D LUT（或 65³）
 
 ### 🟡 中期（M2–M5）
 
@@ -228,6 +235,7 @@ ctest --test-dir build --output-on-failure
 scripts\dev-install.cmd   装工具链（只做一次，不需要管理员权限）
 scripts\build.cmd         编译 + 跑测试
 scripts\demo-m1.cmd       M1 真正的胶片样张（前后对比，自动打开两张图）
+scripts\demo-m2.cmd       M2 Apple Log 素材 → Portra 400（自动抽帧 + 打开两张图）
 scripts\verify-m1.cmd     一键验收：编译 + 测试 + 烘 LUT + 和参考对比
 scripts\demo.cmd          M0 的合成 LUT 冒烟测试（不是胶片）
 scripts\push.cmd          登录 GitHub 并推送
@@ -238,7 +246,7 @@ scripts\push.cmd          登录 GitHub 并推送
 ```powershell
 cd X:\agent\SpektraRoll
 .\build\spektra-roll-cli.exe version        # 应输出 spektra-roll-cli 0.1.0
-ctest --test-dir build --output-on-failure # 应 3/3 通过
+ctest --test-dir build --output-on-failure # 应 4/4 通过
 .\build\spektra-roll-cli.exe lut bake --out out\check.cube
 .\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\check.cube
 # 应输出 PSNR ≈ 88 dB, PASS
@@ -260,12 +268,16 @@ Python 环境里已装：numpy、scipy、colour-science 0.4.7、opt_einsum、num
 ### M2 素材（Apple Log / ProRes）
 
 ```
-X:\agent\footage\            你提供的 iPhone 素材放这里（仓库外，不进 git）
+X:\agent\footage\A001_11011538_C001.mov    已收到（仓库外，不进 git）
 ```
 
-M2 的色彩验收需要真素材：至少一段 Apple Log（10-bit HEVC 或 ProRes），
-再尽量有同场景的普通 sRGB 片段做对照。
-C++ 目前还不能读 `.mov`，M2 阶段先用 `ffmpeg` 抽一张 16-bit PNG 做验收，不动视频链路。
+规格（ffprobe）：iPhone 16 Pro + Blackmagic Cam，HEVC Rext 4:2:2 10-bit，
+1214x2160 竖拍（rotation -90，显示为 2160x1214），BT.2020 非恒定亮度，
+transfer = unknown（即 Apple Log），24 fps，4.125 s，99 帧。
+ffmpeg 抽帧时要带上 `scale=in_color_matrix=bt2020:in_range=tv:out_range=full`
+并用 `-ss` 自动旋转，`scripts\demo-m2.ps1` 已经封装。
+
+C++ 还不能读 `.mov`，M2 阶段先用 `ffmpeg` 抽一张 16-bit PNG 做验收，不动视频链路（M3）。
 
 ---
 
@@ -273,10 +285,10 @@ C++ 目前还不能读 `.mov`，M2 阶段先用 `ffmpeg` 抽一张 16-bit PNG �
 
 ```
 X:\agent\SpektraRoll\
-├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, spectral_data）
+├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, transfer, spectral_data）
 ├── src/core/src/            实现 + 生成的 spectral_tables.cpp
 ├── src/cli/main.cpp         命令行入口（gen / bake / apply / compare / info / version）
-├── tests/                   3 个测试程序 + reference/ 冻结参考 LUT
+├── tests/                   4 个测试程序 + reference/ 冻结参考 LUT
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
 ├── third_party/stb/         stb_image / stb_image_write（单头文件）
@@ -287,7 +299,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D021
+├── DECISIONS.md             决策台账 D001–D023
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -296,7 +308,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D021**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D023**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
@@ -312,10 +324,10 @@ X:\agent\SpektraRoll\
 
 > “读 progress.md，我们从 M2 开始。”
 
-AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，然后按 D020 的顺序做：
+AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，再跑一遍
+`scripts\demo-m2.cmd -NoOpen` 确认 Apple Log 链路没坏，然后按顺序做：
 
-1. 真实照片样张（demo 换成照片，测试图保留做数值校验）
-2. 输出色域压缩 → 耦合剂
-3. Apple Log 输入 → HDR（PQ/HLG）输出
+1. 输出色域压缩（D014）→ 耦合剂（D015）
+2. HDR 输出：PQ / HLG + Rec.2020 + 10-bit + LUT shaper（D021）
 
 每一步都要重新跑 `lut compare`，PSNR 不能从 88 dB 掉下来。

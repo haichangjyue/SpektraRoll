@@ -22,7 +22,8 @@ add_library(sr_core
     src/core/src/profile.cpp
     src/core/src/film_model.cpp
     src/core/src/metrics.cpp
-    src/core/src/spectral_tables.cpp)
+    src/core/src/spectral_tables.cpp
+    src/core/src/transfer.cpp)
 
 target_include_directories(sr_core
     PUBLIC src/core/include)
@@ -67,6 +68,13 @@ if(SR_BUILD_TESTS)
         target_link_options(test_image PRIVATE -static)
     endif()
     add_test(NAME image_io COMMAND test_image)
+
+    add_executable(test_transfer tests/test_transfer.cpp)
+    target_link_libraries(test_transfer PRIVATE sr_core)
+    if(MINGW)
+        target_link_options(test_transfer PRIVATE -static)
+    endif()
+    add_test(NAME transfer COMMAND test_transfer)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

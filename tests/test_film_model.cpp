@@ -91,6 +91,32 @@ int main() {
     const sr::Rgb fromLut = lut.apply({0.5f, 0.5f, 0.5f});
     checkRgb(fromLut, model.transform({0.5f, 0.5f, 0.5f}), 1e-6, "LUT matches transform");
 
+    // The M2 entry point must be a no-op for sRGB input at 0 EV (D013/D021).
+    sr::BakeOptions options;
+    checkRgb(model.transformFrom(options, {0.5f, 0.5f, 0.5f}), model.transform({0.5f, 0.5f, 0.5f}),
+             1e-9, "transformFrom(sRGB) matches M1 transform");
+    checkRgb(model.transformFrom(options, {0.8f, 0.2f, 0.2f}), model.transform({0.8f, 0.2f, 0.2f}),
+             1e-9, "transformFrom(sRGB) matches M1 transform (colour)");
+
+    // Apple Log input: 18% grey in BT.2020 (0.48827 per channel) must land on
+    // the same print as 18% grey in sRGB (0.18 linear -> 0.46135 encoded).
+    // The BT.2020 -> sRGB matrix rounds at ~1.6e-4, so grey is not bit-exact.
+    sr::BakeOptions appleLog;
+    appleLog.input = sr::InputTransfer::AppleLog;
+    const float grey = static_cast<float>(sr::appleLogEncode(0.18));
+    checkRgb(model.transformFrom(appleLog, {grey, grey, grey}),
+             model.transform({static_cast<float>(sr::srgbEncode(0.18)),
+                              static_cast<float>(sr::srgbEncode(0.18)),
+                              static_cast<float>(sr::srgbEncode(0.18))}),
+             5e-4, "18% grey matches between sRGB and Apple Log input");
+
+    // +1 EV doubles scene light, which must print brighter than 0 EV.
+    sr::BakeOptions brighter = appleLog;
+    brighter.exposureEv = 1.0;
+    const sr::Rgb base = model.transformFrom(appleLog, {0.4f, 0.4f, 0.4f});
+    const sr::Rgb up = model.transformFrom(brighter, {0.4f, 0.4f, 0.4f});
+    check(up.r > base.r, "positive exposure brightens the print");
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

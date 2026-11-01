@@ -1,6 +1,6 @@
 # Architecture
 
-Status: M1. Parts marked *(built)* exist today; the rest is the target shape.
+Status: M2 in progress. Parts marked *(built)* exist today; the rest is the target shape.
 
 ## The split that makes video possible
 
@@ -44,12 +44,25 @@ display-encoded sRGB
 Everything is a pure function of one RGB triple. That is what makes the bake
 deterministic and the LUT meaningful.
 
-Deliberately off in M1 (each has a decision record):
+Two input domains are supported (D023). The LUT domain is whichever one you
+bake:
+
+```
+display-encoded sRGB            (M1 default)
+Apple Log code values, BT.2020  → Apple Log OETF decode → linear BT.2020
+                                → linear sRGB → the chain above
+```
+
+Apple Log decodes with the constants from Apple's white paper; a negative
+linear value below black is kept until the final sRGB clamp so the hue near
+black stays right. `--exposure` scales linear light before the film model.
+
+Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2
 - dir couplers (D015) — M2
 - grain, halation, diffusion, glare — M4
-- Apple Log input and HDR (PQ/HLG) output — M2 (D021)
+- HDR (PQ/HLG) output — M2 (D021); Apple Log input is now built (D023)
 - hanatos2025 upsampling (D012)
 
 ## Layers
@@ -62,6 +75,7 @@ core/        C++20, no UI, no policy. C ABI on the outside.
   profile    profile JSON -> spectral arrays                (built)
   film_model M1 spectral chain + LUT bake                   (built)
   metrics    PSNR / CIE76 for parity                        (built)
+  transfer   sRGB / Apple Log OETF, BT.2020 -> sRGB         (built)
   bake/      OCIO config, .3dl, other LUT flavours          (next)
   grain/     temporal grain, µm-scaled, Philox seeds         (later)
   spatial/   halation, diffusion, glare                      (later)

@@ -16,16 +16,6 @@ constexpr int kN = data::kWavelengthCount;  // 81 samples, 380..780 nm
 
 double nanToZero(double value) { return std::isnan(value) ? 0.0 : value; }
 
-double srgbDecode(double value) {
-    const double x = std::min(1.0, std::max(0.0, value));
-    return x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4);
-}
-
-double srgbEncode(double value) {
-    if (value <= 0.0031308) return value * 12.92;
-    return 1.055 * std::pow(std::max(value, 0.0), 1.0 / 2.4) - 0.055;
-}
-
 double normCdf(double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); }
 
 }  // namespace
@@ -253,7 +243,31 @@ double FilmModel::paperCurve(int sample, int channel) const {
 
 Rgb FilmModel::transform(Rgb srgb) const {
     double linear[3] = {srgbDecode(srgb.r), srgbDecode(srgb.g), srgbDecode(srgb.b)};
+    return transformLinear(linear);
+}
 
+Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
+    double linear[3];
+    if (options.input == InputTransfer::AppleLog) {
+        const double code[3] = {value.r, value.g, value.b};
+        double lin2020[3];
+        // No per-channel clamp before the matrix: below-black codes decode
+        // negative and still contribute to the hue near black.
+        for (int c = 0; c < 3; ++c) lin2020[c] = appleLogDecode(code[c]);
+        bt2020ToSrgb(lin2020, linear);
+        for (int c = 0; c < 3; ++c) linear[c] = std::max(0.0, linear[c]);
+    } else {
+        const double encoded[3] = {value.r, value.g, value.b};
+        for (int c = 0; c < 3; ++c) linear[c] = srgbDecode(encoded[c]);
+    }
+    if (options.exposureEv != 0.0) {
+        const double gain = std::exp2(options.exposureEv);
+        for (int c = 0; c < 3; ++c) linear[c] *= gain;
+    }
+    return transformLinear(linear);
+}
+
+Rgb FilmModel::transformLinear(const double linear[3]) const {
     double raw[3];
     filmRaw(linear, raw);
 
@@ -310,6 +324,10 @@ Rgb FilmModel::transform(Rgb srgb) const {
 }
 
 Lut3D FilmModel::bake(int size, const std::string& title) const {
+    return bake(size, title, BakeOptions{});
+}
+
+Lut3D FilmModel::bake(int size, const std::string& title, const BakeOptions& options) const {
     size = std::max(2, size);
     std::vector<Rgb> values(static_cast<size_t>(size) * size * size);
     const float scale = 1.0f / static_cast<float>(size - 1);
@@ -317,7 +335,7 @@ Lut3D FilmModel::bake(int size, const std::string& title) const {
         for (int g = 0; g < size; ++g) {
             for (int r = 0; r < size; ++r) {
                 values[(static_cast<size_t>(b) * size + g) * size + r] =
-                    transform(Rgb{r * scale, g * scale, b * scale});
+                    transformFrom(options, Rgb{r * scale, g * scale, b * scale});
             }
         }
     }
