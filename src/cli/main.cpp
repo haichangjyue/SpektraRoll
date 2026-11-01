@@ -48,7 +48,7 @@ void printUsage() {
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
         "                            [--input srgb|apple-log] [--exposure EV]\n"
         "                            [--scan print|negative] [--contrast 1.15]\n"
-        "                            [--title <text>]\n"
+        "                            [--gamut oklch|off] [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
         "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
@@ -58,6 +58,8 @@ void printUsage() {
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
         "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
         "      pass 1.0 for the flat film curve only).\n"
+        "      --gamut oklch maps out-of-gamut colour back into sRGB by reducing\n"
+        "      OkLCh chroma; negative scans default to it, print keeps it off.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -263,6 +265,21 @@ int cmdLutBake(const Args& args) {
     options.contrast =
         args.getDouble("contrast", options.scan == sr::ScanMode::Negative ? 1.15 : 1.0);
 
+    // Gamut compression defaults on only for Apple Log input (D027): the print
+    // path from Apple Log can produce negative linear values, while the sRGB
+    // path must stay byte-identical to the M1 reference.
+    options.gamutCompress = options.input == sr::InputTransfer::AppleLog;
+    if (args.has("gamut")) {
+        const std::string mode = args.get("gamut");
+        if (mode == "oklch") {
+            options.gamutCompress = true;
+        } else if (mode == "off") {
+            options.gamutCompress = false;
+        } else {
+            return fail("--gamut expects 'off' or 'oklch'");
+        }
+    }
+
     std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
     std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
     std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
@@ -273,6 +290,7 @@ int cmdLutBake(const Args& args) {
     std::printf("scan:              %s\n",
                 options.scan == sr::ScanMode::Negative ? "negative (no paper)" : "print");
     if (options.contrast != 1.0) std::printf("contrast:          %.2f\n", options.contrast);
+    std::printf("gamut:             %s\n", options.gamutCompress ? "oklch" : "off");
 
     const auto started = std::chrono::steady_clock::now();
     const std::string title =

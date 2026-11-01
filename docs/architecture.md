@@ -67,6 +67,12 @@ on the scan's own 18% grey and scales all channels together, so it adds punch
 without shifting hue; negative scans default to 1.15 (D026), and 1.0 keeps the
 flat film curve for grading later.
 
+Out-of-gamut output is rolled back in with an OkLCh chroma knee (D027). The
+print path from Apple Log can produce negative linear values; the negative scan
+is bounded by construction, so the compression is a no-op there. It defaults on
+for Apple Log input and off for sRGB input, which keeps the M1 reference
+byte-identical.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2
@@ -126,7 +132,7 @@ and CIE76 ΔE over all 33³ entries. Current numbers are in
 |---|---|
 | M0 *(done)* | CLI applies a LUT, tests, CI |
 | M1 *(done)* | spektrafilm model ported, real Portra 400 + Endura LUT, parity harness, 16-bit PNG |
-| M2 | colour correctness: real-photo sample, gamut compression, couplers, Apple Log input, scanned negative, HDR (PQ/HLG) output |
+| M2 | colour correctness: real-photo sample, gamut compression (done), couplers, Apple Log input (done), scanned negative (done), HDR (PQ/HLG) output |
 | M3 | video I/O: FFmpeg / ProRes, time dimension, frame ranges; decide standalone vs OFX (D022) |
 | M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, SIMD / threads / GPU, float / EXR |
 | M5 | UI: Windows WinUI 3, macOS SwiftUI, OFX plugin, render-farm CLI |

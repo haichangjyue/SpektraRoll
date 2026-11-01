@@ -289,7 +289,8 @@ double FilmModel::paperCurve(int sample, int channel) const {
 
 Rgb FilmModel::transform(Rgb srgb) const {
     double linear[3] = {srgbDecode(srgb.r), srgbDecode(srgb.g), srgbDecode(srgb.b)};
-    return transformLinear(linear, ScanMode::Print, 1.0);
+    BakeOptions defaults;
+    return transformLinear(linear, defaults);
 }
 
 Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
@@ -310,7 +311,7 @@ Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
         const double gain = std::exp2(options.exposureEv);
         for (int c = 0; c < 3; ++c) linear[c] *= gain;
     }
-    return transformLinear(linear, options.scan, options.contrast);
+    return transformLinear(linear, options);
 }
 
 void FilmModel::filmCmy(const double linear[3], double cmy[3]) const {
@@ -343,28 +344,38 @@ void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const
     }
 }
 
-Rgb FilmModel::transformLinear(const double linear[3], ScanMode scan, double contrast) const {
+Rgb FilmModel::transformLinear(const double linear[3], const BakeOptions& options) const {
     double cmyFilm[3];
     filmCmy(linear, cmyFilm);
 
-    if (scan == ScanMode::Negative) {
+    if (options.scan == ScanMode::Negative) {
         const double positive[3] = {filmMaxCmy_[0] - cmyFilm[0], filmMaxCmy_[1] - cmyFilm[1],
                                     filmMaxCmy_[2] - cmyFilm[2]};
         double rgb[3];
         scanPositiveDye(positive, rgb);
         for (int c = 0; c < 3; ++c) {
             const double span = negativeWhite_[c] - negativeBlack_[c];
-            const double value = span > 1e-9 ? (rgb[c] - negativeBlack_[c]) / span : 0.0;
-            const double clamped = std::min(1.0, std::max(0.0, value));
+            rgb[c] = span > 1e-9 ? (rgb[c] - negativeBlack_[c]) / span : 0.0;
+        }
+        if (options.gamutCompress) {
+            const Rgb mapped = compressGamutOklch(Rgb{static_cast<float>(rgb[0]),
+                                                      static_cast<float>(rgb[1]),
+                                                      static_cast<float>(rgb[2])});
+            rgb[0] = mapped.r;
+            rgb[1] = mapped.g;
+            rgb[2] = mapped.b;
+        }
+        for (int c = 0; c < 3; ++c) {
+            const double clamped = std::min(1.0, std::max(0.0, rgb[c]));
             rgb[c] = std::pow(clamped, negativeGamma_[c]);
         }
-        if (contrast != 1.0) {
+        if (options.contrast != 1.0) {
             // Pivot at the scan's own 18% grey and scale all channels together
             // so hue and saturation are left alone.
             const double luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
             if (luma > 1e-9) {
                 const double scale =
-                    std::pow(luma / negativeGreyLuma_, contrast - 1.0);
+                    std::pow(luma / negativeGreyLuma_, options.contrast - 1.0);
                 for (int c = 0; c < 3; ++c) rgb[c] = std::min(1.0, rgb[c] * scale);
             }
         }
@@ -412,6 +423,14 @@ Rgb FilmModel::transformLinear(const double linear[3], ScanMode scan, double con
         rgb[c] = data::kXyzD50ToSrgb[c * 3 + 0] * xyz[0] +
                  data::kXyzD50ToSrgb[c * 3 + 1] * xyz[1] +
                  data::kXyzD50ToSrgb[c * 3 + 2] * xyz[2];
+    }
+    if (options.gamutCompress) {
+        const Rgb mapped = compressGamutOklch(
+            Rgb{static_cast<float>(rgb[0]), static_cast<float>(rgb[1]),
+                static_cast<float>(rgb[2])});
+        rgb[0] = mapped.r;
+        rgb[1] = mapped.g;
+        rgb[2] = mapped.b;
     }
 
     return Rgb{static_cast<float>(srgbEncode(rgb[0])), static_cast<float>(srgbEncode(rgb[1])),

@@ -9,6 +9,7 @@
 #include "sr/lut3d.hpp"
 #include "sr/profile.hpp"
 #include "sr/transfer.hpp"
+#include "sr/gamut.hpp"
 
 namespace sr {
 
@@ -29,6 +30,9 @@ struct BakeOptions {
     // Tone contrast around 18% grey, applied after a negative scan: 1.0 leaves
     // the film's own curve alone, >1 gives a punchier image, <1 flattens it.
     double contrast = 1.0;
+    // Map out-of-gamut linear colour back into the sRGB cube (OkLCh chroma
+    // reduction). Off for the print path so M1 parity is untouched (D027).
+    bool gamutCompress = false;
 };
 
 // The M1 colour chain: display-encoded sRGB in, display-encoded sRGB out.
@@ -70,7 +74,7 @@ public:
     std::array<double, 3> neutralFilters() const { return neutralFilters_; }
 
 private:
-    Rgb transformLinear(const double linear[3], ScanMode scan, double contrast) const;
+    Rgb transformLinear(const double linear[3], const BakeOptions& options) const;
     void filmCmy(const double linear[3], double cmy[3]) const;
     void scanPositiveDye(const double cmy[3], double linearSrgb[3]) const;
     void filmRaw(const double rgb[3], double raw[3]) const;

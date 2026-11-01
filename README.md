@@ -121,13 +121,14 @@ docs/           architecture and licensing notes
 
 - No couplers, grain, halation, diffusion or glare yet (M4 for the spatial ones,
   M2 for couplers).
+- Output gamut compression is on for Apple Log input (`--gamut oklch`, D027) and
+  off by default for sRGB input so the M1 reference stays bit-identical.
 - Apple Log input works, with two ways out: print (`--scan print`, the M1
   chain, contrasty) and scanned negative (`--scan negative`, more latitude,
   flatter). The negative path has no upstream parity and its grey balance is a
   power law rather than a full dye-correction matrix, so colours are close but
   not final.
-- SDR output only. HDR (PQ/HLG) output, and proper gamut mapping for
-  out-of-sRGB colours, are the rest of M2 (D014/D021).
+- SDR output only. HDR (PQ/HLG) output is the rest of M2 (D021).
 - No video file I/O yet: stills only until the M3 FFmpeg/ProRes step.
 - Output gamut compression is off. Extreme colours can produce out-of-range
   LUT values, which are clamped when writing an image.

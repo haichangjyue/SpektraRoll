@@ -23,7 +23,8 @@ add_library(sr_core
     src/core/src/film_model.cpp
     src/core/src/metrics.cpp
     src/core/src/spectral_tables.cpp
-    src/core/src/transfer.cpp)
+    src/core/src/transfer.cpp
+    src/core/src/gamut.cpp)
 
 target_include_directories(sr_core
     PUBLIC src/core/include)
@@ -75,6 +76,13 @@ if(SR_BUILD_TESTS)
         target_link_options(test_transfer PRIVATE -static)
     endif()
     add_test(NAME transfer COMMAND test_transfer)
+
+    add_executable(test_gamut tests/test_gamut.cpp)
+    target_link_libraries(test_gamut PRIVATE sr_core)
+    if(MINGW)
+        target_link_options(test_gamut PRIVATE -static)
+    endif()
+    add_test(NAME gamut COMMAND test_gamut)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)
