@@ -76,8 +76,9 @@ Qt 6.8.3 and MinGW 13.1 are expected under `X:\agent\tools\qt` (installed with
 
 Renders can be queued: **加入队列** freezes the current arguments and copies the
 LUT, outputs that would collide get a `-2`, `-3` suffix, and the queue runs the
-jobs one after another with per-job status and frame progress. Stopping the
-queue leaves unfinished jobs queued for the next run.
+jobs one after another with per-job progress bars, elapsed/remaining time, and
+status. The queue is saved to `out/ui-queue/queue.json` and restored on the next
+launch; dropping several clips at once (or **批量加入**) enqueues one job per clip.
 
 ![Render queue](docs/ui-queue.png)
 
