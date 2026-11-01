@@ -12,9 +12,10 @@ namespace sr {
 struct GrainParams {
     // 0 = off. 1 is a strong print-grain look; the demo uses ~0.35.
     float amount = 0.0f;
-    // Grain radius in pixels. Real grain scales with the scanned resolution, so
-    // this is deliberately resolution dependent.
-    float size = 1.2f;
+    // Grain radius in pixels (1-2 reads as film grain; 0 is raw per-pixel
+    // noise). Real grain scales with the scanned resolution, so this is
+    // deliberately resolution dependent.
+    float size = 1.4f;
     unsigned seed = 1;
     // Frame index: changing it gives a new, independent grain field.
     int frame = 0;

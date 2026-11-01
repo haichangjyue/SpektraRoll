@@ -9,8 +9,8 @@ param(
     [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
     [double]$Time = 1.5,
     [double]$Exposure = 0.7,
-    [double]$Grain = 0.35,
-    [double]$Halation = 0.6
+    [double]$Grain = 0.4,
+    [double]$Halation = 0.45
 )
 
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)

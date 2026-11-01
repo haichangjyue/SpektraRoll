@@ -423,7 +423,7 @@ struct TextureOptions {
 TextureOptions parseTexture(const Args& args) {
     TextureOptions texture;
     texture.grain.amount = static_cast<float>(args.getDouble("grain", 0.0));
-    texture.grain.size = static_cast<float>(args.getDouble("grain-size", 1.2));
+    texture.grain.size = static_cast<float>(args.getDouble("grain-size", 1.4));
     texture.grain.seed = static_cast<unsigned>(args.getInt("seed", 1));
     texture.halation.amount = static_cast<float>(args.getDouble("halation", 0.0));
     texture.halation.radius = static_cast<float>(args.getDouble("halation-radius", 0.006));

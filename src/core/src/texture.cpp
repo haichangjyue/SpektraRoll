@@ -122,7 +122,9 @@ void applyGrain(float* pixels, int width, int height, const GrainParams& params)
     }
 
     std::vector<float> scratch(count);
-    const int radius = std::max(0, static_cast<int>(std::lround(params.size)) - 1);
+    // `size` is the blur radius in pixels: 0 is per-pixel noise (harsh), 1-2
+    // gives the clumped look of real grain.
+    const int radius = std::max(0, static_cast<int>(std::lround(params.size)));
     for (int pass = 0; pass < 2; ++pass) boxBlur(field, scratch, width, height, radius);
 
     const float scale = params.amount * 0.14f;

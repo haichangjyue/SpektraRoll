@@ -155,6 +155,7 @@
 | **D031** | 帧区间 / ProRes | **`--start/--frames/--duration` + `--codec prores`（422 HQ）** | 音画同步；ProRes 120 MB / 4.1 s |
 | **D032** | 多线程（提前） | **`parallelChunks` + `--threads`，0=自动** | 套 LUT 96→17 ms；视频 268→214 ms/帧（瓶颈转编码） |
 | **D033** | 胶片质感 | **确定性颗粒 + 暖色光晕，逐帧叠加（不进 LUT）** | 同 seed/帧可复现；视频 +97 ms/帧；光晕半径仍是画幅比例 |
+| **D034** | 颗粒调轻 | **模糊半径 = round(size)，demo 默认 0.4 / 0.45** | 噪声 std 0.014→0.0053，颗粒成团不毛躁 |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -187,6 +188,7 @@
 - [x] **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
 - [x] **多线程**（D032，提前做）：套 LUT 96→17 ms；视频 268→214 ms/帧
 - [x] **胶片质感**（D033）：`--grain` / `--halation`，颗粒逐帧变化、可复现；`scripts\demo-m3.cmd`
+- [x] **颗粒调轻**（D034，按你的反馈）：模糊半径修正，默认 0.4 / 0.45，std 0.014→0.0053
 - [x] **macOS 修复**（issue #1）：POSIX `popen` 只接受 `"r"/"w"`，我们传了 `"rb"/"wb"`，macOS 直接返回 NULL → 视频命令起不来。已修，CI 现在两个平台都跑视频冒烟
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 

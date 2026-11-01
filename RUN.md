@@ -119,7 +119,7 @@ X:\agent\SpektraRoll\scripts\demo-m3.cmd
 它会出三样东西：
 
 - `out\m3-clean.png` —— 不带质感的同一帧
-- `out\m3-texture.png` —— 加了颗粒和光晕
+- `out\m3-texture.png` —— 加了颗粒和光晕（默认 0.4 / 0.45，D034）
 - `out\m3-texture.mov` —— 整段视频，带声音，颗粒逐帧变化
 
 **你要判断三件事**（图片建议放大到 100% 看）：
