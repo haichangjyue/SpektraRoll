@@ -643,6 +643,16 @@ std::string runCapture(const std::string& command) {
     return out;
 }
 
+// ffprobe 7+ prints a stream twice when a timecode track creates a stream group
+// (once under "stream_groups", once under "streams"). The text output is
+// therefore duplicated; all our probes only need the first line.
+std::string firstLine(const std::string& text) {
+    const auto end = text.find('\n');
+    std::string line = end == std::string::npos ? text : text.substr(0, end);
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+    return line;
+}
+
 std::string ffmpegPath(const Args& args) {    if (args.has("ffmpeg")) return args.get("ffmpeg");
     if (const char* env = std::getenv("SPEKTRA_FFMPEG")) return env;
     return "ffmpeg";
@@ -740,11 +750,11 @@ std::string probeTimecode(const std::string& ffprobe, const std::string& input) 
 // Frame count of the video stream; falls back to duration x fps when the
 // container does not count frames.
 long probeFrameCount(const std::string& ffprobe, const std::string& input, double fps) {
-    const std::string text =
-        runCapture(shellQuote(ffprobe) +
-                   " -v error -select_streams v:0 -show_entries stream=nb_frames,duration"
-                   " -of csv=p=0 " +
-                   shellQuote(input));
+    const std::string text = firstLine(runCapture(
+        shellQuote(ffprobe) +
+        " -v error -select_streams v:0 -show_entries stream=nb_frames,duration"
+        " -of csv=p=0 " +
+        shellQuote(input)));
     std::istringstream stream(text);
     std::string token;
     std::vector<std::string> parts;
@@ -852,8 +862,9 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
 // the frame index within the requested range and keeps grain continuous across
 // segment boundaries.
 bool renderRange(const VideoRender& job, long startFrame, long frameCount, long rangeFrameBase,
-                 const std::string& outPath, sr::GrainFieldCache* grainCache, long rangeTotal,
-                 size_t* rendered, std::string& error) {
+                 const std::string& outPath, const std::string& timecode,
+                 sr::GrainFieldCache* grainCache, long rangeTotal, size_t* rendered,
+                 std::string& error) {
     const double start = static_cast<double>(startFrame) / job.fps;
     const std::string seek = start > 0.0 ? " -ss " + formatSeconds(start) : "";
     const std::string limit = frameCount > 0 ? " -frames:v " + std::to_string(frameCount) : "";
@@ -870,7 +881,8 @@ bool renderRange(const VideoRender& job, long startFrame, long frameCount, long 
         shellQuote("scale=out_color_matrix=" + job.matrix + ":out_range=tv,format=" +
                    job.outFormat) +
         job.codecArgs + " -color_primaries " + job.primaries + " -color_trc " + job.transfer +
-        " -colorspace " + job.matrix + " " + shellQuote(outPath);
+        " -colorspace " + job.matrix +
+        (timecode.empty() ? "" : " -timecode " + timecode) + " " + shellQuote(outPath);
 
     FILE* decoder = openPipe(decodeCmd, "rb");
     if (!decoder) {
@@ -940,18 +952,18 @@ bool renderRange(const VideoRender& job, long startFrame, long frameCount, long 
     return true;
 }
 
-// Copies the audio once and stamps the source start timecode on the result.
+// Copies the audio once into the rendered video. The timecode was already
+// stamped while encoding, so a stream copy carries it through (this also keeps
+// new ffmpeg builds happy: -timecode is an encoder option, not a copy option).
 bool finishVideo(const std::string& ffmpeg, const std::string& videoInput,
                  const std::string& inPath, long startFrame, long totalFrames, double fps,
-                 const std::string& timecode, const std::string& outPath, std::string& error) {
+                 const std::string& outPath, std::string& error) {
     const double start = static_cast<double>(startFrame) / fps;
     std::string command = shellQuote(ffmpeg) + " -v error -y" + videoInput;
     if (start > 0.0) command += " -ss " + formatSeconds(start);
     if (totalFrames > 0) command += " -t " + formatSeconds(static_cast<double>(totalFrames) / fps);
     command += " -i " + shellQuote(inPath) +
-               " -map 0:v:0 -map 1:a:0? -c copy" +
-               (timecode.empty() ? "" : " -timecode " + timecode) +
-               " -movflags +faststart " + shellQuote(outPath);
+               " -map 0:v:0 -map 1:a:0? -c copy -movflags +faststart " + shellQuote(outPath);
     if (runCommand(command) != 0) {
         error = "ffmpeg could not mux the final file";
         return false;
@@ -973,11 +985,11 @@ int cmdVideo(const Args& args) {
 
     const std::string ffmpeg = ffmpegPath(args);
     const std::string ffprobe = siblingTool(ffmpeg);
-    const std::string probe =
+    const std::string probe = firstLine(
         runCapture(shellQuote(ffprobe) +
                    " -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate"
                    " -of csv=p=0 " +
-                   shellQuote(inPath));
+                   shellQuote(inPath)));
     int width = 0;
     int height = 0;
     double fps = 0.0;
@@ -1002,11 +1014,11 @@ int cmdVideo(const Args& args) {
 
     // ffmpeg autorotates while decoding, so a 90/270 display matrix means the
     // frames arrive with width and height swapped.
-    const std::string rotation = runCapture(
+    const std::string rotation = firstLine(runCapture(
         shellQuote(ffprobe) +
         " -v error -select_streams v:0 -show_entries side_data=rotation"
         " -of default=noprint_wrappers=1:nokey=1 " +
-        shellQuote(inPath));
+        shellQuote(inPath)));
     const int degrees = std::atoi(rotation.c_str());
     if (degrees == 90 || degrees == -90 || degrees == 270 || degrees == -270) {
         std::swap(width, height);
@@ -1219,8 +1231,10 @@ int cmdVideo(const Args& args) {
                         startFrame + offset, startFrame + offset + count - 1);
             size_t partFrames = 0;
             std::string partError;
-            if (!renderRange(job, startFrame + offset, count, offset, part.string(), &grainCache,
-                             totalFrames, &partFrames, partError)) {
+            const std::string partTimecode =
+                base.valid ? formatTimecode(addFrames(base, startFrame + offset, fps)) : "";
+            if (!renderRange(job, startFrame + offset, count, offset, part.string(), partTimecode,
+                             &grainCache, totalFrames, &partFrames, partError)) {
                 return fail(partError + " (finished parts are kept for --resume)");
             }
             renderedFrames += partFrames;
@@ -1242,16 +1256,17 @@ int cmdVideo(const Args& args) {
     } else {
         tempVideo = outPath + ".video" + extension;
         std::string renderError;
-        if (!renderRange(job, startFrame, totalFrames, 0, tempVideo, &grainCache, totalFrames,
-                         &renderedFrames, renderError)) {
+        const std::string rangeTimecode =
+            base.valid ? formatTimecode(addFrames(base, startFrame, fps)) : "";
+        if (!renderRange(job, startFrame, totalFrames, 0, tempVideo, rangeTimecode, &grainCache,
+                         totalFrames, &renderedFrames, renderError)) {
             return fail(renderError);
         }
         videoInput = " -i " + shellQuote(tempVideo);
     }
 
-    const std::string stamp = base.valid ? formatTimecode(addFrames(base, startFrame, fps)) : "";
     std::string finishError;
-    if (!finishVideo(ffmpeg, videoInput, inPath, startFrame, totalFrames, fps, stamp, outPath,
+    if (!finishVideo(ffmpeg, videoInput, inPath, startFrame, totalFrames, fps, outPath,
                      finishError)) {
         return fail(finishError);
     }
