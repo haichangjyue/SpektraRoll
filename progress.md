@@ -209,6 +209,7 @@
 | 渲染完成询问是否打开文件夹 | ✅ |
 | 关闭时保存路径/参数/窗口位置，下次恢复 | ✅ |
 | `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动 | ✅ |
+| CI 默认不建 UI（`SR_BUILD_QT_UI=OFF`），run 39 双平台绿 | ✅ |
 | 截图 `docs/ui-preview.png` | ✅ |
 
 界面原则：**UI 不复制颜色/质感逻辑**，预览和渲染都调用 `spektra-roll-cli`；Qt 动态链接并随 exe 部署，符合 GPL/LGPL。
