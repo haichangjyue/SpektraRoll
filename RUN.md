@@ -108,6 +108,24 @@ X:\agent\SpektraRoll\scripts\push.cmd
 
 以后每次我说"可以推了"，你双击这个文件就行。
 
+## 在 Mac 上验证（可选）
+
+你的 MacBook Air M1 也能跑这个程序。把仓库拷到 Mac 上，双击：
+
+```
+SpektraRoll/scripts/verify-macos.command
+```
+
+它会编译、跑单元测试、烘一张 Portra 400 LUT 并和参考对比；如果装了 `ffmpeg`，
+还会顺带测一遍视频路径。第一次双击如果被系统拦下，右键 → 打开即可。
+
+需要先装两样东西（都是免费的）：
+
+```
+xcode-select --install     # Xcode 命令行工具
+brew install cmake ffmpeg  # 没有 brew 的话先装 brew
+```
+
 ## 出问题了怎么办
 
 把窗口截图发给我，或者说一句"跑挂了"。不需要你自己修。

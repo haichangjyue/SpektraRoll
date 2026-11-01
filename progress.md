@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-01
-> **当前里程碑**：M2 已完成（Apple Log 输入、扫描负片、反差、色域压缩、耦合剂、HDR 输出）；M3 = 视频读写待启动
+> **当前里程碑**：M3 进行中（视频读写 + 帧区间 + ProRes 已通）；本机有 MacBook Air M1，可做 macOS 本机验收
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -126,7 +126,7 @@
 
 | 编号 | 决策 | 结论 | 后果 / 影响 |
 |---|---|---|---|
-| **D001** | 第一个可运行成果 | **Windows 命令行先跑通** | 没有 Mac，先在这台机器上闭环；macOS UI 推迟 |
+| **D001** | 第一个可运行成果 | **Windows 命令行先跑通** | Windows 先闭环；**后来确认有 MacBook Air M1**，macOS 本机验收可以做（`scripts\verify-macos.command`） |
 | **D002** | 代码托管 | **现在建公开 GitHub 仓库** | 公开仓库的 macOS CI runner 免费，正好补上没有 Mac 的缺口 |
 | **D003** | 许可证 | **GPL-3.0-or-later** | 不能上 Mac App Store；OFX 插件也必须 GPL；profile 数据仍 CC BY-SA 4.0 |
 | **D004** | 图像 I/O（M0） | **stb_image / stb_image_write（8bit）** | M0 只能 8bit；M1 已按 D017 补到 16-bit PNG，EXR 仍欠着 |
@@ -203,7 +203,7 @@
 
 ### 🟢 还没开始、但必须记住的欠账
 
-- [ ] **没有 Mac** → macOS 端目前只有"能编译"的证据，没有"画面对不对"的证据
+- [ ] **macOS 本机验收** → 有 MacBook Air M1，双击 `scripts\verify-macos.command` 即可编译+测试+烘 LUT；但它还没在本机跑过，先跑一次再谈"画面证据"
 - [x] ~~8bit 输出~~ → M1 已支持 16-bit PNG；浮点 / EXR 仍未做
 - [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；现在只有 display-encoded sRGB，Apple Log/HDR 是 M2 的任务（D021）
 - [ ] **没有时间维度** → 现在的 CLI 只处理单张图，还不能读视频 / 图像序列
@@ -331,7 +331,7 @@ X:\agent\SpektraRoll\
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
 - ❌ **不要把 16-bit PNG 当成终点**，浮点 / EXR 仍是欠账（D017）
-- ❌ **不要承诺“视觉验收”**，没有 Mac 就看不到 macOS 画面
+- ❌ **不要说“没有 Mac”**，产品负责人有 MacBook Air M1；macOS 相关先让他双击 `scripts\verify-macos.command` 拿结果
 - ❌ **不要偷懒改品牌**，SpektraRoll 已定案，改一次要动二进制名/CI/文档
 
 ---
