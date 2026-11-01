@@ -43,12 +43,15 @@
 - [x] **按住看原片**对比、拖放素材、快捷键 Ctrl+P/R/B、输出文件夹
 - [x] **烘焙 LUT** 按钮（Apple Log / SDR，HDR 自动带 PQ/HLG）
 - [x] **渲染整段**：编码、起始、帧数、分段、续渲；日志、进度条、取消
+- [x] **渲染队列**：参数冻结入队、自动避重名、顺序渲染、停止/移除/清空；LUT 快照保证已入队任务不被后续改参影响
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
 - [x] 截图：`docs/ui-preview.png`
 - [ ] 时间线拖动预览、批量队列、macOS 打包
 
 ![Qt UI](docs/ui-preview.png)
+
+![Render queue](docs/ui-queue.png)
 
 ## 这次交付（M1）
 

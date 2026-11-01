@@ -74,6 +74,13 @@ Qt 6.8.3 and MinGW 13.1 are expected under `X:\agent\tools\qt` (installed with
 `aqtinstall`, not vendored). Qt is dynamically linked (LGPL-3.0/GPL-3.0);
 `windeployqt` copies the runtime next to the executable.
 
+Renders can be queued: **加入队列** freezes the current arguments and copies the
+LUT, outputs that would collide get a `-2`, `-3` suffix, and the queue runs the
+jobs one after another with per-job status and frame progress. Stopping the
+queue leaves unfinished jobs queued for the next run.
+
+![Render queue](docs/ui-queue.png)
+
 ## Use
 
 ```

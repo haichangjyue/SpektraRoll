@@ -7,9 +7,11 @@
 // command line. Qt is dynamically linked and deployed with windeployqt.
 
 #include <QApplication>
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -22,6 +24,7 @@
 #include <QGroupBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -44,10 +47,14 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QVector>
 #include <QWidget>
 
 #include <cmath>
@@ -95,6 +102,18 @@ struct ClipInfo {
     long frames = 0;
     QString timecode;
     bool valid() const { return width > 0 && height > 0 && fps > 0.0; }
+};
+
+// A queued render. The argument list is frozen at enqueue time, and the LUT is
+// copied so a later parameter change cannot alter jobs already in the queue.
+struct RenderJob {
+    QString input;
+    QString output;
+    QString lutSnapshot;
+    QStringList args;
+    QString status = QStringLiteral("等待");
+    int done = 0;
+    int total = 0;
 };
 
 class PreviewView : public QWidget {
@@ -503,11 +522,16 @@ private:
         buttons->addWidget(compareButton_);
 
         auto* buttons2 = new QHBoxLayout;
+        addQueueButton_ = new QPushButton(QStringLiteral("加入队列"));
+        addQueueButton_->setToolTip(QStringLiteral("把当前参数冻结成一个队列任务"));
+        buttons2->addWidget(renderButton_);
+        buttons2->addWidget(addQueueButton_);
+
+        auto* buttons3 = new QHBoxLayout;
         auto* folderButton = new QPushButton(QStringLiteral("输出文件夹"));
         folderButton->setToolTip(QStringLiteral("在资源管理器里打开输出文件所在目录"));
-        buttons2->addWidget(renderButton_);
-        buttons2->addWidget(cancelButton_);
-        buttons2->addWidget(folderButton);
+        buttons3->addWidget(cancelButton_);
+        buttons3->addWidget(folderButton);
 
         progress_ = new QProgressBar;
         progress_->setRange(0, 100);
@@ -521,12 +545,12 @@ private:
         leftLayout->addWidget(renderGroup);
         leftLayout->addLayout(buttons);
         leftLayout->addLayout(buttons2);
-        leftLayout->addWidget(progress_);
-        leftLayout->addWidget(status_);
+        leftLayout->addLayout(buttons3);
         leftLayout->addStretch(1);
 
         connect(previewButton_, &QPushButton::clicked, this, [this] { previewFrame(); });
         connect(renderButton_, &QPushButton::clicked, this, [this] { startRender(); });
+        connect(addQueueButton_, &QPushButton::clicked, this, [this] { enqueueJob(); });
         connect(cancelButton_, &QPushButton::clicked, this, [this] { cancelRender(); });
         connect(compareButton_, &QPushButton::pressed, this, [this] { showOriginal(); });
         connect(compareButton_, &QPushButton::released, this, [this] { restoreGraded(); });
@@ -572,7 +596,18 @@ private:
         auto* scroll = new QScrollArea;
         scroll->setWidgetResizable(true);
         scroll->setWidget(left);
-        scroll->setMinimumWidth(430);
+
+        auto* leftColumn = new QWidget;
+        auto* leftColumnLayout = new QVBoxLayout(leftColumn);
+        leftColumnLayout->setContentsMargins(0, 0, 0, 0);
+        leftColumnLayout->addWidget(scroll, 1);
+        auto* footer = new QWidget;
+        auto* footerLayout = new QVBoxLayout(footer);
+        footerLayout->setContentsMargins(8, 0, 8, 8);
+        footerLayout->addWidget(progress_);
+        footerLayout->addWidget(status_);
+        leftColumnLayout->addWidget(footer);
+        leftColumn->setMinimumWidth(430);
 
         preview_ = new PreviewView;
         clipInfoLabel_ = new QLabel(QStringLiteral("未选择素材"));
@@ -597,14 +632,63 @@ private:
         log_->setMaximumBlockCount(4000);
         log_->setPlaceholderText(QStringLiteral("渲染日志会显示在这里"));
 
+        auto* previewTab = new QWidget;
+        auto* previewLayout = new QVBoxLayout(previewTab);
+        previewLayout->setContentsMargins(0, 0, 0, 0);
+        previewLayout->addWidget(preview_, 1);
+        previewLayout->addWidget(clipInfoLabel_);
+        previewLayout->addWidget(timelineRow);
+
+        queueTable_ = new QTableWidget(0, 4);
+        queueTable_->setHorizontalHeaderLabels({QStringLiteral("素材"), QStringLiteral("输出"),
+                                                QStringLiteral("状态"), QStringLiteral("进度")});
+        queueTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+        queueTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+        queueTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        queueTable_->verticalHeader()->setVisible(false);
+        queueTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+        queueTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        queueTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+        queueTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+
+        auto* queueButtons = new QHBoxLayout;
+        queueStartButton_ = new QPushButton(QStringLiteral("开始队列"));
+        queueStopButton_ = new QPushButton(QStringLiteral("停止"));
+        queueRemoveButton_ = new QPushButton(QStringLiteral("移除选中"));
+        queueClearButton_ = new QPushButton(QStringLiteral("清空已完成"));
+        queueOpenButton_ = new QPushButton(QStringLiteral("打开输出"));
+        queueButtons->addWidget(queueStartButton_);
+        queueButtons->addWidget(queueStopButton_);
+        queueButtons->addStretch(1);
+        queueButtons->addWidget(queueRemoveButton_);
+        queueButtons->addWidget(queueClearButton_);
+        queueButtons->addWidget(queueOpenButton_);
+
+        auto* queueTab = new QWidget;
+        auto* queueLayout = new QVBoxLayout(queueTab);
+        queueLayout->setContentsMargins(0, 0, 0, 0);
+        queueLayout->addWidget(queueTable_, 1);
+        queueLayout->addLayout(queueButtons);
+
+        tabs_ = new QTabWidget;
+        tabs_->addTab(previewTab, QStringLiteral("预览"));
+        tabs_->addTab(queueTab, QStringLiteral("渲染队列"));
+
         auto* right = new QWidget;
         auto* rightLayout = new QVBoxLayout(right);
-        rightLayout->setContentsMargins(0, 0, 0, 0);
-        rightLayout->addWidget(preview_, 4);
-        rightLayout->addWidget(clipInfoLabel_);
-        rightLayout->addWidget(timelineRow);
+        rightLayout->addWidget(tabs_, 4);
         rightLayout->addWidget(log_, 1);
         rightLayout->setContentsMargins(0, 0, 8, 8);
+
+        connect(queueStartButton_, &QPushButton::clicked, this, [this] { startQueue(); });
+        connect(queueStopButton_, &QPushButton::clicked, this, [this] { stopQueue(); });
+        connect(queueRemoveButton_, &QPushButton::clicked, this, [this] { removeSelectedJob(); });
+        connect(queueClearButton_, &QPushButton::clicked, this, [this] { clearFinishedJobs(); });
+        connect(queueOpenButton_, &QPushButton::clicked, this, [this] { openSelectedOutput(); });
+        connect(queueTable_, &QTableWidget::itemSelectionChanged, this,
+                [this] { updateQueueButtons(); });
+        connect(queueTable_, &QTableWidget::cellDoubleClicked, this,
+                [this](int, int) { openSelectedOutput(); });
 
         connect(timeline_, &QSlider::valueChanged, this, [this](int value) {
             if (clipInfo_.fps > 0.0) {
@@ -620,7 +704,7 @@ private:
                 [this](double) { syncTimelineFromTime(); });
 
         auto* splitter = new QSplitter(Qt::Horizontal);
-        splitter->addWidget(scroll);
+        splitter->addWidget(leftColumn);
         splitter->addWidget(right);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
@@ -1018,18 +1102,8 @@ private:
                              .arg(number(previewTime_->value(), 2)));
     }
 
-    void startRender() {
-        if (!requireInput() || !ensureLut() || rendering_) return;
-
-        const QString output = outputEdit_->text().trimmed();
-        if (output.isEmpty()) {
-            QMessageBox::warning(this, QStringLiteral("缺少输出"),
-                                 QStringLiteral("请指定输出文件。"));
-            return;
-        }
-        QDir().mkpath(QFileInfo(output).absolutePath());
-
-        QStringList args{QStringLiteral("video"), QStringLiteral("--lut"), lutEdit_->text(),
+    QStringList buildVideoArgs(const QString& output, const QString& lut) const {
+        QStringList args{QStringLiteral("video"), QStringLiteral("--lut"), lut,
                          QStringLiteral("--in"), inputEdit_->text(), QStringLiteral("--out"),
                          output, QStringLiteral("--trc"), trc_->currentData().toString(),
                          QStringLiteral("--ffmpeg"), ffmpegEdit_->text()};
@@ -1045,6 +1119,26 @@ private:
             args << QStringLiteral("--segment") << QString::number(segment_->value());
             if (resume_->isChecked()) args << QStringLiteral("--resume");
         }
+        return args;
+    }
+
+    void startRender() {
+        if (!requireInput() || !ensureLut() || rendering_) return;
+        if (queueRunning_) {
+            QMessageBox::information(this, QStringLiteral("队列正在渲染"),
+                                     QStringLiteral("先停止队列，或把这一条“加入队列”。"));
+            return;
+        }
+
+        const QString output = outputEdit_->text().trimmed();
+        if (output.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("缺少输出"),
+                                 QStringLiteral("请指定输出文件。"));
+            return;
+        }
+        QDir().mkpath(QFileInfo(output).absolutePath());
+
+        const QStringList args = buildVideoArgs(output, lutEdit_->text());
 
         log_->clear();
         appendLog(QStringLiteral("> ") + cliPath_ + QLatin1Char(' ') + args.join(QLatin1Char(' ')) +
@@ -1089,7 +1183,10 @@ private:
                     }
                 });
         connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
-            appendLog(QStringLiteral("进程错误：") + process->errorString() + QLatin1Char('\n'));
+            if (!canceled_ && !queueCanceled_) {
+                appendLog(QStringLiteral("进程错误：") + process->errorString() +
+                          QLatin1Char('\n'));
+            }
         });
         process->start(cliPath_, args);
         if (!process->waitForStarted(5000)) {
@@ -1132,11 +1229,330 @@ private:
         }
     }
 
+    // ---- render queue ----------------------------------------------------
+
+    QString uniqueOutputPath(const QString& base) const {
+        const QFileInfo info(base);
+        const QString directory = info.absolutePath();
+        const QString suffix = info.suffix().isEmpty() ? QStringLiteral("mov") : info.suffix();
+        const QString stem =
+            info.completeBaseName().isEmpty() ? QStringLiteral("render") : info.completeBaseName();
+        const auto used = [this](const QString& path) {
+            const QString absolute = QFileInfo(path).absoluteFilePath();
+            for (const RenderJob& job : jobs_) {
+                if (QFileInfo(job.output).absoluteFilePath() == absolute) return true;
+            }
+            return false;
+        };
+        QString candidate = base;
+        int copy = 2;
+        while (used(candidate)) {
+            candidate = directory + QLatin1Char('/') + stem + QLatin1Char('-') +
+                        QString::number(copy++) + QLatin1Char('.') + suffix;
+        }
+        return candidate;
+    }
+
+    void enqueueJob() {
+        if (!requireInput() || !ensureLut()) return;
+        if (rendering_) {
+            QMessageBox::information(this, QStringLiteral("正在渲染"),
+                                     QStringLiteral("等当前单条渲染结束再入队。"));
+            return;
+        }
+        QString output = outputEdit_->text().trimmed();
+        if (output.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("缺少输出"),
+                                 QStringLiteral("请先指定输出文件。"));
+            return;
+        }
+        output = uniqueOutputPath(output);
+        QDir().mkpath(QFileInfo(output).absolutePath());
+
+        const QString queueDir = repoRoot_ + QStringLiteral("/out/ui-queue");
+        QDir().mkpath(queueDir);
+        const QString snapshot =
+            queueDir + QStringLiteral("/lut-%1-%2.cube")
+                           .arg(QDateTime::currentMSecsSinceEpoch())
+                           .arg(++lutCounter_);
+        if (!QFile::copy(lutEdit_->text(), snapshot)) {
+            QMessageBox::critical(this, QStringLiteral("入队失败"),
+                                  QStringLiteral("无法复制 LUT 到队列目录：\n") + snapshot);
+            return;
+        }
+
+        RenderJob job;
+        job.input = inputEdit_->text();
+        job.output = output;
+        job.lutSnapshot = snapshot;
+        job.args = buildVideoArgs(output, snapshot);
+        jobs_.append(job);
+
+        refreshQueueTable();
+        tabs_->setCurrentIndex(1);
+        queueTable_->selectRow(jobs_.size() - 1);
+        status_->setText(QStringLiteral("已加入队列：") + QFileInfo(output).fileName());
+    }
+
+    void updateJobRow(int row) {
+        if (row < 0 || row >= jobs_.size()) return;
+        const RenderJob& job = jobs_[row];
+        const auto setCell = [this, row](int column, const QString& text) {
+            QTableWidgetItem* item = queueTable_->item(row, column);
+            if (item == nullptr) {
+                item = new QTableWidgetItem;
+                queueTable_->setItem(row, column, item);
+            }
+            item->setText(text);
+        };
+        setCell(0, QFileInfo(job.input).fileName());
+        setCell(1, QFileInfo(job.output).fileName());
+        setCell(2, job.status);
+        setCell(3, job.total > 0 ? QStringLiteral("%1/%2").arg(job.done).arg(job.total)
+                                 : QStringLiteral("—"));
+
+        queueTable_->item(row, 0)->setToolTip(job.input);
+        queueTable_->item(row, 1)->setToolTip(job.output);
+
+        QColor color(200, 200, 200);
+        if (job.status == QStringLiteral("渲染中")) color = QColor(240, 200, 90);
+        else if (job.status == QStringLiteral("完成")) color = QColor(120, 210, 120);
+        else if (job.status == QStringLiteral("失败")) color = QColor(235, 110, 110);
+        else if (job.status == QStringLiteral("已取消")) color = QColor(230, 160, 100);
+        queueTable_->item(row, 2)->setForeground(color);
+    }
+
+    void refreshQueueTable() {
+        queueTable_->setRowCount(jobs_.size());
+        for (int row = 0; row < jobs_.size(); ++row) updateJobRow(row);
+        updateQueueButtons();
+    }
+
+    void updateQueueButtons() {
+        bool hasWaiting = false;
+        bool hasFinished = false;
+        for (const RenderJob& job : jobs_) {
+            if (job.status == QStringLiteral("等待")) hasWaiting = true;
+            if (job.status != QStringLiteral("等待") && job.status != QStringLiteral("渲染中")) {
+                hasFinished = true;
+            }
+        }
+        const int selected = queueTable_->currentRow();
+        queueStartButton_->setEnabled(!queueRunning_ && !rendering_ && hasWaiting &&
+                                      queueProcess_ == nullptr);
+        queueStopButton_->setEnabled(queueRunning_);
+        queueRemoveButton_->setEnabled(!queueRunning_ && selected >= 0);
+        queueClearButton_->setEnabled(!queueRunning_ && hasFinished);
+        queueOpenButton_->setEnabled(selected >= 0 && selected < jobs_.size());
+    }
+
+    void startQueue() {
+        if (queueRunning_ || rendering_) return;
+        bool hasWaiting = false;
+        for (const RenderJob& job : jobs_) {
+            if (job.status == QStringLiteral("等待")) hasWaiting = true;
+        }
+        if (!hasWaiting) {
+            status_->setText(QStringLiteral("队列里没有等待的任务"));
+            return;
+        }
+        queueRunning_ = true;
+        queueCanceled_ = false;
+        setBusy(true);
+        cancelButton_->setEnabled(false);
+        progress_->setRange(0, 0);
+        tabs_->setCurrentIndex(1);
+        updateQueueButtons();
+        startNextJob();
+    }
+
+    void stopQueue() {
+        if (!queueRunning_) return;
+        queueRunning_ = false;
+        queueCanceled_ = true;
+        status_->setText(QStringLiteral("正在停止队列…"));
+        if (queueProcess_ != nullptr) queueProcess_->kill();
+        updateQueueButtons();
+    }
+
+    void startNextJob() {
+        if (!queueRunning_) return;
+        int index = -1;
+        for (int i = 0; i < jobs_.size(); ++i) {
+            if (jobs_[i].status == QStringLiteral("等待")) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) {
+            int ok = 0;
+            int failed = 0;
+            for (const RenderJob& job : jobs_) {
+                if (job.status == QStringLiteral("完成")) ++ok;
+                if (job.status == QStringLiteral("失败")) ++failed;
+            }
+            queueRunning_ = false;
+            activeJob_ = -1;
+            setBusy(false);
+            progress_->setRange(0, 100);
+            progress_->setValue(100);
+            status_->setText(QStringLiteral("队列完成：%1 成功，%2 失败").arg(ok).arg(failed));
+            updateQueueButtons();
+            return;
+        }
+
+        activeJob_ = index;
+        jobs_[index].status = QStringLiteral("渲染中");
+        jobs_[index].done = 0;
+        jobs_[index].total = 0;
+        updateJobRow(index);
+        queueTable_->selectRow(index);
+        updateQueueButtons();
+
+        log_->clear();
+        appendLog(QStringLiteral("> ") + cliPath_ + QLatin1Char(' ') +
+                  jobs_[index].args.join(QLatin1Char(' ')) + QLatin1Char('\n'));
+        pending_.clear();
+        queueCanceled_ = false;
+        progress_->setRange(0, 0);
+        status_->setText(QStringLiteral("队列 %1/%2：渲染中…")
+                             .arg(index + 1)
+                             .arg(jobs_.size()));
+
+        auto* process = new QProcess(this);
+        queueProcess_ = process;
+        process->setWorkingDirectory(repoRoot_);
+        process->setProcessChannelMode(QProcess::MergedChannels);
+        connect(process, &QProcess::readyRead, this, [this] { drainQueueOutput(); });
+        connect(process, &QProcess::finished, this,
+                [this, process](int code, QProcess::ExitStatus exitStatus) {
+                    drainQueueOutput();
+                    const int finishedIndex = activeJob_;
+                    if (finishedIndex >= 0 && finishedIndex < jobs_.size()) {
+                        const bool ok =
+                            !queueCanceled_ && exitStatus == QProcess::NormalExit && code == 0;
+                        jobs_[finishedIndex].status =
+                            queueCanceled_ ? QStringLiteral("已取消")
+                                           : (ok ? QStringLiteral("完成")
+                                                 : QStringLiteral("失败"));
+                        if (ok && jobs_[finishedIndex].total > 0) {
+                            jobs_[finishedIndex].done = jobs_[finishedIndex].total;
+                        }
+                        updateJobRow(finishedIndex);
+                    }
+                    activeJob_ = -1;
+                    queueProcess_ = nullptr;
+                    process->deleteLater();
+                    if (queueRunning_) {
+                        startNextJob();
+                    } else {
+                        setBusy(false);
+                        progress_->setRange(0, 100);
+                        status_->setText(QStringLiteral("队列已停止；未完成的任务仍是“等待”"));
+                        updateQueueButtons();
+                    }
+                });
+        connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
+            if (!canceled_ && !queueCanceled_) {
+                appendLog(QStringLiteral("进程错误：") + process->errorString() +
+                          QLatin1Char('\n'));
+            }
+        });
+        process->start(cliPath_, jobs_[index].args);
+        if (!process->waitForStarted(5000)) {
+            appendLog(QStringLiteral("无法启动 CLI：") + process->errorString() +
+                      QLatin1Char('\n'));
+            jobs_[index].status = QStringLiteral("失败");
+            updateJobRow(index);
+            queueProcess_ = nullptr;
+            activeJob_ = -1;
+            process->deleteLater();
+            startNextJob();
+        }
+    }
+
+    void drainQueueOutput() {
+        if (queueProcess_ == nullptr) return;
+        const QString text = QString::fromLocal8Bit(queueProcess_->readAll());
+        if (text.isEmpty()) return;
+        appendLog(text);
+        pending_ += text;
+        const QRegularExpression framesRe(QStringLiteral("(\\d+)\\s*/\\s*(\\d+)\\s+frames"));
+        const QRegularExpression wroteRe(QStringLiteral("wrote .*?: (\\d+) frames"));
+        int newline = 0;
+        while ((newline = pending_.indexOf(QLatin1Char('\n'))) >= 0) {
+            const QString line = pending_.left(newline).trimmed();
+            pending_.remove(0, newline + 1);
+            if (line.isEmpty()) continue;
+            status_->setText(line);
+            const auto match = framesRe.match(line);
+            if (match.hasMatch() && activeJob_ >= 0 && activeJob_ < jobs_.size()) {
+                jobs_[activeJob_].done = match.captured(1).toInt();
+                jobs_[activeJob_].total = match.captured(2).toInt();
+                updateJobRow(activeJob_);
+                continue;
+            }
+            const auto wrote = wroteRe.match(line);
+            if (wrote.hasMatch() && activeJob_ >= 0 && activeJob_ < jobs_.size()) {
+                const int frames = wrote.captured(1).toInt();
+                jobs_[activeJob_].done = frames;
+                jobs_[activeJob_].total = frames;
+                updateJobRow(activeJob_);
+            }
+        }
+    }
+
+    void releaseSnapshotIfUnused(const QString& snapshot) {
+        if (snapshot.isEmpty()) return;
+        for (const RenderJob& job : jobs_) {
+            if (job.lutSnapshot == snapshot) return;
+        }
+        QFile::remove(snapshot);
+    }
+
+    void removeJobAt(int row) {
+        if (row < 0 || row >= jobs_.size() || queueRunning_) return;
+        const QString snapshot = jobs_[row].lutSnapshot;
+        jobs_.removeAt(row);
+        refreshQueueTable();
+        releaseSnapshotIfUnused(snapshot);
+    }
+
+    void removeSelectedJob() {
+        removeJobAt(queueTable_->currentRow());
+    }
+
+    void clearFinishedJobs() {
+        if (queueRunning_) return;
+        for (int row = jobs_.size() - 1; row >= 0; --row) {
+            if (jobs_[row].status != QStringLiteral("等待") &&
+                jobs_[row].status != QStringLiteral("渲染中")) {
+                const QString snapshot = jobs_[row].lutSnapshot;
+                jobs_.removeAt(row);
+                releaseSnapshotIfUnused(snapshot);
+            }
+        }
+        refreshQueueTable();
+    }
+
+    void openSelectedOutput() {
+        const int row = queueTable_->currentRow();
+        if (row < 0 || row >= jobs_.size()) return;
+        const QFileInfo info(jobs_[row].output);
+        if (!info.exists()) {
+            QMessageBox::information(this, QStringLiteral("还没有输出"),
+                                     QStringLiteral("这个任务还没有生成文件。"));
+            return;
+        }
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath()));
+    }
+
     void setBusy(bool busy) {
         bakeButton_->setEnabled(!busy);
         previewButton_->setEnabled(!busy);
-        renderButton_->setEnabled(!busy);
-        cancelButton_->setEnabled(busy);
+        renderButton_->setEnabled(!busy && !queueRunning_);
+        addQueueButton_->setEnabled(!rendering_);
+        cancelButton_->setEnabled(busy && !queueRunning_);
     }
 
     bool runSync(const QString& program, const QStringList& args, QString* output) {
@@ -1197,7 +1613,13 @@ private:
     QPushButton* previewButton_ = nullptr;
     QPushButton* compareButton_ = nullptr;
     QPushButton* renderButton_ = nullptr;
+    QPushButton* addQueueButton_ = nullptr;
     QPushButton* cancelButton_ = nullptr;
+    QPushButton* queueStartButton_ = nullptr;
+    QPushButton* queueStopButton_ = nullptr;
+    QPushButton* queueRemoveButton_ = nullptr;
+    QPushButton* queueClearButton_ = nullptr;
+    QPushButton* queueOpenButton_ = nullptr;
 
     QProgressBar* progress_ = nullptr;
     QLabel* status_ = nullptr;
@@ -1205,6 +1627,8 @@ private:
     QLabel* timeLabel_ = nullptr;
     QPlainTextEdit* log_ = nullptr;
     QSlider* timeline_ = nullptr;
+    QTabWidget* tabs_ = nullptr;
+    QTableWidget* queueTable_ = nullptr;
     PreviewView* preview_ = nullptr;
 
     ClipInfo clipInfo_;
@@ -1212,6 +1636,13 @@ private:
     QImage originalImage_;
     double originalTime_ = -1.0;
     QString lastProbePath_;
+
+    QVector<RenderJob> jobs_;
+    bool queueRunning_ = false;
+    bool queueCanceled_ = false;
+    int activeJob_ = -1;
+    int lutCounter_ = 0;
+    QProcess* queueProcess_ = nullptr;
 
     QProcess* renderProcess_ = nullptr;
     QString pending_;
