@@ -20,7 +20,7 @@
 - [x] macOS 本机验收脚本：`scripts/verify-macos.command`（**已在 Mac 上跑通，含视频路径**；期间发现并修复 POSIX `popen` 模式 bug）
 - [x] 多线程（D032）：套 LUT 96→17 ms，视频 214 ms/帧
 - [x] **胶片质感**（D033）：确定性颗粒 + 暖色光晕，逐帧叠加；`scripts\demo-m3.cmd`
-- [x] 颗粒调轻（D034）：模糊半径修正，噪声 std 0.014→0.0053，不再"毛躁"
+- [x] 颗粒调轻（D034）：模糊半径修正，噪声 std 0.014→0.0053，不再"毛躁"（**已验收**）
 - [x] CI 现在 Windows + macOS 都跑视频冒烟（之前 macOS 失败被误判成"没装 ffmpeg"，实际是 popen bug）
 - [ ] 断点续渲 / 时间码轨道
 - [ ] 视频速度仍受编码器限制（M4：crf/preset 或硬件编码）

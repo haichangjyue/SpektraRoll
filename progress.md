@@ -188,7 +188,7 @@
 - [x] **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
 - [x] **多线程**（D032，提前做）：套 LUT 96→17 ms；视频 268→214 ms/帧
 - [x] **胶片质感**（D033）：`--grain` / `--halation`，颗粒逐帧变化、可复现；`scripts\demo-m3.cmd`
-- [x] **颗粒调轻**（D034，按你的反馈）：模糊半径修正，默认 0.4 / 0.45，std 0.014→0.0053
+- [x] **颗粒调轻**（D034，按你的反馈）：模糊半径修正，默认 0.4 / 0.45，std 0.014→0.0053（**你已确认观感可以**）
 - [x] **macOS 修复**（issue #1）：POSIX `popen` 只接受 `"r"/"w"`，我们传了 `"rb"/"wb"`，macOS 直接返回 NULL → 视频命令起不来。已修，CI 现在两个平台都跑视频冒烟
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 
