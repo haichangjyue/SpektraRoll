@@ -138,6 +138,15 @@ int main() {
         previous = value;
     }
 
+    // Contrast pivots at 18% grey: grey must not move, shadows must darken.
+    sr::BakeOptions punchy = negative;
+    punchy.contrast = 1.2;
+    checkRgb(model.transformFrom(punchy, {grey, grey, grey}), negativeGrey, 0.01f,
+             "contrast leaves 18% grey alone");
+    const sr::Rgb darkBase = model.transformFrom(negative, {0.3f, 0.3f, 0.3f});
+    const sr::Rgb darkPunchy = model.transformFrom(punchy, {0.3f, 0.3f, 0.3f});
+    check(darkPunchy.g < darkBase.g, "contrast above 1 darkens shadows");
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

@@ -188,8 +188,7 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
         // Neutralise mid-grey on top of the black/white mapping: the film's
         // dyes overlap, so an un-corrected scan of the positive carries a warm
         // cast (the same reason a scanner needs a dye-correction matrix).
-        const double greyLinear[3] = {srgbDecode(0.184), srgbDecode(0.184),
-                                      srgbDecode(0.184)};
+        const double greyLinear[3] = {0.184, 0.184, 0.184};
         double cmyGrey[3];
         filmCmy(greyLinear, cmyGrey);
         const double positiveGrey[3] = {filmMaxCmy_[0] - cmyGrey[0],
@@ -202,6 +201,7 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
             rgbGrey[c] = span > 1e-9 ? (rgbGrey[c] - negativeBlack_[c]) / span : 0.0;
         }
         const double greyLuma = 0.2126 * rgbGrey[0] + 0.7152 * rgbGrey[1] + 0.0722 * rgbGrey[2];
+        negativeGreyLuma_ = std::min(1.0, std::max(1e-4, greyLuma));
         for (int c = 0; c < 3; ++c) {
             // A per-channel power keeps black at 0 and white at 1 while
             // neutralising mid-grey; a plain gain would tint the highlights.
@@ -289,7 +289,7 @@ double FilmModel::paperCurve(int sample, int channel) const {
 
 Rgb FilmModel::transform(Rgb srgb) const {
     double linear[3] = {srgbDecode(srgb.r), srgbDecode(srgb.g), srgbDecode(srgb.b)};
-    return transformLinear(linear, ScanMode::Print);
+    return transformLinear(linear, ScanMode::Print, 1.0);
 }
 
 Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
@@ -310,7 +310,7 @@ Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
         const double gain = std::exp2(options.exposureEv);
         for (int c = 0; c < 3; ++c) linear[c] *= gain;
     }
-    return transformLinear(linear, options.scan);
+    return transformLinear(linear, options.scan, options.contrast);
 }
 
 void FilmModel::filmCmy(const double linear[3], double cmy[3]) const {
@@ -343,7 +343,7 @@ void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const
     }
 }
 
-Rgb FilmModel::transformLinear(const double linear[3], ScanMode scan) const {
+Rgb FilmModel::transformLinear(const double linear[3], ScanMode scan, double contrast) const {
     double cmyFilm[3];
     filmCmy(linear, cmyFilm);
 
@@ -357,6 +357,16 @@ Rgb FilmModel::transformLinear(const double linear[3], ScanMode scan) const {
             const double value = span > 1e-9 ? (rgb[c] - negativeBlack_[c]) / span : 0.0;
             const double clamped = std::min(1.0, std::max(0.0, value));
             rgb[c] = std::pow(clamped, negativeGamma_[c]);
+        }
+        if (contrast != 1.0) {
+            // Pivot at the scan's own 18% grey and scale all channels together
+            // so hue and saturation are left alone.
+            const double luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+            if (luma > 1e-9) {
+                const double scale =
+                    std::pow(luma / negativeGreyLuma_, contrast - 1.0);
+                for (int c = 0; c < 3; ++c) rgb[c] = std::min(1.0, rgb[c] * scale);
+            }
         }
         return Rgb{static_cast<float>(srgbEncode(rgb[0])), static_cast<float>(srgbEncode(rgb[1])),
                    static_cast<float>(srgbEncode(rgb[2]))};

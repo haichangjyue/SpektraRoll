@@ -26,6 +26,9 @@ struct BakeOptions {
     // range can hold several stops above diffuse white.
     double exposureEv = 0.0;
     ScanMode scan = ScanMode::Print;
+    // Tone contrast around 18% grey, applied after a negative scan: 1.0 leaves
+    // the film's own curve alone, >1 gives a punchier image, <1 flattens it.
+    double contrast = 1.0;
 };
 
 // The M1 colour chain: display-encoded sRGB in, display-encoded sRGB out.
@@ -67,7 +70,7 @@ public:
     std::array<double, 3> neutralFilters() const { return neutralFilters_; }
 
 private:
-    Rgb transformLinear(const double linear[3], ScanMode scan) const;
+    Rgb transformLinear(const double linear[3], ScanMode scan, double contrast) const;
     void filmCmy(const double linear[3], double cmy[3]) const;
     void scanPositiveDye(const double cmy[3], double linearSrgb[3]) const;
     void filmRaw(const double rgb[3], double raw[3]) const;
@@ -113,6 +116,8 @@ private:
     // Per-channel power that neutralises mid-grey while keeping black and
     // white fixed (dye crosstalk correction).
     double negativeGamma_[3] = {1.0, 1.0, 1.0};
+    // Luminance of the scan's 18% grey, used as the contrast pivot.
+    double negativeGreyLuma_ = 0.18;
     std::array<double, 3> neutralFilters_{0.0, 0.0, 0.0};
 };
 

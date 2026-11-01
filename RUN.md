@@ -60,18 +60,19 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 X:\agent\SpektraRoll\scripts\demo-m2.cmd
 ```
 
-它会用 `ffmpeg` 从 `X:\agent\footage\` 里的 `.mov` 抽一帧，然后出三张图：
+它会用 `ffmpeg` 从 `X:\agent\footage\` 里的 `.mov` 抽一帧，然后出四张图：
 
 - `out\m2-before.png` —— 只解码，不上胶片（对照）
 - `out\m2-after.png` —— 印片：Kodak Portra 400 + Endura（对比强，像洗出来的照片）
 - `out\m2-negative.png` —— 扫描负片：高光和暗部都能留住，画面偏平，留给你调色
+- `out\m2-negative-contrast.png` —— 同上，加了一点反差（1.15）
 
 **你要判断四件事：**
 
 - 天空和窗户：有没有层次，还是糊成一片白
 - 暗部：有没有死黑，细节还在不在
 - 彩色招牌和墙面：有没有过饱和或者串色
-- 印片 vs 负片：哪种更接近你想要的（印片像照片，负片留余量）
+- 负片 vs 加反差：哪个更像你要的（前者留余量，后者更"出片"）
 
 觉得不对就告诉我"太黄了 / 太暗了 / 高光糊了"，我来调曝光或曲线。
 

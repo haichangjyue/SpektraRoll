@@ -47,7 +47,8 @@ void printUsage() {
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
         "                            [--input srgb|apple-log] [--exposure EV]\n"
-        "                            [--scan print|negative] [--title <text>]\n"
+        "                            [--scan print|negative] [--contrast 1.0]\n"
+        "                            [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
         "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
@@ -55,6 +56,7 @@ void printUsage() {
         "      and --exposure shifts scene exposure in stops before the film model.\n"
         "      --scan negative scans the negative itself (inverted against the film\n"
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
+        "      --contrast pivots at 18% grey (1.0 = film curve only, 1.2 = punchier).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -246,6 +248,7 @@ int cmdLutBake(const Args& args) {
         }
     }
     options.exposureEv = args.getDouble("exposure", 0.0);
+    options.contrast = args.getDouble("contrast", 1.0);
 
     if (args.has("scan")) {
         const std::string mode = args.get("scan");
@@ -265,6 +268,7 @@ int cmdLutBake(const Args& args) {
     std::printf("\n");
     std::printf("scan:              %s\n",
                 options.scan == sr::ScanMode::Negative ? "negative (no paper)" : "print");
+    if (options.contrast != 1.0) std::printf("contrast:          %.2f\n", options.contrast);
 
     const auto started = std::chrono::steady_clock::now();
     const std::string title =

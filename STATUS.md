@@ -28,15 +28,16 @@
 - [x] `convert --from apple-log`：只解码、不上胶片的 SDR 对照图
 - [x] **真实画面样张**：`scripts\demo-m2.cmd` 从你的 `.mov` 抽帧，出 before / 印片 / 负片 三张
 - [x] **扫描负片模式**（D024）：`--scan negative`，天空从 0.88–0.91 变成 0.48–0.70（云有层次），暗部死黑 7.7%→2.5%
+- [x] **负片定为推荐路径**（D025）；新增 `--contrast`（1.0 保留余量，1.15 稍加反差）
 - [ ] 输出色域压缩（D014 欠账）
 - [ ] 耦合剂（D015 欠账）
 - [ ] HDR 输出：PQ / HLG + Rec.2020 + 10-bit（D021）
 
 ## 怎么验收（M2）
 
-1. 双击 `scripts\demo-m2.cmd` → 自动打开 `out\m2-after.png`（印片）和 `out\m2-negative.png`（扫描负片）
-2. 对照 `out\m2-before.png`（只解码，不上胶片）
-3. 看四件事：天空/窗户有没有层次、暗部有没有死黑、彩色招牌有没有串色、两种模式哪种更像你要的
+1. 双击 `scripts\demo-m2.cmd` → 自动打开 `out\m2-negative.png`（负片）和 `out\m2-negative-contrast.png`（负片 + 1.15 反差）
+2. 另外两张：`out\m2-before.png`（只解码）、`out\m2-after.png`（印片）
+3. 看四件事：天空/窗户有没有层次、暗部有没有死黑、彩色招牌有没有串色、要留余量还是直接出片
 
 ## 实测数据（本机）
 
@@ -49,6 +50,7 @@
 | C++ vs Python 参考 | **PSNR 88.07 dB**，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | max 1.53e-5（16-bit 1 LSB），mean 1.9e-8 |
 | 印片 vs 扫描负片（同一帧） | 天空 0.88–0.91 vs 0.48–0.70；暗部 <0.10：7.7% vs 2.5% |
+| 负片反差 1.0 / 1.15 / 1.3 | 天空 p5–p95 0.48–0.70 / 0.49–0.75 / 0.49–0.79；暗部 2.5% / 6.8% / 13.1% |
 | 可执行文件 | `build\spektra-roll-cli.exe`，静态链接 |
 
 ## 怎么验收（M1）

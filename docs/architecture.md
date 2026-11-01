@@ -62,7 +62,9 @@ densities (`Dmax - D`), drop the base density so the orange mask disappears,
 scan that virtual positive under D50, map no-dye to white and maximum dye to
 black, then neutralise mid-grey with a per-channel power (a first-order stand-in
 for a dye-correction matrix). That path has much more latitude, looks flatter
-and has no upstream counterpart to compare against.
+and has no upstream counterpart to compare against. `--contrast` (D025) pivots
+on the scan's own 18% grey and scales all channels together, so it adds punch
+without shifting hue.
 
 Deliberately off so far (each has a decision record):
 
