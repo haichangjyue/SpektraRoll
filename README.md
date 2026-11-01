@@ -82,6 +82,9 @@ spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --con
 # HDR delivery: PQ code values with white at 1000 nits (or --hdr hlg)
 spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --hdr pq --peak 1000 --out hdr.cube
 
+# grade a whole clip (ffmpeg decodes, the LUT runs in-process, audio is copied)
+spektra-roll-cli video --lut hdr.cube --in clip.mov --out graded.mov --trc pq
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
@@ -133,7 +136,9 @@ docs/           architecture and licensing notes
   not final.
 - SDR output is the default; HDR (PQ/HLG, `--hdr`, D029) works and the demo
   writes an HEVC Main10 HDR clip, but seeing it needs an HDR display.
-- No video file I/O yet: stills only until the M3 FFmpeg/ProRes step.
+- No video file I/O in the library yet: `video` drives `ffmpeg` as a child process
+  (D022), so a clip can be graded in one command, but trimming/timecode and
+  ProRes output are not there.
 - Output gamut compression is off. Extreme colours can produce out-of-range
   LUT values, which are clamped when writing an image.
 - 16-bit PNG only; no EXR or OpenImageIO yet.

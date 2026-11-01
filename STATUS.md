@@ -1,13 +1,22 @@
 # STATUS
 
-**最后更新**：2026-11-01 · 里程碑 **M2 完成** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-01 · 里程碑 **M3 进行中**（视频读写已通）· 项目名 **SpektraRoll**
 
 ## 一句话
 
-现在能读 iPhone 的 **Apple Log** 素材，用真正的 Portra 400 光谱模型出**扫描负片**（高光暗部都留住），再输出 **SDR 或 HDR（PQ/HLG）**；M1 的印片 parity 仍是 88 dB。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，带原声输出 SDR 或 **HDR（PQ/HLG）**，一段 4 秒 99 帧的素材约 30 秒跑完。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
+
+## M3 进行中：视频读写已通
+
+- [x] `spektra-roll-cli video --lut x.cube --in clip.mov --out graded.mov [--trc pq]`
+- [x] 逐帧解码 → 套 LUT → 重新编码，原声保留，HDR 自动带 PQ/HLG 标记
+- [x] 自动处理竖拍素材的旋转（-90 元数据）
+- [x] 99 帧 2.6 MP 素材约 30 秒（268 ms/帧，单线程）
+- [ ] 时间码 / 帧区间 / 断点续渲
+- [ ] 直接写 ProRes（现在是 HEVC/H.264）
 
 ## 这次交付（M1）
 

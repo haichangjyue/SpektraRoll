@@ -85,6 +85,11 @@ image's white to `--peak` nits (default 1000) and writes ST 2084 code values,
 `--hdr hlg` writes BT.2100 HLG. The film model is untouched, so SDR and HDR
 renders share every earlier stage.
 
+Video (D022) is a child-process integration: `spektra-roll-cli video` runs
+ffprobe once for geometry and rotation, then pipes raw RGB48 frames from an
+ffmpeg decoder through the LUT into an ffmpeg encoder, mapping the source audio
+straight through. No intermediate files, no frame sequence on disk.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2

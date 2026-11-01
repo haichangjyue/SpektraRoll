@@ -12,6 +12,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "sr/film_model.hpp"
 #include "sr/image.hpp"
 #include "sr/lut3d.hpp"
@@ -38,6 +43,13 @@ void printUsage() {
         "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
         "      Decode an image to display-encoded sRGB without the film model. Used\n"
         "      to render an Apple Log frame as a plain SDR reference.\n"
+        "\n"
+        "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
+        "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
+        "                         [--interp tetra|tri] [--strength 0..1]\n"
+        "                         [--ffmpeg <path>]\n"
+        "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
+        "      with the original audio. HDR output is HEVC Main10 with PQ/HLG tags.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -498,8 +510,204 @@ int cmdLutApply(const Args& args) {
     return 0;
 }
 
-int cmdConvert(const Args& args) {
+#ifdef _WIN32
+FILE* openPipe(const std::string& command, const char* mode) {
+    // cmd.exe needs the whole line wrapped when the program path is quoted.
+    const std::string full = command.rfind("\"", 0) == 0 ? "\"" + command + "\"" : command;
+    FILE* pipe = _popen(full.c_str(), mode);
+    if (pipe) _setmode(_fileno(pipe), _O_BINARY);
+    return pipe;
+}
+void closePipe(FILE* pipe) {
+    if (pipe) _pclose(pipe);
+}
+#else
+FILE* openPipe(const std::string& command, const char* mode) {
+    return popen(command.c_str(), mode);
+}
+void closePipe(FILE* pipe) {
+    if (pipe) pclose(pipe);
+}
+#endif
+
+std::string shellQuote(const std::string& value) { return "\"" + value + "\""; }
+
+std::string runCapture(const std::string& command) {
+    std::string out;
+    FILE* pipe = openPipe(command, "r");
+    if (!pipe) return out;
+    char buffer[512];
+    while (std::fgets(buffer, sizeof(buffer), pipe)) out += buffer;
+    closePipe(pipe);
+    return out;
+}
+
+std::string ffmpegPath(const Args& args) {
+    if (args.has("ffmpeg")) return args.get("ffmpeg");
+    if (const char* env = std::getenv("SPEKTRA_FFMPEG")) return env;
+    return "ffmpeg";
+}
+
+std::string siblingTool(const std::string& ffmpeg, const std::string& name) {
+    const auto slash = ffmpeg.find_last_of("/\\");
+    if (slash == std::string::npos) return name;
+    return ffmpeg.substr(0, slash + 1) + name;
+}
+
+int cmdVideo(const Args& args) {
     const std::string inPath = args.get("in");
+    const std::string outPath = args.get("out");
+    const std::string lutPath = args.get("lut");
+    if (lutPath.empty()) return fail("video requires --lut <file.cube>");
+    if (inPath.empty()) return fail("video requires --in <clip>");
+    if (outPath.empty()) return fail("video requires --out <clip>");
+
+    sr::Lut3D lut;
+    std::string error;
+    if (!lut.loadCube(lutPath, error)) return fail(error);
+
+    const std::string ffmpeg = ffmpegPath(args);
+    const std::string ffprobe = siblingTool(ffmpeg, "ffprobe.exe");
+    const std::string probe =
+        runCapture(shellQuote(ffprobe) +
+                   " -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate"
+                   " -of csv=p=0 " +
+                   shellQuote(inPath));
+    int width = 0;
+    int height = 0;
+    double fps = 0.0;
+    {
+        std::istringstream stream(probe);
+        std::string token;
+        std::vector<std::string> parts;
+        while (std::getline(stream, token, ',')) parts.push_back(token);
+        if (parts.size() < 3) {
+            return fail("could not probe " + inPath + " (is ffprobe next to ffmpeg?)");
+        }
+        width = std::atoi(parts[0].c_str());
+        height = std::atoi(parts[1].c_str());
+        const auto slash = parts[2].find('/');
+        if (slash != std::string::npos) {
+            const double num = std::atof(parts[2].substr(0, slash).c_str());
+            const double den = std::atof(parts[2].substr(slash + 1).c_str());
+            fps = den != 0.0 ? num / den : 0.0;
+        }
+    }
+    if (width <= 0 || height <= 0 || fps <= 0.0) return fail("bad video geometry");
+
+    // ffmpeg autorotates while decoding, so a 90/270 display matrix means the
+    // frames arrive with width and height swapped.
+    const std::string rotation = runCapture(
+        shellQuote(ffprobe) +
+        " -v error -select_streams v:0 -show_entries side_data=rotation"
+        " -of default=noprint_wrappers=1:nokey=1 " +
+        shellQuote(inPath));
+    const int degrees = std::atoi(rotation.c_str());
+    if (degrees == 90 || degrees == -90 || degrees == 270 || degrees == -270) {
+        std::swap(width, height);
+    }
+
+    if (width % 2 != 0 || height % 2 != 0) {
+        return fail("video needs even width and height for 4:2:0 output");
+    }
+
+    const std::string trc = args.get("trc", "srgb");
+    const bool hdr = trc == "pq" || trc == "hlg";
+    const std::string inMatrix = args.get("in-matrix", "bt2020");
+
+    const std::string decodeCmd =
+        shellQuote(ffmpeg) + " -v error -i " + shellQuote(inPath) + " -vf " +
+        shellQuote("scale=in_color_matrix=" + inMatrix + ":in_range=tv:out_range=full") +
+        " -pix_fmt rgb48le -f rawvideo -";
+
+    std::string encodeCmd;
+    if (hdr) {
+        const std::string transfer = trc == "pq" ? "smpte2084" : "arib-std-b67";
+        encodeCmd = shellQuote(ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
+                    std::to_string(width) + "x" + std::to_string(height) + " -r " +
+                    std::to_string(fps) + " -i - -i " + shellQuote(inPath) +
+                    " -map 0:v:0 -map 1:a:0? -c:a copy -vf " +
+                    shellQuote("scale=out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le") +
+                    " -c:v libx265 -crf 16 -x265-params " +
+                    shellQuote("colorprim=bt2020:transfer=" + transfer +
+                               ":colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)"
+                               "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400") +
+                    " -color_primaries bt2020 -color_trc " + transfer + " -colorspace bt2020nc" +
+                    " -movflags +faststart " + shellQuote(outPath);
+    } else {
+        encodeCmd = shellQuote(ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
+                    std::to_string(width) + "x" + std::to_string(height) + " -r " +
+                    std::to_string(fps) + " -i - -i " + shellQuote(inPath) +
+                    " -map 0:v:0 -map 1:a:0? -c:a copy -vf " +
+                    shellQuote("scale=out_color_matrix=bt709:out_range=tv,format=yuv420p") +
+                    " -c:v libx264 -crf 16 -preset medium" +
+                    " -color_primaries bt709 -color_trc bt709 -colorspace bt709" +
+                    " -movflags +faststart " + shellQuote(outPath);
+    }
+
+    std::printf("input:  %s (%dx%d @ %.3f fps)\n", inPath.c_str(), width, height, fps);
+    std::printf("output: %s (%s)\n", outPath.c_str(), hdr ? (trc == "pq" ? "HEVC PQ" : "HEVC HLG")
+                                                         : "H.264 SDR");
+
+    FILE* decoder = openPipe(decodeCmd, "rb");
+    if (!decoder) return fail("failed to start ffmpeg decoder");
+    FILE* encoder = openPipe(encodeCmd, "wb");
+    if (!encoder) {
+        closePipe(decoder);
+        return fail("failed to start ffmpeg encoder");
+    }
+
+    const std::string interpName = args.get("interp", "tetra");
+    const sr::Interp mode =
+        interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
+    const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
+
+    const size_t pixels = static_cast<size_t>(width) * height;
+    std::vector<unsigned short> raw(pixels * 3);
+    std::vector<float> frame(pixels * 3);
+    const auto started = std::chrono::steady_clock::now();
+    size_t frames = 0;
+    while (true) {
+        const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
+        if (got < raw.size()) break;
+        for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
+        for (size_t i = 0; i < pixels; ++i) {
+            float* px = &frame[i * 3];
+            const sr::Rgb src{px[0], px[1], px[2]};
+            const sr::Rgb mapped = lut.apply(src, mode);
+            const sr::Rgb result = sr::mix(src, mapped, strength);
+            px[0] = result.r;
+            px[1] = result.g;
+            px[2] = result.b;
+        }
+        for (size_t i = 0; i < raw.size(); ++i) {
+            const float value = std::min(1.0f, std::max(0.0f, frame[i]));
+            raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
+        }
+        if (std::fwrite(raw.data(), sizeof(unsigned short), raw.size(), encoder) != raw.size()) {
+            closePipe(decoder);
+            closePipe(encoder);
+            return fail("encoder closed the pipe early");
+        }
+        ++frames;
+        if (frames % 24 == 0) {
+            std::printf("  %zu frames...\n", frames);
+            std::fflush(stdout);
+        }
+    }
+    closePipe(decoder);
+    closePipe(encoder);
+
+    if (frames == 0) return fail("no frames were decoded");
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+    std::printf("wrote %s: %zu frames, %.1f ms/frame, %.2f s total\n", outPath.c_str(), frames,
+                elapsed / frames, elapsed / 1000.0);
+    return 0;
+}
+
+int cmdConvert(const Args& args) {    const std::string inPath = args.get("in");
     const std::string outPath = args.get("out");
     if (inPath.empty()) return fail("convert requires --in <image>");
     if (outPath.empty()) return fail("convert requires --out <image>");
@@ -573,6 +781,7 @@ int main(int argc, char** argv) {
     }
     if (command == "gen") return cmdGen(args);
     if (command == "convert") return cmdConvert(args);
+    if (command == "video") return cmdVideo(args);
 
     if (command == "lut" && args.positional.size() >= 2) {
         const std::string& sub = args.positional[1];

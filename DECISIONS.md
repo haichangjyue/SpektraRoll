@@ -347,9 +347,21 @@
 
 ---
 
+## D022 · 视频读写的形态：独立程序（已定）
+
+- **日期**：2026-11-01
+- **背景**：M3 要吃 `.mov`。两条路：独立程序自己做编解码，还是做 Resolve 插件由宿主负责。
+- **决定**：**独立程序**（你选的）。编解码统一走 FFmpeg，先以**子进程**方式集成（`spektra-roll-cli video` 负责解码、套 LUT、编码），不把 FFmpeg 链接进 exe。
+- **后果**：
+  - 用户机器上需要有 `ffmpeg.exe`（demo 会指到 `J:\ffmpeg\bin\ffmpeg.exe`，也可用 `--ffmpeg` 或 `SPEKTRA_FFMPEG` 指定）
+  - 好处：不用把 100 MB 的 FFmpeg 链进构建、Windows/macOS 行为一致、升级 FFmpeg 不用重编
+  - 代价：exe 不再是"单文件零依赖"；以后要单文件分发时再切换成链接 libav*
+  - D010（OFX 插件）仍然待定，但不再和 M3 绑在一起
+
+---
+
 ## 待决策（还没问你）
 
 - D009：Windows UI 用 WinUI 3 还是 Qt（建议 WinUI 3）
 - D010：是否做 OFX 插件（建议做，第二期）
 - D011：Apple Developer 账号什么时候买
-- D022：ProRes / 视频读写走哪条路——独立程序（引 FFmpeg）还是 Resolve 插件（和 D010 一起定，M3 之前必须拍板）
