@@ -568,7 +568,12 @@ std::string ffmpegPath(const Args& args) {
     return "ffmpeg";
 }
 
-std::string siblingTool(const std::string& ffmpeg, const std::string& name) {
+std::string siblingTool(const std::string& ffmpeg) {
+#ifdef _WIN32
+    const char* name = "ffprobe.exe";
+#else
+    const char* name = "ffprobe";
+#endif
     const auto slash = ffmpeg.find_last_of("/\\");
     if (slash == std::string::npos) return name;
     return ffmpeg.substr(0, slash + 1) + name;
@@ -587,7 +592,7 @@ int cmdVideo(const Args& args) {
     if (!lut.loadCube(lutPath, error)) return fail(error);
 
     const std::string ffmpeg = ffmpegPath(args);
-    const std::string ffprobe = siblingTool(ffmpeg, "ffprobe.exe");
+    const std::string ffprobe = siblingTool(ffmpeg);
     const std::string probe =
         runCapture(shellQuote(ffprobe) +
                    " -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate"
