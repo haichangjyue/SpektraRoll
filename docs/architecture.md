@@ -103,6 +103,10 @@ diffusion adds the blurred-minus-original luminance back to all three channels,
 softening detail without shifting hue. Order is halation, glare, diffusion,
 grain.
 
+Grain is cross-faded across frames (D036): two independent fields are mixed over
+`--grain-rate` frames instead of replacing the field every frame, because a
+fresh pattern at 24 fps reads as digital boiling rather than film.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2

@@ -168,23 +168,43 @@ void applyDiffusion(float* pixels, int width, int height, const DiffusionParams&
     });
 }
 
-void applyGrain(float* pixels, int width, int height, const GrainParams& params) {    if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
+void applyGrain(float* pixels, int width, int height, const GrainParams& params) {
+    if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
 
     const size_t count = static_cast<size_t>(width) * height;
-    std::vector<float> field(count);
+    const int radius = std::max(0, static_cast<int>(std::lround(params.size)));
     const std::uint32_t seed = params.seed;
-    const std::uint32_t frame = static_cast<std::uint32_t>(std::max(0, params.frame));
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            field[static_cast<size_t>(y) * width + x] = noiseAt(seed, frame, x, y);
+    const int frame = std::max(0, params.frame);
+    const int rate = std::max(1, params.rate);
+
+    // Cross-fade two independent fields over `rate` frames. rate = 1 is a fresh
+    // field every frame, which reads as digital boiling at 24 fps (D036).
+    const std::uint32_t fieldIndex = static_cast<std::uint32_t>(frame / rate);
+    const float phase =
+        rate > 1 ? static_cast<float>(frame % rate) / static_cast<float>(rate) : 0.0f;
+
+    auto buildField = [&](std::uint32_t index) {
+        std::vector<float> field(count);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                field[static_cast<size_t>(y) * width + x] = noiseAt(seed, index, x, y);
+            }
+        }
+        std::vector<float> scratch(count);
+        for (int pass = 0; pass < 2; ++pass) boxBlur(field, scratch, width, height, radius);
+        return field;
+    };
+
+    std::vector<float> field = buildField(fieldIndex);
+    if (rate > 1) {
+        const std::vector<float> next = buildField(fieldIndex + 1);
+        // Two independent fields mixed 50/50 would lose ~30% of their contrast,
+        // so normalise the blend to keep the grain level steady.
+        const float norm = 1.0f / std::sqrt((1.0f - phase) * (1.0f - phase) + phase * phase);
+        for (size_t i = 0; i < count; ++i) {
+            field[i] = (field[i] * (1.0f - phase) + next[i] * phase) * norm;
         }
     }
-
-    std::vector<float> scratch(count);
-    // `size` is the blur radius in pixels: 0 is per-pixel noise (harsh), 1-2
-    // gives the clumped look of real grain.
-    const int radius = std::max(0, static_cast<int>(std::lround(params.size)));
-    for (int pass = 0; pass < 2; ++pass) boxBlur(field, scratch, width, height, radius);
 
     const float scale = params.amount * 0.14f;
     sr::parallelChunks(count, resolveThreadCount(0), [&](size_t begin, size_t end) {

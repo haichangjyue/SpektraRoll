@@ -52,7 +52,7 @@ void printUsage() {
         "                         [--codec hevc|h264|prores]\n"
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
-        "                         [--glare 0..1] [--diffusion 0..1]\n"
+        "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
         "                         [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
@@ -91,7 +91,7 @@ void printUsage() {
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
-        "                             [--glare 0..1] [--diffusion 0..1]\n"
+        "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
@@ -429,6 +429,7 @@ TextureOptions parseTexture(const Args& args) {
     texture.grain.amount = static_cast<float>(args.getDouble("grain", 0.0));
     texture.grain.size = static_cast<float>(args.getDouble("grain-size", 1.4));
     texture.grain.seed = static_cast<unsigned>(args.getInt("seed", 1));
+    texture.grain.rate = std::max(1, args.getInt("grain-rate", 3));
     texture.halation.amount = static_cast<float>(args.getDouble("halation", 0.0));
     texture.halation.radius = static_cast<float>(args.getDouble("halation-radius", 0.006));
     texture.halation.threshold = static_cast<float>(args.getDouble("halation-threshold", 0.72));

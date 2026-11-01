@@ -10,6 +10,7 @@ param(
     [double]$Time = 1.5,
     [double]$Exposure = 0.7,
     [double]$Grain = 0.4,
+    [double]$GrainRate = 3,
     [double]$Halation = 0.45,
     [double]$Glare = 0.2,
     [double]$Diffusion = 0.1
@@ -68,7 +69,7 @@ Write-Host "3/4  同一帧: 干净版 vs 颗粒+光晕版..." -ForegroundColor C
 & $exe lut apply --lut "out\m3-applelog-sdr.cube" --in "out\m3-frame.png" --out "out\m3-clean.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $exe lut apply --lut "out\m3-applelog-sdr.cube" --in "out\m3-frame.png" --out "out\m3-texture.png" `
-    --grain $Grain --halation $Halation --glare $Glare --diffusion $Diffusion
+    --grain $Grain --grain-rate $GrainRate --halation $Halation --glare $Glare --diffusion $Diffusion
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""

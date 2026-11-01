@@ -19,6 +19,10 @@ struct GrainParams {
     unsigned seed = 1;
     // Frame index: changing it gives a new, independent grain field.
     int frame = 0;
+    // How many frames a field takes to cross-fade into the next one. 1 gives a
+    // completely new field every frame (digital "boiling"), 3-4 morphs the
+    // grain instead, which is what keeps video from strobing (D036).
+    int rate = 3;
 };
 
 struct HalationParams {

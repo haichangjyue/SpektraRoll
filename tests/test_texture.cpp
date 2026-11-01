@@ -122,6 +122,31 @@ int main() {
         check(!identical(image, before), "halation changes the image");
     }
 
+    // Temporal coherence: a cross-faded field changes much less between frames
+    // than a brand new one, which is what stops video grain from strobing.
+    {
+        sr::GrainParams fast;
+        fast.amount = 0.5f;
+        fast.rate = 1;
+        sr::GrainParams slow = fast;
+        slow.rate = 4;
+
+        auto frames = [&](sr::GrainParams params) {
+            std::vector<float> first = flat(w, h, 0.5f);
+            std::vector<float> second = flat(w, h, 0.5f);
+            params.frame = 5;
+            sr::applyGrain(first.data(), w, h, params);
+            params.frame = 6;
+            sr::applyGrain(second.data(), w, h, params);
+            return meanDifference(first, second);
+        };
+
+        const double fastDelta = frames(fast);
+        const double slowDelta = frames(slow);
+        check(slowDelta < fastDelta * 0.6, "cross-faded grain changes less per frame");
+        check(slowDelta > 1e-6, "cross-faded grain still moves");
+    }
+
     // Glare lifts the blacks with a wide veil of light; diffusion softens.
     {
         std::vector<float> image = flat(w, h, 0.05f);

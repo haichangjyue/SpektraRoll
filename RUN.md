@@ -128,7 +128,7 @@ X:\agent\SpektraRoll\scripts\demo-m3.cmd
 - 播放视频时颗粒有没有在动（不是一张贴图）
 - 高光边缘有没有一点点暖色晕开（不是发光泛滥）
 
-参数可以改：`demo-m3.cmd -Grain 0.2 -Glare 0.1`，0 就是关掉。四个都有：`-Grain`、`-Halation`、`-Glare`、`-Diffusion`。
+参数可以改：`demo-m3.cmd -Grain 0.2 -Glare 0.1`，0 就是关掉。四个都有：`-Grain`、`-Halation`、`-Glare`、`-Diffusion`；颗粒的稳定度用 `-GrainRate`（默认 3，越大越稳，1 = 每帧全新颗粒）。
 
 ## 在 Mac 上验证（可选）
 
