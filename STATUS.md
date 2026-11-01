@@ -1,10 +1,10 @@
 # STATUS
 
-**最后更新**：2026-11-01 · 里程碑 **M2 进行中（Apple Log 已通）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-01 · 里程碑 **M2 进行中（Apple Log + 扫描负片已通）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-现在能烘出一张**真正的柯达 Portra 400 + Portra Endura LUT**，也能直接吃 iPhone 拍的 **Apple Log** 素材：双击 `demo-m2.cmd` 就能看到"只解码"和"过 Portra"的两张真实画面。
+现在能烘出**真正的柯达 Portra 400 + Portra Endura LUT**，能直接吃 iPhone 的 **Apple Log** 素材，并且有两条出片方式：**印片**（像洗出来的照片，对比强）和**扫描负片**（高光暗部都能留住，留调色余量）。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -26,15 +26,17 @@
 - [x] **Apple Log 输入**：`lut bake --input apple-log`，LUT 定义域就是 Apple Log 码值（D023）
 - [x] Apple Log 解码和 colour-science 逐点一致：16-bit 输出误差 ≤ 1 LSB
 - [x] `convert --from apple-log`：只解码、不上胶片的 SDR 对照图
-- [x] **真实画面样张**：`scripts\demo-m2.cmd` 从你的 `.mov` 抽帧，出 before / after 两张
+- [x] **真实画面样张**：`scripts\demo-m2.cmd` 从你的 `.mov` 抽帧，出 before / 印片 / 负片 三张
+- [x] **扫描负片模式**（D024）：`--scan negative`，天空从 0.88–0.91 变成 0.48–0.70（云有层次），暗部死黑 7.7%→2.5%
 - [ ] 输出色域压缩（D014 欠账）
 - [ ] 耦合剂（D015 欠账）
 - [ ] HDR 输出：PQ / HLG + Rec.2020 + 10-bit（D021）
 
 ## 怎么验收（M2）
 
-1. 双击 `scripts\demo-m2.cmd` → 自动打开 `out\m2-before.png`（只解码）和 `out\m2-after.png`（过 Portra 400）
-2. 看四件事：天空/窗户高光有没有被压住、暗部有没有死黑、彩色招牌有没有串色、整体像不像胶片
+1. 双击 `scripts\demo-m2.cmd` → 自动打开 `out\m2-after.png`（印片）和 `out\m2-negative.png`（扫描负片）
+2. 对照 `out\m2-before.png`（只解码，不上胶片）
+3. 看四件事：天空/窗户有没有层次、暗部有没有死黑、彩色招牌有没有串色、两种模式哪种更像你要的
 
 ## 实测数据（本机）
 
@@ -46,6 +48,7 @@
 | 0.92 MP 套 LUT（16-bit） | **约 31 ms** |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | max 1.53e-5（16-bit 1 LSB），mean 1.9e-8 |
+| 印片 vs 扫描负片（同一帧） | 天空 0.88–0.91 vs 0.48–0.70；暗部 <0.10：7.7% vs 2.5% |
 | 可执行文件 | `build\spektra-roll-cli.exe`，静态链接 |
 
 ## 怎么验收（M1）

@@ -57,6 +57,13 @@ Apple Log decodes with the constants from Apple's white paper; a negative
 linear value below black is kept until the final sRGB clamp so the hue near
 black stays right. `--exposure` scales linear light before the film model.
 
+`--scan negative` (D024) replaces paper + print with: invert the film's dye
+densities (`Dmax - D`), drop the base density so the orange mask disappears,
+scan that virtual positive under D50, map no-dye to white and maximum dye to
+black, then neutralise mid-grey with a per-channel power (a first-order stand-in
+for a dye-correction matrix). That path has much more latitude, looks flatter
+and has no upstream counterpart to compare against.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2
@@ -116,7 +123,7 @@ and CIE76 ΔE over all 33³ entries. Current numbers are in
 |---|---|
 | M0 *(done)* | CLI applies a LUT, tests, CI |
 | M1 *(done)* | spektrafilm model ported, real Portra 400 + Endura LUT, parity harness, 16-bit PNG |
-| M2 | colour correctness: real-photo sample, gamut compression, couplers, Apple Log input, HDR (PQ/HLG) output |
+| M2 | colour correctness: real-photo sample, gamut compression, couplers, Apple Log input, scanned negative, HDR (PQ/HLG) output |
 | M3 | video I/O: FFmpeg / ProRes, time dimension, frame ranges; decide standalone vs OFX (D022) |
 | M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, SIMD / threads / GPU, float / EXR |
 | M5 | UI: Windows WinUI 3, macOS SwiftUI, OFX plugin, render-farm CLI |

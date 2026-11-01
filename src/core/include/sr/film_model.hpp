@@ -12,12 +12,20 @@
 
 namespace sr {
 
+// Which end of the chain produces the picture.
+//
+//   Print     negative -> paper -> scan, the M1 chain (a printed photograph)
+//   Negative  scan the negative itself, inverted and balanced against the
+//             film base: much more latitude, flatter look, meant for grading
+enum class ScanMode { Print, Negative };
+
 struct BakeOptions {
     InputTransfer input = InputTransfer::Srgb;
     // Exposure in stops, applied in linear light before the film model. Only
     // meaningful for scene-referred inputs such as Apple Log, where the code
     // range can hold several stops above diffuse white.
     double exposureEv = 0.0;
+    ScanMode scan = ScanMode::Print;
 };
 
 // The M1 colour chain: display-encoded sRGB in, display-encoded sRGB out.
@@ -59,7 +67,9 @@ public:
     std::array<double, 3> neutralFilters() const { return neutralFilters_; }
 
 private:
-    Rgb transformLinear(const double linear[3]) const;
+    Rgb transformLinear(const double linear[3], ScanMode scan) const;
+    void filmCmy(const double linear[3], double cmy[3]) const;
+    void scanPositiveDye(const double cmy[3], double linearSrgb[3]) const;
     void filmRaw(const double rgb[3], double raw[3]) const;
     void simpleRgbToDensitySpectral(double value, double density[81]) const;
     double interpolate(double x, const std::vector<double>& axis,
@@ -94,6 +104,15 @@ private:
 
     double printExposureFactor_ = 1.0;
     double scanNormalization_ = 1.0;
+    // Maximum film CMY densities, used to invert a negative scan.
+    double filmMaxCmy_[3] = {0.0, 0.0, 0.0};
+    // Linear sRGB of the positive scan at no dye (white) and at maximum dye
+    // (black); the scan is mapped between them so the black end is neutral.
+    double negativeWhite_[3] = {1.0, 1.0, 1.0};
+    double negativeBlack_[3] = {0.0, 0.0, 0.0};
+    // Per-channel power that neutralises mid-grey while keeping black and
+    // white fixed (dye crosstalk correction).
+    double negativeGamma_[3] = {1.0, 1.0, 1.0};
     std::array<double, 3> neutralFilters_{0.0, 0.0, 0.0};
 };
 

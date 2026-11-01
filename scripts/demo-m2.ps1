@@ -72,8 +72,15 @@ Write-Host "3/4  只做解码, 不上胶片 (对照)..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "4/4  套上 Portra 400..." -ForegroundColor Cyan
+Write-Host "4/5  套上 Portra 400 (印片, 高对比)..." -ForegroundColor Cyan
 & $exe lut apply --lut "out\m2-applelog.cube" --in "out\m2-frame-applelog.png" --out "out\m2-after.png"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Host ""
+Write-Host "5/5  改成扫描负片 (保留高光和暗部)..." -ForegroundColor Cyan
+& $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\m2-applelog-negative.cube"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $exe lut apply --lut "out\m2-applelog-negative.cube" --in "out\m2-frame-applelog.png" --out "out\m2-negative.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
@@ -81,14 +88,15 @@ Write-Host "看图重点:" -ForegroundColor Green
 Write-Host "  * 天空和窗户: 高光是被压住了, 还是糊成一片白" -ForegroundColor Green
 Write-Host "  * 暗部: 是不是偏暖, 有没有死黑" -ForegroundColor Green
 Write-Host "  * 彩色招牌和墙面: 是不是过饱和或者串色" -ForegroundColor Green
-Write-Host "  * 整体: 像不像胶片拍的, 还是像手机直出" -ForegroundColor Green
+Write-Host "  * 印片 vs 负片: 印片更像一张洗出来的照片, 负片更平但两头都留得住" -ForegroundColor Green
 Write-Host ""
-Write-Host "两张图已经打开, 可以并排看:" -ForegroundColor Green
-Write-Host "  $root\out\m2-before.png   (只解码, 对照)"
-Write-Host "  $root\out\m2-after.png    (过 Portra 400)"
+Write-Host "三张图已经生成:" -ForegroundColor Green
+Write-Host "  $root\out\m2-before.png    (只解码, 对照)"
+Write-Host "  $root\out\m2-after.png     (印片: Portra 400 + Endura)"
+Write-Host "  $root\out\m2-negative.png  (扫描负片: 高光/暗部都保住)"
 Write-Host ""
 
 if (-not $NoOpen) {
-    Start-Process (Join-Path $root "out\m2-before.png")
     Start-Process (Join-Path $root "out\m2-after.png")
+    Start-Process (Join-Path $root "out\m2-negative.png")
 }

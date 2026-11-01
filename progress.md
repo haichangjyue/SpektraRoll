@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-01
-> **当前里程碑**：M1 已完成并推送；M2 进行中（Apple Log 输入已通，HDR 输出待做）
+> **当前里程碑**：M1 已完成并推送；M2 进行中（Apple Log 输入 + 扫描负片已通，HDR 输出待做）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -113,6 +113,7 @@
 | C++ vs Python 参考 | **PSNR 88.07 dB**，max \\|diff\\| 4.57e-4，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | 2.6 MP 帧，max \\|diff\\| **1.53e-5**（= 16-bit 1 LSB），mean 1.9e-8 |
 | Apple Log 素材 | 2160x1214，24p，HEVC 10-bit 4:2:2，BT.2020 |
+| 扫描负片 vs 印片（同一帧） | 天空 0.48–0.70 / 0.88–0.91；暗部 <0.10 由 7.7% 降到 2.5% |
 | 印片曝光因子 | 0.837773013976（上游含一次 sRGB→sRGB 往返，0.837787256300） |
 | 产物 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
@@ -143,6 +144,7 @@
 | **D020** | M2 顺序 | **先色彩（真实照片 + Apple Log/HDR）→ 再视频编解码** | M2 颜色、M3 视频、M4 质感与性能、M5 界面 |
 | **D021** | Apple Log / HDR | **Apple Log 输入 → 线性宽色域 → 胶片模型 → SDR 或 HDR(PQ/HLG) 输出** | HDR 曝光映射做成参数；动态元数据不做 |
 | **D023** | Apple Log 输入落地 | **LUT 定义域改为 Apple Log 码值，内部解码到线性 BT.2020 → sRGB** | 与 colour-science 逐点一致（≤1 LSB）；负值暂时钳制 |
+| **D024** | 扫描负片 | **反相 + 去片基 + D50 扫描 + 灰点中性化** | 天空 0.48–0.70、暗部死黑 7.7%→2.5%；无上游 parity |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -164,7 +166,8 @@
 已完成：
 
 - [x] **Apple Log 输入**（D023）：`lut bake --input apple-log`、`convert --from apple-log`，和 colour-science 逐点一致（16-bit 误差 ≤ 1 LSB）
-- [x] **真实画面样张**：`scripts\demo-m2.cmd` 直接从你的 `.mov` 抽帧，出"只解码 / 过 Portra"两张图
+- [x] **真实画面样张**：`scripts\demo-m2.cmd` 直接从你的 `.mov` 抽帧，出"只解码 / 印片 / 负片"三张图
+- [x] **扫描负片模式**（D024）：`lut bake --scan negative`，天空 0.48–0.70（有云），暗部死黑 7.7%→2.5%
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 
 还没做：
@@ -299,7 +302,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D023
+├── DECISIONS.md             决策台账 D001–D024
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -308,7 +311,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D023**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D024**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
@@ -325,7 +328,7 @@ X:\agent\SpektraRoll\
 > “读 progress.md，我们从 M2 开始。”
 
 AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，再跑一遍
-`scripts\demo-m2.cmd -NoOpen` 确认 Apple Log 链路没坏，然后按顺序做：
+`scripts\demo-m2.cmd -NoOpen` 确认 Apple Log 和扫描负片链路没坏，然后按顺序做：
 
 1. 输出色域压缩（D014）→ 耦合剂（D015）
 2. HDR 输出：PQ / HLG + Rec.2020 + 10-bit + LUT shaper（D021）

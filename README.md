@@ -6,9 +6,9 @@ Open-source spectral film simulation for **motion picture**.
 
 Status: **M2 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
 + Portra Endura** LUT with parity against the upstream Python model at
-**PSNR 88 dB** (ΔE76 max 0.0065), and now accepts **Apple Log** footage
-(BT.2020, log-encoded) as input, decoded to the same chain (D023). HDR output
-is the next step.
+**PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log** footage (BT.2020,
+log-encoded) as input, and can either print it (`--scan print`) or scan the
+negative (`--scan negative`, much more latitude). HDR output is the next step.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -73,6 +73,10 @@ spektra-roll-cli lut bake --input apple-log --exposure 0.7 --out applelog.cube
 spektra-roll-cli convert --in frame.png --out frame_sdr.png --from apple-log --exposure 0.7
 spektra-roll-cli lut apply --lut applelog.cube --in frame.png --out frame_portra.png
 
+# scan the negative instead of printing it: more latitude, flatter look
+spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --out neg.cube
+spektra-roll-cli lut apply --lut neg.cube --in frame.png --out frame_negative.png
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
@@ -115,8 +119,13 @@ docs/           architecture and licensing notes
 
 - No couplers, grain, halation, diffusion or glare yet (M4 for the spatial ones,
   M2 for couplers).
-- Apple Log input works; SDR output only. HDR (PQ/HLG) output, and proper
-  gamut mapping for out-of-sRGB colours, are the rest of M2 (D014/D021).
+- Apple Log input works, with two ways out: print (`--scan print`, the M1
+  chain, contrasty) and scanned negative (`--scan negative`, more latitude,
+  flatter). The negative path has no upstream parity and its grey balance is a
+  power law rather than a full dye-correction matrix, so colours are close but
+  not final.
+- SDR output only. HDR (PQ/HLG) output, and proper gamut mapping for
+  out-of-sRGB colours, are the rest of M2 (D014/D021).
 - No video file I/O yet: stills only until the M3 FFmpeg/ProRes step.
 - Output gamut compression is off. Extreme colours can produce out-of-range
   LUT values, which are clamped when writing an image.

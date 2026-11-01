@@ -59,3 +59,5 @@ jobs:
           if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
           "$exe" lut bake --input apple-log --exposure 0.7 --out applelog.cube
           "$exe" lut info --lut applelog.cube
+          "$exe" lut bake --input apple-log --exposure 0.7 --scan negative --out negative.cube
+          "$exe" lut info --lut negative.cube

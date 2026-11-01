@@ -117,6 +117,27 @@ int main() {
     const sr::Rgb up = model.transformFrom(brighter, {0.4f, 0.4f, 0.4f});
     check(up.r > base.r, "positive exposure brightens the print");
 
+    // Scanning the negative keeps more latitude: black stays at 0, white gets
+    // close to 1, 18% grey is neutral, and the grey ramp is monotonic.
+    sr::BakeOptions negative = appleLog;
+    negative.scan = sr::ScanMode::Negative;
+    negative.exposureEv = 0.7;  // same default as scripts\demo-m2.ps1
+    checkRgb(model.transformFrom(negative, {0.0f, 0.0f, 0.0f}), {0.0f, 0.0f, 0.0f}, 1e-6,
+             "negative scan black");
+    const sr::Rgb negativeWhite = model.transformFrom(negative, {1.0f, 1.0f, 1.0f});
+    check(negativeWhite.r > 0.8f && negativeWhite.g > 0.8f && negativeWhite.b > 0.8f,
+          "negative scan reaches white");
+    const sr::Rgb negativeGrey = model.transformFrom(negative, {grey, grey, grey});
+    check(std::fabs(negativeGrey.r - negativeGrey.g) < 0.02f &&
+              std::fabs(negativeGrey.g - negativeGrey.b) < 0.02f,
+          "negative scan grey is neutral");
+    float previous = -1.0f;
+    for (float code = 0.0f; code <= 0.9f; code += 0.05f) {
+        const float value = model.transformFrom(negative, {code, code, code}).g;
+        check(value >= previous, "negative scan is monotonic");
+        previous = value;
+    }
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

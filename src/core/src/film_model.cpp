@@ -165,6 +165,52 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
         scanNormalization_ += viewingIlluminant_[static_cast<size_t>(l)] * data::kCmfs[l * 3 + 1];
     }
 
+    // Maximum film CMY densities, so a negative scan can be inverted.
+    for (int c = 0; c < 3; ++c) {
+        double maximum = 0.0;
+        for (const Triple& row : filmCurves_) {
+            const double value = row[static_cast<size_t>(c)];
+            if (!std::isnan(value)) maximum = std::max(maximum, value);
+        }
+        filmMaxCmy_[c] = maximum;
+    }
+
+    // Negative scan: invert the film's dye densities (no base density, so the
+    // orange mask and the film base fall away) and scan the resulting virtual
+    // positive transparency, mapped between "no dye" and "maximum dye" so the
+    // deepest black is neutral.
+    {
+        const double noDye[3] = {0.0, 0.0, 0.0};
+        const double maxDye[3] = {filmMaxCmy_[0], filmMaxCmy_[1], filmMaxCmy_[2]};
+        scanPositiveDye(noDye, negativeWhite_);
+        scanPositiveDye(maxDye, negativeBlack_);
+
+        // Neutralise mid-grey on top of the black/white mapping: the film's
+        // dyes overlap, so an un-corrected scan of the positive carries a warm
+        // cast (the same reason a scanner needs a dye-correction matrix).
+        const double greyLinear[3] = {srgbDecode(0.184), srgbDecode(0.184),
+                                      srgbDecode(0.184)};
+        double cmyGrey[3];
+        filmCmy(greyLinear, cmyGrey);
+        const double positiveGrey[3] = {filmMaxCmy_[0] - cmyGrey[0],
+                                        filmMaxCmy_[1] - cmyGrey[1],
+                                        filmMaxCmy_[2] - cmyGrey[2]};
+        double rgbGrey[3];
+        scanPositiveDye(positiveGrey, rgbGrey);
+        for (int c = 0; c < 3; ++c) {
+            const double span = negativeWhite_[c] - negativeBlack_[c];
+            rgbGrey[c] = span > 1e-9 ? (rgbGrey[c] - negativeBlack_[c]) / span : 0.0;
+        }
+        const double greyLuma = 0.2126 * rgbGrey[0] + 0.7152 * rgbGrey[1] + 0.0722 * rgbGrey[2];
+        for (int c = 0; c < 3; ++c) {
+            // A per-channel power keeps black at 0 and white at 1 while
+            // neutralising mid-grey; a plain gain would tint the highlights.
+            const double value = std::min(1.0, std::max(1e-4, rgbGrey[c]));
+            const double target = std::min(1.0, std::max(1e-4, greyLuma));
+            negativeGamma_[c] = std::log(target) / std::log(value);
+        }
+    }
+
     // Print exposure factor: expose mid-grey through the print illuminant and
     // normalise the geometric mean of the paper's raw response to 1.
     double midgrayDensity[kN];
@@ -243,7 +289,7 @@ double FilmModel::paperCurve(int sample, int channel) const {
 
 Rgb FilmModel::transform(Rgb srgb) const {
     double linear[3] = {srgbDecode(srgb.r), srgbDecode(srgb.g), srgbDecode(srgb.b)};
-    return transformLinear(linear);
+    return transformLinear(linear, ScanMode::Print);
 }
 
 Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
@@ -264,17 +310,56 @@ Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
         const double gain = std::exp2(options.exposureEv);
         for (int c = 0; c < 3; ++c) linear[c] *= gain;
     }
-    return transformLinear(linear);
+    return transformLinear(linear, options.scan);
 }
 
-Rgb FilmModel::transformLinear(const double linear[3]) const {
+void FilmModel::filmCmy(const double linear[3], double cmy[3]) const {
     double raw[3];
     filmRaw(linear, raw);
-
-    double cmyFilm[3];
     for (int c = 0; c < 3; ++c) {
         const double logRaw = std::log10(std::max(raw[c], 0.0) + 1e-10);
-        cmyFilm[c] = interpolate(logRaw, filmLogExposure_, filmCurves_, c);
+        cmy[c] = interpolate(logRaw, filmLogExposure_, filmCurves_, c);
+    }
+}
+
+void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const {
+    double xyz[3] = {0.0, 0.0, 0.0};
+    for (int l = 0; l < kN; ++l) {
+        double density = 0.0;
+        for (int c = 0; c < 3; ++c) {
+            density += cmy[c] * filmChannelDensity_[static_cast<size_t>(l)][static_cast<size_t>(c)];
+        }
+        const double light =
+            std::isnan(density) ? 0.0
+                                : std::pow(10.0, -density) *
+                                      viewingIlluminant_[static_cast<size_t>(l)];
+        for (int c = 0; c < 3; ++c) xyz[c] += light * data::kCmfs[l * 3 + c];
+    }
+    for (int c = 0; c < 3; ++c) xyz[c] /= scanNormalization_;
+    for (int c = 0; c < 3; ++c) {
+        linearSrgb[c] = data::kXyzD50ToSrgb[c * 3 + 0] * xyz[0] +
+                        data::kXyzD50ToSrgb[c * 3 + 1] * xyz[1] +
+                        data::kXyzD50ToSrgb[c * 3 + 2] * xyz[2];
+    }
+}
+
+Rgb FilmModel::transformLinear(const double linear[3], ScanMode scan) const {
+    double cmyFilm[3];
+    filmCmy(linear, cmyFilm);
+
+    if (scan == ScanMode::Negative) {
+        const double positive[3] = {filmMaxCmy_[0] - cmyFilm[0], filmMaxCmy_[1] - cmyFilm[1],
+                                    filmMaxCmy_[2] - cmyFilm[2]};
+        double rgb[3];
+        scanPositiveDye(positive, rgb);
+        for (int c = 0; c < 3; ++c) {
+            const double span = negativeWhite_[c] - negativeBlack_[c];
+            const double value = span > 1e-9 ? (rgb[c] - negativeBlack_[c]) / span : 0.0;
+            const double clamped = std::min(1.0, std::max(0.0, value));
+            rgb[c] = std::pow(clamped, negativeGamma_[c]);
+        }
+        return Rgb{static_cast<float>(srgbEncode(rgb[0])), static_cast<float>(srgbEncode(rgb[1])),
+                   static_cast<float>(srgbEncode(rgb[2]))};
     }
 
     double printRaw[3] = {0.0, 0.0, 0.0};

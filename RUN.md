@@ -60,17 +60,18 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 X:\agent\SpektraRoll\scripts\demo-m2.cmd
 ```
 
-它会用 `ffmpeg` 从 `X:\agent\footage\` 里的 `.mov` 抽一帧，然后出两张图：
+它会用 `ffmpeg` 从 `X:\agent\footage\` 里的 `.mov` 抽一帧，然后出三张图：
 
 - `out\m2-before.png` —— 只解码，不上胶片（对照）
-- `out\m2-after.png` —— 过 Kodak Portra 400 + Endura
+- `out\m2-after.png` —— 印片：Kodak Portra 400 + Endura（对比强，像洗出来的照片）
+- `out\m2-negative.png` —— 扫描负片：高光和暗部都能留住，画面偏平，留给你调色
 
 **你要判断四件事：**
 
-- 天空和窗户：高光是被压住了，还是糊成一片白
-- 暗部：是不是偏暖，有没有死黑
+- 天空和窗户：有没有层次，还是糊成一片白
+- 暗部：有没有死黑，细节还在不在
 - 彩色招牌和墙面：有没有过饱和或者串色
-- 整体：像不像胶片拍的，还是像手机直出
+- 印片 vs 负片：哪种更接近你想要的（印片像照片，负片留余量）
 
 觉得不对就告诉我"太黄了 / 太暗了 / 高光糊了"，我来调曝光或曲线。
 
@@ -115,4 +116,8 @@ ctest --test-dir build --output-on-failure
 .\build\spektra-roll-cli.exe lut bake --input apple-log --exposure 0.7 --out out\applelog.cube
 .\build\spektra-roll-cli.exe convert --in frame.png --out frame_sdr.png --from apple-log --exposure 0.7
 .\build\spektra-roll-cli.exe lut apply --lut out\applelog.cube --in frame.png --out frame_portra.png
+
+# 扫描负片（高光/暗部都留住，画面偏平）
+.\build\spektra-roll-cli.exe lut bake --input apple-log --exposure 0.7 --scan negative --out out\negative.cube
+.\build\spektra-roll-cli.exe lut apply --lut out\negative.cube --in frame.png --out frame_negative.png
 ```
