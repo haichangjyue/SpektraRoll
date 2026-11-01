@@ -88,7 +88,9 @@ renders share every earlier stage.
 Video (D022) is a child-process integration: `spektra-roll-cli video` runs
 ffprobe once for geometry and rotation, then pipes raw RGB48 frames from an
 ffmpeg decoder through the LUT into an ffmpeg encoder, mapping the source audio
-straight through. No intermediate files, no frame sequence on disk.
+straight through. No intermediate files, no frame sequence on disk. `--start`
+/`--frames`/`--duration` seek both the video pipe and the audio input so they
+stay in sync, and `--codec prores` swaps the encoder for ProRes 422 HQ (D031).
 
 Deliberately off so far (each has a decision record):
 

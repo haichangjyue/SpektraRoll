@@ -152,6 +152,7 @@
 | **D028** | DIR 耦合剂 | **自层 + 层间抑制矩阵，Apple Log 默认开** | 与上游 PSNR 80.75 dB；饱和色增强，中性灰不变 |
 | **D029** | HDR 输出 | **PQ / HLG 末端编码，白色 = `--peak` 尼特（默认 1000）** | 1.0 → PQ 0.75183；Air 是 SDR 屏，验收要靠 iPhone |
 | **D022** | 视频读写形态 | **独立程序 + FFmpeg 子进程**（你选的） | `spektra-roll-cli video` 直接吃 .mov；不把 FFmpeg 链进 exe |
+| **D031** | 帧区间 / ProRes | **`--start/--frames/--duration` + `--codec prores`（422 HQ）** | 音画同步；ProRes 120 MB / 4.1 s |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -181,6 +182,7 @@
 - [x] **DIR 耦合剂**（D028）：`--couplers on|off`，Apple Log 默认开；与上游参考 PSNR 80.75 dB
 - [x] **HDR 输出**（D029）：`--hdr pq|hlg --peak 1000`，demo 出 16-bit PQ PNG + HEVC 10-bit 片段
 - [x] **M3 第一步**（D022）：`spektra-roll-cli video` 直接读 `.mov`、逐帧套 LUT、带原声编码；99 帧约 30 秒
+- [x] **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 
 还没做：

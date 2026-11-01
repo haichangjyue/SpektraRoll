@@ -46,10 +46,14 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
+        "                         [--start 0] [--frames N | --duration T]\n"
+        "                         [--codec hevc|h264|prores]\n"
         "                         [--interp tetra|tri] [--strength 0..1]\n"
         "                         [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
-        "      with the original audio. HDR output is HEVC Main10 with PQ/HLG tags.\n"
+        "      with the original audio. --start/--frames pick a range (seconds or\n"
+        "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
+        "      tags.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -532,6 +536,22 @@ void closePipe(FILE* pipe) {
 
 std::string shellQuote(const std::string& value) { return "\"" + value + "\""; }
 
+// "12.5" or "00:01:12.5" -> seconds.
+double parseSeconds(const std::string& text) {
+    if (text.find(':') == std::string::npos) return std::atof(text.c_str());
+    std::istringstream stream(text);
+    std::string part;
+    double total = 0.0;
+    while (std::getline(stream, part, ':')) total = total * 60.0 + std::atof(part.c_str());
+    return total;
+}
+
+std::string formatSeconds(double value) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.6f", value);
+    return buffer;
+}
+
 std::string runCapture(const std::string& command) {
     std::string out;
     FILE* pipe = openPipe(command, "r");
@@ -615,39 +635,82 @@ int cmdVideo(const Args& args) {
     const bool hdr = trc == "pq" || trc == "hlg";
     const std::string inMatrix = args.get("in-matrix", "bt2020");
 
+    // Time range (D031): seconds or HH:MM:SS.mmm, plus an optional frame count.
+    const double start = parseSeconds(args.get("start", "0"));
+    double framesWanted = 0.0;
+    if (args.has("frames")) {
+        framesWanted = std::atof(args.get("frames").c_str());
+    } else if (args.has("duration")) {
+        framesWanted = std::floor(parseSeconds(args.get("duration")) * fps + 0.5);
+    }
+
+    std::string seekDecode;
+    std::string seekAudio;
+    if (start > 0.0) {
+        const std::string s = formatSeconds(start);
+        seekDecode = " -ss " + s;
+        seekAudio = " -ss " + s;
+    }
+    std::string limitDecode;
+    std::string limitAudio;
+    if (framesWanted >= 1.0) {
+        const std::string dur = formatSeconds(framesWanted / fps);
+        limitDecode = " -frames:v " + std::to_string(static_cast<long>(framesWanted));
+        limitAudio = " -t " + dur;
+    }
+
     const std::string decodeCmd =
-        shellQuote(ffmpeg) + " -v error -i " + shellQuote(inPath) + " -vf " +
+        shellQuote(ffmpeg) + " -v error" + seekDecode + " -i " + shellQuote(inPath) +
+        limitDecode + " -vf " +
         shellQuote("scale=in_color_matrix=" + inMatrix + ":in_range=tv:out_range=full") +
         " -pix_fmt rgb48le -f rawvideo -";
 
-    std::string encodeCmd;
-    if (hdr) {
-        const std::string transfer = trc == "pq" ? "smpte2084" : "arib-std-b67";
-        encodeCmd = shellQuote(ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
-                    std::to_string(width) + "x" + std::to_string(height) + " -r " +
-                    std::to_string(fps) + " -i - -i " + shellQuote(inPath) +
-                    " -map 0:v:0 -map 1:a:0? -c:a copy -vf " +
-                    shellQuote("scale=out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le") +
-                    " -c:v libx265 -crf 16 -x265-params " +
-                    shellQuote("colorprim=bt2020:transfer=" + transfer +
-                               ":colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)"
-                               "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400") +
-                    " -color_primaries bt2020 -color_trc " + transfer + " -colorspace bt2020nc" +
-                    " -movflags +faststart " + shellQuote(outPath);
-    } else {
-        encodeCmd = shellQuote(ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
-                    std::to_string(width) + "x" + std::to_string(height) + " -r " +
-                    std::to_string(fps) + " -i - -i " + shellQuote(inPath) +
-                    " -map 0:v:0 -map 1:a:0? -c:a copy -vf " +
-                    shellQuote("scale=out_color_matrix=bt709:out_range=tv,format=yuv420p") +
-                    " -c:v libx264 -crf 16 -preset medium" +
-                    " -color_primaries bt709 -color_trc bt709 -colorspace bt709" +
-                    " -movflags +faststart " + shellQuote(outPath);
+    // Codec: HEVC for HDR, H.264 for SDR, or ProRes 422 HQ on request.
+    std::string codec = args.get("codec", hdr ? "hevc" : "h264");
+    if (args.has("prores")) codec = "prores";
+    if (codec != "hevc" && codec != "h264" && codec != "prores") {
+        return fail("--codec expects 'hevc', 'h264' or 'prores'");
     }
 
+    const bool prores = codec == "prores";
+    const std::string outFormat =
+        prores ? "yuv422p10le" : (hdr ? "yuv420p10le" : "yuv420p");
+    const std::string matrix = hdr ? "bt2020nc" : "bt709";
+    const std::string transfer = hdr ? (trc == "pq" ? "smpte2084" : "arib-std-b67") : "bt709";
+    const std::string primaries = hdr ? "bt2020" : "bt709";
+
+    std::string codecArgs;
+    if (prores) {
+        codecArgs = " -c:v prores_ks -profile:v 3 -vendor apl0";
+    } else if (hdr) {
+        codecArgs = " -c:v libx265 -crf 16 -x265-params " +
+                    shellQuote("colorprim=bt2020:transfer=" + transfer +
+                               ":colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)"
+                               "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400");
+    } else {
+        codecArgs = " -c:v libx264 -crf 16 -preset medium";
+    }
+
+    const std::string encodeCmd =
+        shellQuote(ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
+        std::to_string(width) + "x" + std::to_string(height) + " -r " +
+        std::to_string(fps) + " -i -" + seekAudio + limitAudio + " -i " + shellQuote(inPath) +
+        " -map 0:v:0 -map 1:a:0? -c:a copy -vf " +
+        shellQuote("scale=out_color_matrix=" + matrix + ":out_range=tv,format=" + outFormat) +
+        codecArgs + " -color_primaries " + primaries + " -color_trc " + transfer +
+        " -colorspace " + matrix + " -movflags +faststart " + shellQuote(outPath);
+
     std::printf("input:  %s (%dx%d @ %.3f fps)\n", inPath.c_str(), width, height, fps);
-    std::printf("output: %s (%s)\n", outPath.c_str(), hdr ? (trc == "pq" ? "HEVC PQ" : "HEVC HLG")
-                                                         : "H.264 SDR");
+    if (start > 0.0 || framesWanted >= 1.0) {
+        std::printf("range:  start %.3f s, %s\n", start,
+                    framesWanted >= 1.0
+                        ? (std::to_string(static_cast<long>(framesWanted)) + " frames").c_str()
+                        : "to the end");
+    }
+    const char* codecName = prores ? "ProRes 422 HQ"
+                                   : (codec == "hevc" ? "HEVC Main10" : "H.264");
+    std::printf("output: %s (%s, %s)\n", outPath.c_str(), codecName,
+                hdr ? (trc == "pq" ? "PQ" : "HLG") : "SDR");
 
     FILE* decoder = openPipe(decodeCmd, "rb");
     if (!decoder) return fail("failed to start ffmpeg decoder");

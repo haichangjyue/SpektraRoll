@@ -85,6 +85,10 @@ spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --hdr
 # grade a whole clip (ffmpeg decodes, the LUT runs in-process, audio is copied)
 spektra-roll-cli video --lut hdr.cube --in clip.mov --out graded.mov --trc pq
 
+# only one second in the middle, as ProRes 422 HQ for the edit
+spektra-roll-cli video --lut hdr.cube --in clip.mov --out trimmed.mov --trc pq \
+    --start 00:00:12.5 --frames 24 --codec prores
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube

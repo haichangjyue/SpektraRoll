@@ -360,6 +360,20 @@
 
 ---
 
+## D031 · 帧区间与 ProRes 输出
+
+- **日期**：2026-11-01
+- **背景**：M3 要能只渲一段，也要能把结果交给剪辑软件（ProRes）。
+- **决定**：
+  - `--start <秒 或 HH:MM:SS.mmm>`、`--frames N`、`--duration T`；解码用 `-ss`/`-frames:v`，音频用同样的 `-ss`/`-t`，保证音画同步
+  - `--codec hevc|h264|prores`；ProRes 走 `prores_ks -profile:v 3`（422 HQ，10-bit 4:2:2），HDR 时同样写 BT.2020 / PQ 标记
+- **后果**：
+  - 1 秒片段（24 帧）验证通过：视频 1.000 s、音频 1.021 s（AAC 帧对齐的正常偏差）
+  - 同一段素材出 ProRes 422 HQ 是 **120 MB / 4.1 s**——ProRes 本来就大，这是交换格式不是交付格式
+  - 断点续渲、时间码（timecode track）还没做
+
+---
+
 ## 待决策（还没问你）
 
 - D009：Windows UI 用 WinUI 3 还是 Qt（建议 WinUI 3）
