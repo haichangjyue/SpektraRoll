@@ -343,6 +343,7 @@
   - 胶片模型完全不变，只是末端编码从 sRGB 换成 PQ/HLG
   - **MacBook Air M1 的屏幕是 SDR**，在本机看 HDR 文件与普通视频无异；验收要用 iPhone 16 Pro（XDR 屏）或外接 HDR 显示器
   - demo 的 HEVC 片段用 4:2:0 10-bit 编码，饱和边缘会有轻微色度误差（PQ 空间最大 0.09），以 16-bit PNG 为准
+  - demo 现在处理**整段素材**：`lut apply --in-dir/--out-dir` 批量套 LUT，再带原声重新编码（99 帧，4.125 s）
 
 ---
 

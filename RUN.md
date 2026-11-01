@@ -79,7 +79,7 @@ X:\agent\SpektraRoll\scripts\demo-m2.cmd
 同一帧还会出两个 HDR 文件：
 
 - `out\m2-hdr-pq.png` —— 16-bit PQ 静帧（画面白 = 1000 nits）
-- `out\m2-hdr-pq.mov` —— 4 秒 HEVC 10-bit，PQ + BT.2020 标记
+- `out\m2-hdr-pq.mov` —— **整段 4.1 秒原片**：99 帧、24p、HEVC 10-bit、PQ + BT.2020、带原声
 
 **重要**：MacBook Air 的屏幕是 SDR 的，在这台电脑上看它和普通视频一样；
 用 AirDrop 传到 iPhone 16 Pro（XDR 屏）上才能看到真正的高光。

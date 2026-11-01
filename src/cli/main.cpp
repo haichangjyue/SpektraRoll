@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <sstream>
 #include <string>
@@ -70,6 +71,11 @@ void printUsage() {
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
+        "\n"
+        "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
+        "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
+        "      Apply the LUT to every PNG in --in-dir (sorted by name). Used to grade\n"
+        "      image sequences without starting the process once per frame.\n"
         "\n"
         "  spektra-roll-cli lut compare --a <reference.cube> --b <test.cube>\n"
         "                               [--min-psnr 60]\n"
@@ -387,26 +393,85 @@ int cmdLutCompare(const Args& args) {
     return 0;
 }
 
+int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
+                   const std::string& inDir, const std::string& outDir, const Args& args) {
+    if (inDir.empty() || outDir.empty()) return fail("--in-dir and --out-dir go together");
+
+    std::error_code ec;
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(inDir, ec)) {
+        if (!entry.is_regular_file()) continue;
+        const std::string ext = entry.path().extension().string();
+        if (ext == ".png" || ext == ".PNG") files.push_back(entry.path());
+    }
+    if (files.empty()) return fail("no PNG files in " + inDir);
+    std::sort(files.begin(), files.end());
+    std::filesystem::create_directories(outDir, ec);
+
+    const auto started = std::chrono::steady_clock::now();
+    size_t frames = 0;
+    size_t pixels = 0;
+    std::string error;
+    int bits = 16;
+    for (const auto& path : files) {
+        sr::Image image;
+        int sourceBits = 8;
+        if (!sr::loadImage(path.string(), image, error, &sourceBits)) return fail(error);
+        const size_t count = static_cast<size_t>(image.width) * image.height;
+        for (size_t i = 0; i < count; ++i) {
+            float* px = &image.pixels[i * 3];
+            const sr::Rgb src{px[0], px[1], px[2]};
+            const sr::Rgb mapped = lut.apply(src, mode);
+            const sr::Rgb result = sr::mix(src, mapped, strength);
+            px[0] = result.r;
+            px[1] = result.g;
+            px[2] = result.b;
+        }
+        bits = requestedBits(args, sourceBits);
+        const auto outPath = std::filesystem::path(outDir) / path.filename();
+        if (!sr::saveImage(outPath.string(), image, error, bits)) return fail(error);
+        ++frames;
+        pixels += count;
+        if (frames % 10 == 0 || frames == files.size()) {
+            std::printf("  frame %zu/%zu (%.0f%%)\n", frames, files.size(),
+                        100.0 * frames / files.size());
+            std::fflush(stdout);
+        }
+    }
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+    std::printf("applied %d^3 LUT to %zu frames, %zu pixels, %d-bit, %.2f s (%.1f ms/frame)\n",
+                lut.size(), frames, pixels, bits, elapsed / 1000.0, elapsed / frames);
+    return 0;
+}
+
 int cmdLutApply(const Args& args) {
     const std::string lutPath = args.get("lut");
-    const std::string inPath = args.get("in");
-    const std::string outPath = args.get("out");
     if (lutPath.empty()) return fail("lut apply requires --lut <file.cube>");
-    if (inPath.empty()) return fail("lut apply requires --in <image>");
-    if (outPath.empty()) return fail("lut apply requires --out <image>");
 
     sr::Lut3D lut;
     std::string error;
     if (!lut.loadCube(lutPath, error)) return fail(error);
 
-    sr::Image image;
-    int sourceBits = 8;
-    if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
-
     const std::string interpName = args.get("interp", "tetra");
     const sr::Interp mode =
         interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
     const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
+
+    if (args.has("in-dir") || args.has("out-dir")) {
+        return applyDirectory(lut, mode, strength, args.get("in-dir"), args.get("out-dir"), args);
+    }
+
+    const std::string inPath = args.get("in");
+    const std::string outPath = args.get("out");
+    if (inPath.empty()) return fail("lut apply requires --in <image>");
+    if (outPath.empty()) return fail("lut apply requires --out <image>");
+
+    sr::Image image;
+    int sourceBits = 8;
+    if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
+
     const int bits = requestedBits(args, sourceBits);
 
     const auto started = std::chrono::steady_clock::now();
