@@ -39,6 +39,8 @@
 - [x] Qt 6.8.3 + MinGW 13.1 安装在 `X:\agent\tools\qt`（不进仓库）
 - [x] `spektra-roll-ui`：素材、LUT、曝光、负片/印片、反差、SDR/HDR、颗粒/光晕/眩光/扩散
 - [x] **预览一帧**：ffmpeg 抽帧 → 套 LUT + 质感 → 窗口显示（2160×1214 实测）
+- [x] **时间线拖动**预览，素材信息条显示分辨率/帧率/时长/帧数/timecode
+- [x] **按住看原片**对比、拖放素材、快捷键 Ctrl+P/R/B、输出文件夹
 - [x] **烘焙 LUT** 按钮（Apple Log / SDR，HDR 自动带 PQ/HLG）
 - [x] **渲染整段**：编码、起始、帧数、分段、续渲；日志、进度条、取消
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
