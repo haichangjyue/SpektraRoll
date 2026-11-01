@@ -72,6 +72,56 @@ void boxBlur(std::vector<float>& buffer, std::vector<float>& scratch, int width,
     }
 }
 
+// Wide blurs do not need full resolution: downsample, blur small, upsample.
+// A 4x reduction cuts the blur work by ~16x and looks identical for radii
+// above ~8 px, which is where glare, halation and diffusion live (D037).
+void blurWide(std::vector<float>& buffer, int width, int height, int radius, int factor) {
+    if (radius < 1) return;
+    factor = std::min(std::max(factor, 1), std::min(width, height));
+    if (factor <= 1 || radius < factor * 2) {
+        std::vector<float> scratch(static_cast<size_t>(width) * height);
+        for (int pass = 0; pass < 3; ++pass) {
+            boxBlur(buffer, scratch, width, height, radius);
+        }
+        return;
+    }
+
+    const int lowWidth = (width + factor - 1) / factor;
+    const int lowHeight = (height + factor - 1) / factor;
+    std::vector<float> low(static_cast<size_t>(lowWidth) * lowHeight, 0.0f);
+    const float inv = 1.0f / static_cast<float>(factor * factor);
+    for (int y = 0; y < height; ++y) {
+        const int ly = y / factor;
+        for (int x = 0; x < width; ++x) {
+            low[static_cast<size_t>(ly) * lowWidth + x / factor] +=
+                buffer[static_cast<size_t>(y) * width + x] * inv;
+        }
+    }
+
+    std::vector<float> scratch(low.size());
+    for (int pass = 0; pass < 2; ++pass) {
+        boxBlur(low, scratch, lowWidth, lowHeight, std::max(1, radius / factor));
+    }
+
+    for (int y = 0; y < height; ++y) {
+        const float fy = (static_cast<float>(y) + 0.5f) / static_cast<float>(factor) - 0.5f;
+        const int y0 = std::clamp(static_cast<int>(std::floor(fy)), 0, lowHeight - 1);
+        const int y1 = std::min(lowHeight - 1, y0 + 1);
+        const float ty = std::clamp(fy - static_cast<float>(y0), 0.0f, 1.0f);
+        for (int x = 0; x < width; ++x) {
+            const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(factor) - 0.5f;
+            const int x0 = std::clamp(static_cast<int>(std::floor(fx)), 0, lowWidth - 1);
+            const int x1 = std::min(lowWidth - 1, x0 + 1);
+            const float tx = std::clamp(fx - static_cast<float>(x0), 0.0f, 1.0f);
+            const float top = low[static_cast<size_t>(y0) * lowWidth + x0] * (1.0f - tx) +
+                              low[static_cast<size_t>(y0) * lowWidth + x1] * tx;
+            const float bottom = low[static_cast<size_t>(y1) * lowWidth + x0] * (1.0f - tx) +
+                                 low[static_cast<size_t>(y1) * lowWidth + x1] * tx;
+            buffer[static_cast<size_t>(y) * width + x] = top * (1.0f - ty) + bottom * ty;
+        }
+    }
+}
+
 }  // namespace
 
 void applyHalation(float* pixels, int width, int height, const HalationParams& params) {
@@ -91,7 +141,7 @@ void applyHalation(float* pixels, int width, int height, const HalationParams& p
     const int radius =
         std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
     std::vector<float> scratch(count);
-    for (int pass = 0; pass < 3; ++pass) boxBlur(glow, scratch, width, height, radius);
+    blurWide(glow, width, height, radius, 2);
 
     // Warm bleed: red scatters most, blue least, like the antihalation layer
     // failing to catch everything.
@@ -122,7 +172,7 @@ void applyGlare(float* pixels, int width, int height, const GlareParams& params)
     }
     // Veiling glare in a lens is essentially neutral, so one wide blur of the
     // luminance is enough; a slight warm tint keeps it from looking digital.
-    for (int pass = 0; pass < 3; ++pass) boxBlur(veil, scratch, width, height, radius);
+    blurWide(veil, width, height, radius, 4);
 
     const float amount = std::min(1.0f, params.amount);
     const float tint[3] = {1.0f, 0.96f, 0.92f};
@@ -150,7 +200,7 @@ void applyDiffusion(float* pixels, int width, int height, const DiffusionParams&
         const float* px = &pixels[i * 3];
         blurred[i] = 0.2126f * px[0] + 0.7152f * px[1] + 0.0722f * px[2];
     }
-    for (int pass = 0; pass < 2; ++pass) boxBlur(blurred, scratch, width, height, radius);
+    blurWide(blurred, width, height, radius, 2);
 
     // Add the local luminance difference back to every channel: bright areas
     // soften and dark areas next to them pick up a little light, while hue is

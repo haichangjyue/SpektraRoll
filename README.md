@@ -93,6 +93,10 @@ spektra-roll-cli video --lut hdr.cube --in clip.mov --out trimmed.mov --trc pq \
 spektra-roll-cli video --lut film.cube --in clip.mov --out textured.mov --trc srgb \
     --grain 0.35 --halation 0.6
 
+# encoder knobs: smaller crf / slower preset = better quality, slower render
+spektra-roll-cli video --lut film.cube --in clip.mov --out fast.mov --trc srgb \
+    --crf 22 --preset fast
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube

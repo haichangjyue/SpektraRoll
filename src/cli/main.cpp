@@ -50,6 +50,7 @@ void printUsage() {
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
+        "                         [--crf 16] [--preset medium]\n"
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
         "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
@@ -614,6 +615,12 @@ std::string formatSeconds(double value) {
     return buffer;
 }
 
+std::string formatNumber(double value) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%g", value);
+    return buffer;
+}
+
 std::string runCapture(const std::string& command) {
     std::string out;
     FILE* pipe = openPipe(command, "r");
@@ -746,15 +753,18 @@ int cmdVideo(const Args& args) {
     const std::string primaries = hdr ? "bt2020" : "bt709";
 
     std::string codecArgs;
+    const double crf = args.getDouble("crf", 16.0);
+    const std::string preset = args.get("preset", "medium");
     if (prores) {
         codecArgs = " -c:v prores_ks -profile:v 3 -vendor apl0";
     } else if (hdr) {
-        codecArgs = " -c:v libx265 -crf 16 -x265-params " +
+        codecArgs = " -c:v libx265 -crf " + formatNumber(crf) + " -preset " + preset +
+                    " -x265-params " +
                     shellQuote("colorprim=bt2020:transfer=" + transfer +
                                ":colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)"
                                "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400");
     } else {
-        codecArgs = " -c:v libx264 -crf 16 -preset medium";
+        codecArgs = " -c:v libx264 -crf " + formatNumber(crf) + " -preset " + preset;
     }
 
     const std::string encodeCmd =
