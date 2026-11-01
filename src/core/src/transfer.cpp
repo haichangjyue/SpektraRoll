@@ -63,8 +63,49 @@ void bt2020ToSrgb(const double rgb2020[3], double srgb[3]) {
     }
 }
 
-bool parseInputTransfer(const std::string& name, InputTransfer& out) {
-    if (name == "srgb" || name == "sRGB" || name == "Srgb") {
+double pqEncode(double nits) {
+    constexpr double m1 = 0.1593017578125;
+    constexpr double m2 = 78.84375;
+    constexpr double c1 = 0.8359375;
+    constexpr double c2 = 18.8515625;
+    constexpr double c3 = 18.6875;
+    const double y = std::max(0.0, nits) / 10000.0;
+    const double p = std::pow(y, m1);
+    return std::pow((c1 + c2 * p) / (1.0 + c3 * p), m2);
+}
+
+double pqDecode(double code) {
+    constexpr double m1 = 0.1593017578125;
+    constexpr double m2 = 78.84375;
+    constexpr double c1 = 0.8359375;
+    constexpr double c2 = 18.8515625;
+    constexpr double c3 = 18.6875;
+    const double n = std::min(1.0, std::max(0.0, code));
+    const double p = std::pow(n, 1.0 / m2);
+    const double num = std::max(p - c1, 0.0);
+    const double den = c2 - c3 * p;
+    return den > 0.0 ? 10000.0 * std::pow(num / den, 1.0 / m1) : 0.0;
+}
+
+double hlgEncode(double linear) {
+    constexpr double a = 0.17883277;
+    constexpr double b = 0.28466892;
+    constexpr double c = 0.55991073;
+    const double e = std::max(0.0, linear);
+    if (e <= 1.0 / 12.0) return std::sqrt(3.0 * e);
+    return a * std::log(12.0 * e - b) + c;
+}
+
+double hlgDecode(double code) {
+    constexpr double a = 0.17883277;
+    constexpr double b = 0.28466892;
+    constexpr double c = 0.55991073;
+    const double v = std::min(1.0, std::max(0.0, code));
+    if (v <= 0.5) return v * v / 3.0;
+    return (std::exp((v - c) / a) + b) / 12.0;
+}
+
+bool parseInputTransfer(const std::string& name, InputTransfer& out) {    if (name == "srgb" || name == "sRGB" || name == "Srgb") {
         out = InputTransfer::Srgb;
         return true;
     }

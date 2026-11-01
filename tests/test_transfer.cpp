@@ -99,6 +99,25 @@ int main() {
           "parse srgb");
     check(!sr::parseInputTransfer("rec709", parsed), "reject unknown input transfer");
 
+    // SMPTE ST 2084 (PQ), reference values from colour-science 0.4.7.
+    checkNear(sr::pqEncode(100.0), 0.508078422, 1e-8, "PQ 100 nits");
+    checkNear(sr::pqEncode(203.0), 0.580688881, 1e-8, "PQ 203 nits");
+    checkNear(sr::pqEncode(1000.0), 0.751827096, 1e-8, "PQ 1000 nits");
+    checkNear(sr::pqEncode(10000.0), 1.0, 1e-9, "PQ 10000 nits is code 1");
+    check(sr::pqEncode(0.0) < 1e-5, "PQ black is near zero");
+    for (double nits : {0.5, 10.0, 100.0, 1000.0}) {
+        checkNear(sr::pqDecode(sr::pqEncode(nits)), nits, 1e-6, "PQ round trip");
+    }
+
+    // ITU-R BT.2100 HLG OETF.
+    checkNear(sr::hlgEncode(0.05), 0.387298335, 1e-8, "HLG 0.05");
+    checkNear(sr::hlgEncode(0.18), 0.672358132, 1e-8, "HLG 0.18");
+    checkNear(sr::hlgEncode(0.5), 0.871643471, 1e-8, "HLG 0.5");
+    checkNear(sr::hlgEncode(1.0), 1.0, 1e-7, "HLG 1.0");
+    for (double value : {0.01, 0.1, 0.5, 0.9}) {
+        checkNear(sr::hlgDecode(sr::hlgEncode(value)), value, 1e-9, "HLG round trip");
+    }
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

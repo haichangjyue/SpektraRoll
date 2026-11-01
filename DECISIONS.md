@@ -329,6 +329,23 @@
 
 ---
 
+## D029 · HDR 输出（PQ / HLG）
+
+- **日期**：2026-11-01
+- **背景**：M2 的最后一项。Apple Log 素材本身有约 6 档高光余量，SDR 交付把它们压成一片白。
+- **决定**：
+  - 新增 `--hdr pq|hlg` 与 `--peak <nits>`（默认 1000）
+  - PQ：画面白（线性 1.0）映射到 `peak` 尼特，按 SMPTE ST 2084 编码；中性灰约 90 nits（白 1000 时）
+  - HLG：按 BT.2100 OETF，1.0 = 峰值信号
+  - 输出仍是 16-bit PNG（存 PQ 码值），演示脚本再用 ffmpeg 封装成 HEVC Main10 + PQ/BT.2020 的 `.mov`
+- **后果**：
+  - `lut bake --hdr pq` 的探针：输入 1.0 → 输出 **0.75183**（= 1000 nits 的 PQ 码值）
+  - 胶片模型完全不变，只是末端编码从 sRGB 换成 PQ/HLG
+  - **MacBook Air M1 的屏幕是 SDR**，在本机看 HDR 文件与普通视频无异；验收要用 iPhone 16 Pro（XDR 屏）或外接 HDR 显示器
+  - demo 的 HEVC 片段用 4:2:0 10-bit 编码，饱和边缘会有轻微色度误差（PQ 空间最大 0.09），以 16-bit PNG 为准
+
+---
+
 ## 待决策（还没问你）
 
 - D009：Windows UI 用 WinUI 3 还是 Qt（建议 WinUI 3）

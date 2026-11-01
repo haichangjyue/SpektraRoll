@@ -80,6 +80,11 @@ up. This is per-pixel chemistry only; the spatial diffusion of inhibitors stays
 in the M4 GPU pass. It matches the upstream reference bake to PSNR 80.75 dB and
 defaults on for Apple Log input.
 
+HDR delivery (D029) only changes the output encoding: `--hdr pq` maps the
+image's white to `--peak` nits (default 1000) and writes ST 2084 code values,
+`--hdr hlg` writes BT.2100 HLG. The film model is untouched, so SDR and HDR
+renders share every earlier stage.
+
 Deliberately off so far (each has a decision record):
 
 - output gamut compression (D014) — M2
@@ -139,7 +144,7 @@ and CIE76 ΔE over all 33³ entries. Current numbers are in
 |---|---|
 | M0 *(done)* | CLI applies a LUT, tests, CI |
 | M1 *(done)* | spektrafilm model ported, real Portra 400 + Endura LUT, parity harness, 16-bit PNG |
-| M2 | colour correctness: real-photo sample, gamut compression (done), couplers, Apple Log input (done), scanned negative (done), HDR (PQ/HLG) output |
+| M2 | colour correctness: real-photo sample, gamut compression (done), couplers (done), Apple Log input (done), scanned negative (done), HDR PQ/HLG output (done) |
 | M3 | video I/O: FFmpeg / ProRes, time dimension, frame ranges; decide standalone vs OFX (D022) |
 | M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, SIMD / threads / GPU, float / EXR |
 | M5 | UI: Windows WinUI 3, macOS SwiftUI, OFX plugin, render-farm CLI |

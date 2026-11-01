@@ -77,7 +77,7 @@ Write-Host "4/5  套上 Portra 400 (印片, 高对比)..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "5/5  扫描负片 (默认反差 1.15)..." -ForegroundColor Cyan
+Write-Host "5/6  扫描负片 (默认反差 1.15)..." -ForegroundColor Cyan
 & $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\m2-applelog-negative.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $exe lut apply --lut "out\m2-applelog-negative.cube" --in "out\m2-frame-applelog.png" --out "out\m2-negative.png"
@@ -88,6 +88,20 @@ Write-Host "5b   负片, 不加反差 (留全部余量, 对比用)..." -Foregrou
 & $exe lut bake --input apple-log --exposure $Exposure --scan negative --contrast 1.0 --out "out\m2-applelog-negative-flat.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $exe lut apply --lut "out\m2-applelog-negative-flat.cube" --in "out\m2-frame-applelog.png" --out "out\m2-negative-flat.png"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Host ""
+Write-Host "6/6  输出 HDR (PQ, 白色 1000 nits)..." -ForegroundColor Cyan
+& $exe lut bake --input apple-log --exposure $Exposure --scan negative --hdr pq --peak 1000 --out "out\m2-applelog-hdr.cube"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $exe lut apply --lut "out\m2-applelog-hdr.cube" --in "out\m2-frame-applelog.png" --out "out\m2-hdr-pq.png"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $ffmpeg -y -v error -loop 1 -i "out\m2-hdr-pq.png" -t 4 -r 24 `
+    -vf "scale=out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le" `
+    -c:v libx265 -crf 16 `
+    -x265-params "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400" `
+    -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc `
+    -movflags +faststart "out\m2-hdr-pq.mov"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
@@ -102,6 +116,12 @@ Write-Host "  $root\out\m2-before.png         (只解码, 对照)"
 Write-Host "  $root\out\m2-after.png          (印片: Portra 400 + Endura)"
 Write-Host "  $root\out\m2-negative.png       (扫描负片: 默认反差 1.15)"
 Write-Host "  $root\out\m2-negative-flat.png  (扫描负片: 不加反差, 留余量)"
+Write-Host ""
+Write-Host "HDR 版本:" -ForegroundColor Green
+Write-Host "  $root\out\m2-hdr-pq.png         (16-bit PQ, 白色 1000 nits)"
+Write-Host "  $root\out\m2-hdr-pq.mov         (HEVC 10-bit, PQ/BT.2020)"
+Write-Host "  注意: MacBook Air 的屏幕是 SDR 的, 看这个文件会像普通视频;" -ForegroundColor Yellow
+Write-Host "        用 AirDrop 传到 iPhone 16 Pro 上才能看到真正的高光。" -ForegroundColor Yellow
 Write-Host ""
 
 if (-not $NoOpen) {

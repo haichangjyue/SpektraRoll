@@ -74,6 +74,16 @@ X:\agent\SpektraRoll\scripts\demo-m2.cmd
 - 彩色招牌和墙面：有没有过饱和或者串色
 - 负片 vs 不加反差：默认 1.15 更"出片"，1.0 留全部余量
 
+### HDR 版本（M2 最后一项）
+
+同一帧还会出两个 HDR 文件：
+
+- `out\m2-hdr-pq.png` —— 16-bit PQ 静帧（画面白 = 1000 nits）
+- `out\m2-hdr-pq.mov` —— 4 秒 HEVC 10-bit，PQ + BT.2020 标记
+
+**重要**：MacBook Air 的屏幕是 SDR 的，在这台电脑上看它和普通视频一样；
+用 AirDrop 传到 iPhone 16 Pro（XDR 屏）上才能看到真正的高光。
+
 觉得不对就告诉我"太黄了 / 太暗了 / 高光糊了"，我来调曝光或曲线。
 
 ### 想确认"它没坏"就双击这个

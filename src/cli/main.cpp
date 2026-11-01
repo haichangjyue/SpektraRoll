@@ -49,6 +49,7 @@ void printUsage() {
         "                            [--input srgb|apple-log] [--exposure EV]\n"
         "                            [--scan print|negative] [--contrast 1.15]\n"
         "                            [--gamut oklch|off] [--couplers on|off]\n"
+        "                            [--hdr pq|hlg] [--peak 1000]\n"
         "                            [--title <text>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
@@ -63,6 +64,8 @@ void printUsage() {
         "      OkLCh chroma; negative scans default to it, print keeps it off.\n"
         "      --couplers on adds DIR interlayer inhibition (Apple Log defaults\n"
         "      to on, the sRGB reference keeps it off).\n"
+        "      --hdr pq writes ST 2084 code values with the image's white at\n"
+        "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -265,8 +268,7 @@ int cmdLutBake(const Args& args) {
     options.contrast =
         args.getDouble("contrast", options.scan == sr::ScanMode::Negative ? 1.15 : 1.0);
 
-    // Gamut compression defaults on only for Apple Log input (D027): the print
-    // path from Apple Log can produce negative linear values, while the sRGB
+    // Gamut compression defaults on only for Apple Log input (D027): the print    // path from Apple Log can produce negative linear values, while the sRGB
     // path must stay byte-identical to the M1 reference.
     options.gamutCompress = options.input == sr::InputTransfer::AppleLog;
     if (args.has("gamut")) {
@@ -299,6 +301,18 @@ int cmdLutBake(const Args& args) {
     modelOptions.couplers = couplers;
     if (!model.configure(film, paper, filters, error, modelOptions)) return fail(error);
 
+    if (args.has("hdr")) {
+        const std::string value = args.get("hdr");
+        if (value == "pq") {
+            options.hdr = sr::HdrMode::Pq;
+        } else if (value == "hlg") {
+            options.hdr = sr::HdrMode::Hlg;
+        } else if (value != "off") {
+            return fail("--hdr expects 'pq', 'hlg' or 'off'");
+        }
+    }
+    options.peakNits = args.getDouble("peak", 1000.0);
+
     std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
     std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
     std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
@@ -311,6 +325,10 @@ int cmdLutBake(const Args& args) {
     if (options.contrast != 1.0) std::printf("contrast:          %.2f\n", options.contrast);
     std::printf("gamut:             %s\n", options.gamutCompress ? "oklch" : "off");
     std::printf("couplers:          %s\n", couplers ? "on" : "off");
+    if (options.hdr != sr::HdrMode::Off) {
+        std::printf("hdr:               %s, white at %.0f nits\n",
+                    options.hdr == sr::HdrMode::Pq ? "pq" : "hlg", options.peakNits);
+    }
 
     const auto started = std::chrono::steady_clock::now();
     const std::string title =

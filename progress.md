@@ -150,6 +150,7 @@
 | **D026** | 负片默认反差 | **1.15**（你确认） | CLI 默认 1.15；`--contrast 1.0` 拿回全余量；库默认仍是 1.0 |
 | **D027** | 输出色域压缩 | **OkLCh 色度压缩，膝点 0.8/1.0/2.0** | Apple Log 默认开（负值 3,763→0）；sRGB 默认关保 M1 parity |
 | **D028** | DIR 耦合剂 | **自层 + 层间抑制矩阵，Apple Log 默认开** | 与上游 PSNR 80.75 dB；饱和色增强，中性灰不变 |
+| **D029** | HDR 输出 | **PQ / HLG 末端编码，白色 = `--peak` 尼特（默认 1000）** | 1.0 → PQ 0.75183；Air 是 SDR 屏，验收要靠 iPhone |
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -177,6 +178,7 @@
 - [x] **默认反差定为 1.15**（D026，你确认；`--contrast 1.0` 拿回全余量版本）
 - [x] **输出色域压缩**（D027）：`--gamut oklch`，Apple Log 印片负值 3,763→0；sRGB 路径默认关，M1 parity 不变
 - [x] **DIR 耦合剂**（D028）：`--couplers on|off`，Apple Log 默认开；与上游参考 PSNR 80.75 dB
+- [x] **HDR 输出**（D029）：`--hdr pq|hlg --peak 1000`，demo 出 16-bit PQ PNG + HEVC 10-bit 片段
 - [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
 
 还没做：
@@ -311,7 +313,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D028
+├── DECISIONS.md             决策台账 D001–D029
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -320,7 +322,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D028**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D029**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）

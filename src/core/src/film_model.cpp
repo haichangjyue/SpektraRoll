@@ -468,8 +468,7 @@ Rgb FilmModel::transformLinear(const double linear[3], const BakeOptions& option
                 for (int c = 0; c < 3; ++c) rgb[c] = std::min(1.0, rgb[c] * scale);
             }
         }
-        return Rgb{static_cast<float>(srgbEncode(rgb[0])), static_cast<float>(srgbEncode(rgb[1])),
-                   static_cast<float>(srgbEncode(rgb[2]))};
+        return encodeOutput(rgb, options);
     }
 
     double printRaw[3] = {0.0, 0.0, 0.0};
@@ -522,8 +521,25 @@ Rgb FilmModel::transformLinear(const double linear[3], const BakeOptions& option
         rgb[2] = mapped.b;
     }
 
-    return Rgb{static_cast<float>(srgbEncode(rgb[0])), static_cast<float>(srgbEncode(rgb[1])),
-               static_cast<float>(srgbEncode(rgb[2]))};
+    return encodeOutput(rgb, options);
+}
+
+Rgb FilmModel::encodeOutput(const double linear[3], const BakeOptions& options) const {
+    if (options.hdr == HdrMode::Off) {
+        // M1 behaviour: no clamp before the sRGB encode, so the reference LUT
+        // keeps its out-of-range entries.
+        return Rgb{static_cast<float>(srgbEncode(linear[0])),
+                   static_cast<float>(srgbEncode(linear[1])),
+                   static_cast<float>(srgbEncode(linear[2]))};
+    }
+    double out[3];
+    for (int c = 0; c < 3; ++c) {
+        const double value = std::min(1.0, std::max(0.0, linear[c]));
+        out[c] = options.hdr == HdrMode::Pq ? pqEncode(value * options.peakNits)
+                                            : hlgEncode(value);
+    }
+    return Rgb{static_cast<float>(out[0]), static_cast<float>(out[1]),
+               static_cast<float>(out[2])};
 }
 
 Lut3D FilmModel::bake(int size, const std::string& title) const {

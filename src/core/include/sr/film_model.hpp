@@ -20,6 +20,10 @@ namespace sr {
 //             film base: much more latitude, flatter look, meant for grading
 enum class ScanMode { Print, Negative };
 
+// Output transfer for HDR delivery (D029). PQ takes absolute luminance with
+// `peakNits` as the value of diffuse white; HLG treats 1.0 as peak signal.
+enum class HdrMode { Off, Pq, Hlg };
+
 struct BakeOptions {
     InputTransfer input = InputTransfer::Srgb;
     // Exposure in stops, applied in linear light before the film model. Only
@@ -33,6 +37,10 @@ struct BakeOptions {
     // Map out-of-gamut linear colour back into the sRGB cube (OkLCh chroma
     // reduction). Off for the print path so M1 parity is untouched (D027).
     bool gamutCompress = false;
+    // Output encoding: sRGB (default), PQ or HLG (D029). PQ maps the image's
+    // white to `peakNits` cd/m2, so the highlights actually reach that level.
+    HdrMode hdr = HdrMode::Off;
+    double peakNits = 1000.0;
 };
 
 struct FilmModelOptions {
@@ -82,6 +90,7 @@ public:
 
 private:
     Rgb transformLinear(const double linear[3], const BakeOptions& options) const;
+    Rgb encodeOutput(const double linear[3], const BakeOptions& options) const;
     void filmCmy(const double linear[3], double cmy[3]) const;
     void scanPositiveDye(const double cmy[3], double linearSrgb[3]) const;
     void filmRaw(const double rgb[3], double raw[3]) const;

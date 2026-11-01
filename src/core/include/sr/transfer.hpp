@@ -35,4 +35,12 @@ double appleLogDecode(double encoded);
 // negative; the caller applies gamut mapping or clipping (D014).
 void bt2020ToSrgb(const double rgb2020[3], double srgb[3]);
 
+// SMPTE ST 2084 (PQ) and ITU-R BT.2100 HLG transfer functions, D029.
+// PQ takes absolute luminance in cd/m2 and returns a [0, 1] code value;
+// HLG takes a scene-linear value in [0, 1] (1.0 = peak).
+double pqEncode(double nits);
+double pqDecode(double code);
+double hlgEncode(double linear);
+double hlgDecode(double code);
+
 }  // namespace sr

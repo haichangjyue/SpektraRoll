@@ -79,6 +79,9 @@ spektra-roll-cli lut apply --lut neg.cube --in frame.png --out frame_negative.pn
 # negative scans default to --contrast 1.15; pass 1.0 for the flat, full-latitude version
 spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --contrast 1.0 --out neg_flat.cube
 
+# HDR delivery: PQ code values with white at 1000 nits (or --hdr hlg)
+spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --hdr pq --peak 1000 --out hdr.cube
+
 # M0 commands still work
 spektra-roll-cli lut gen --out warm.cube --size 33 --preset warm
 spektra-roll-cli lut info --lut warm.cube
@@ -128,7 +131,8 @@ docs/           architecture and licensing notes
   flatter). The negative path has no upstream parity and its grey balance is a
   power law rather than a full dye-correction matrix, so colours are close but
   not final.
-- SDR output only. HDR (PQ/HLG) output is the rest of M2 (D021).
+- SDR output is the default; HDR (PQ/HLG, `--hdr`, D029) works and the demo
+  writes an HEVC Main10 HDR clip, but seeing it needs an HDR display.
 - No video file I/O yet: stills only until the M3 FFmpeg/ProRes step.
 - Output gamut compression is off. Extreme colours can produce out-of-range
   LUT values, which are clamped when writing an image.
