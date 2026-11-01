@@ -1,33 +1,31 @@
 # STATUS
 
-**最后更新**：2026-11-01 · 里程碑 **M3 进行中**（视频读写已通）· 项目名 **SpektraRoll**
+**最后更新**：2026-11-02 · 里程碑 **M3 完成** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，带原声输出 SDR 或 **HDR（PQ/HLG）**，一段 4 秒 99 帧的素材约 30 秒跑完。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。4 秒 99 帧素材约 46 秒跑完。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
 
-## M3 进行中：视频读写已通
+## M3 已完成：视频读写 + 胶片质感
 
 - [x] `spektra-roll-cli video --lut x.cube --in clip.mov --out graded.mov [--trc pq]`
 - [x] 逐帧解码 → 套 LUT → 重新编码，原声保留，HDR 自动带 PQ/HLG 标记
 - [x] 自动处理竖拍素材的旋转（-90 元数据）
-- [x] 99 帧 2.6 MP 素材约 30 秒（268 ms/帧，单线程）
 - [x] 帧区间：`--start 00:00:12 --frames 240`（音画同步）
 - [x] ProRes 422 HQ 输出：`--codec prores`（SDR 和 HDR 都有）
 - [x] macOS 本机验收脚本：`scripts/verify-macos.command`（**已在 Mac 上跑通，含视频路径**；期间发现并修复 POSIX `popen` 模式 bug）
-- [x] 多线程（D032）：套 LUT 96→17 ms，视频 214 ms/帧
-- [x] **胶片质感**（D033）：确定性颗粒 + 暖色光晕，逐帧叠加；`scripts\demo-m3.cmd`
-- [x] 颗粒调轻（D034）：模糊半径修正，噪声 std 0.014→0.0053，不再"毛躁"（**已验收**）
-- [x] **眩光 + 扩散**（D035）：宽模糊 screen 眩光 + 亮度差扩散，demo 默认 0.2 / 0.1
-- [x] **颗粒时间连续**（D036）：两场交叉淡化（`--grain-rate 3`），视频不再闪烁
+- [x] 多线程（D032）：套 LUT 96→17 ms
+- [x] **胶片质感**（D033/D035）：颗粒 + 光晕 + 眩光 + 扩散，逐帧叠加；`scripts\demo-m3.cmd`
+- [x] 颗粒调轻（D034）：噪声 std 0.014→0.0053，不再"毛躁"（**已验收**）
+- [x] **颗粒时间连续**（D036）：两场交叉淡化（`--grain-rate 3`），帧间差 −44%，视频不再闪烁
 - [x] **模糊降采样**（D037）：眩光降 4 倍、光晕/扩散降 2 倍，579→469 ms/帧
 - [x] **硬件编码选项**（D038）：`--encoder qsv`，2.6 MP 下收益有限（瓶颈在管道）
-- [x] CI 现在 Windows + macOS 都跑视频冒烟（之前 macOS 失败被误判成"没装 ffmpeg"，实际是 popen bug）
+- [x] CI 现在 Windows + macOS 都跑视频冒烟
 - [ ] 断点续渲 / 时间码轨道
-- [ ] 视频速度仍受编码器限制（M4：crf/preset 或硬件编码）
+- [ ] 颗粒场缓存（下一项，预期 469→约 350 ms/帧）
 
 ## 这次交付（M1）
 
@@ -41,7 +39,7 @@
 - [x] 单元测试 4 个程序全绿（LUT / 胶片模型 / 图像 I/O / Apple Log）
 - [x] 已推送 `main`，GitHub Actions Windows + macOS 双平台绿（CI 也会烘 LUT 并和参考对比）
 
-## 这次交付（M2 · 进行中）
+## 这次交付（M2 · 已完成）
 
 - [x] **Apple Log 输入**：`lut bake --input apple-log`，LUT 定义域就是 Apple Log 码值（D023）
 - [x] Apple Log 解码和 colour-science 逐点一致：16-bit 输出误差 ≤ 1 LSB
@@ -52,9 +50,6 @@
 - [x] **输出色域压缩**（D027）：OkLCh 色度压缩，Apple Log 印片负值 3,763→0，色相保持
 - [x] **DIR 耦合剂**（D028）：Apple Log 默认开启，与上游参考 bake PSNR 80.75 dB
 - [x] **HDR 输出**（D029）：PQ / HLG + 10-bit，白色默认 1000 nits；demo 出 HEVC 片段
-- [ ] 输出色域压缩（D014 欠账）
-- [ ] 耦合剂（D015 欠账）
-- [ ] HDR 输出：PQ / HLG + Rec.2020 + 10-bit（D021）
 
 ## 怎么验收（M2）
 
@@ -67,9 +62,11 @@
 | 项 | 结果 |
 |---|---|
 | 编译器 | MinGW-w64 GCC 16.2.0 (ucrt, posix-seh) |
-| 单元测试 | 4/4 通过 |
-| 33³ LUT 烘焙 | **约 245 ms**（单线程） |
-| 0.92 MP 套 LUT（16-bit） | **约 31 ms** |
+| 单元测试 | **6/6** 通过 |
+| 33³ LUT 烘焙 | 108 ms（多线程）；单线程 198 ms |
+| 2.6 MP 套 LUT（16-bit） | **17 ms**（多线程）；单线程 96 ms |
+| 视频（2.6 MP，HEVC） | 无质感 187 ms/帧；全质感 **469 ms/帧**；4.1 s 素材约 46 秒 |
+| 颗粒时间稳定性 | 帧间差 0.0025（rate 1）→ **0.0014**（rate 3） |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | max 1.53e-5（16-bit 1 LSB），mean 1.9e-8 |
 | 印片 vs 扫描负片（同一帧） | 天空 0.88–0.91 vs 0.48–0.70；暗部 <0.10：7.7% vs 2.5% |
@@ -82,25 +79,23 @@
 2. 双击 `scripts\demo-m1.cmd` → 自动打开 `out\m1-before.png` 和 `out\m1-after.png`
 3. 看三件事：灰阶暗部是否偏暖、肤色是否自然、红蓝是否过饱和
 
-## 下一步（M2 · 颜色正确）
+## 下一步（M3 收尾 / M4）
 
-1. 真实照片样张（demo 前/后对比，测试图保留做数值校验）
-2. 输出色域压缩（CAM16-UCS），把负值和超 1 的结果合法地压回色域
-3. 耦合剂（couplers），先做 `dir_couplers`
-4. Apple Log 输入（按 Apple 公开公式解码到线性宽色域）
-5. HDR 输出（PQ / HLG + Rec.2020 + 10-bit，HDR 曝光映射做成参数）
-6. 视频编解码（ProRes / FFmpeg）放到 M3；颗粒 / 光晕 / SIMD 顺延到 M4
+1. **颗粒场缓存**：`--grain-rate 3` 时复用噪声场，预期 469 → 约 350 ms/帧
+2. **断点续渲 + 时间码**：长片和片场需要的工程能力
+3. **界面**：先拍板 D009（WinUI 3 还是 Qt）
+4. **真实点扩散核**：眩光 / 光晕 / 扩散现在是画幅比例 + 盒状模糊
+5. **浮点 / EXR**（D017 欠账）
 
 ## 需要你决定的事
 
 - **D009**：Windows UI 用 WinUI 3 还是 Qt？（建议 WinUI 3，但要先装 MSVC）
 - **D010**：OFX 插件做不做？（建议做，放第二期）
 - **D011**：Apple Developer 账号什么时候买？（建议等有 Mac 再说）
-- **D022**：ProRes 读写走独立程序（FFmpeg）还是 Resolve 插件？（M3 之前定）
 
 ## 风险 / 提醒
 
-- 本机没有 Mac，macOS 端仍然只有 CI 编译证据，**没有画面证据**。
+- macOS 已经本机验收过（MacBook Air M1），但**HDR 画面**只能在 iPhone 16 Pro 或 HDR 显示器上看。
 - M1 的 LUT 是 display-encoded sRGB，不是线性/ACES；调色软件里要放在正确的色彩空间节点。
-- 极端饱和输入会产生负的 LUT 值，写图时被钳制；这是 D014 的已知取舍。
-- 单线程 31 ms/0.92 MP ≈ 1080p 一帧 0.3 s，视频仍需 SIMD/多线程/GPU，这是 M4 的事。
+- 极端饱和输入会产生负的 LUT 值；Apple Log 路径已开 OkLCh 压缩，sRGB 路径仍靠钳制（保 parity）。
+- 视频速度瓶颈在质感计算与管道，不在编码器；颗粒场缓存是下一步。

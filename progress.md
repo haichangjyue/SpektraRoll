@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-01
-> **当前里程碑**：M3 进行中（视频读写 + 帧区间 + ProRes 已通）；本机有 MacBook Air M1，可做 macOS 本机验收
+> **最后更新**：2026-11-02
+> **当前里程碑**：**M3 完成**（视频读写、帧区间、ProRes、多线程、胶片质感）；下一步做颗粒缓存或 M4
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -30,6 +30,26 @@
   - 所有决定写进 DECISIONS.md
   - 每次结束时更新 progress.md 和 STATUS.md
 ```
+
+---
+
+## 零之一、本次会话（2026-11-02）做了什么
+
+一次会话把项目从"M2 尾声"推到"M3 完成"，按时间顺序：
+
+1. 修好 HDR 视频：原来 demo 是单帧循环 4 秒，改成 **99 帧整段 + 原声**
+2. **M3 视频读写**（D022）：`spektra-roll-cli video` 直接吃 `.mov`，ffmpeg 解码 → 逐帧套 LUT → 重新编码，音画同步
+3. **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
+4. **macOS 修复**（issue #1）：POSIX `popen` 不接受 `"rb"/"wb"`，已修，CI 两个平台都跑视频冒烟
+5. **多线程**（D032）：套 LUT 96 → 17 ms
+6. **胶片质感**：颗粒 + 光晕（D033）→ 调轻（D034）→ 眩光 + 扩散（D035）→ 颗粒时间连续（D036）
+7. **速度**：宽模糊降采样（D037）、`--crf/--preset`、`--encoder qsv`（D038）
+
+**你亲自验收过的**：
+- MacBook Air M1 上 `scripts\verify-macos.command` 全过（含视频路径）
+- HDR 片段在 iPhone 16 Pro 上看过
+- 负片观感、颗粒浓度（0.4 / 0.45）确认"可以了"
+- 视频颗粒闪烁问题已反馈并修复（−44% 帧间差）
 
 ---
 
@@ -83,7 +103,36 @@
 | CI：Windows + macOS 都跑 `lut bake` + `lut compare`（D019） | ✅ 两个 job 绿 |
 | 冻结参考 LUT：`tests/reference/portra400_endura_33.cube` | ✅ |
 
-### 4. 改名与上线
+### 4. M2 颜色正确（已完成并验收）
+
+| 项 | 状态 |
+|---|---|
+| Apple Log 输入（LUT 定义域 = Apple Log 码值，内部解码到 BT.2020→sRGB） | ✅ 与 colour-science 差 ≤1 个 16-bit LSB |
+| `convert --from apple-log`（只解码的对照图） | ✅ |
+| 扫描负片（推荐路径）：反相 + 去片基 + 灰点中性化 | ✅ 天空 0.48–0.70，暗部死黑 7.7%→2.5% |
+| `--contrast`，负片默认 1.15（你选的） | ✅ |
+| 输出色域压缩（OkLCh，膝点 0.8/1.0/2.0） | ✅ Apple Log 印片负值 3,763→0 |
+| DIR 耦合剂（与上游参考 PSNR **80.75 dB**） | ✅ |
+| HDR 输出（PQ / HLG + `--peak`，16-bit PNG） | ✅ 1.0 → PQ 0.75183 |
+| `scripts\demo-m2.cmd`（抽帧 + 三张图 + HDR 片段） | ✅ |
+
+### 5. M3 视频与质感（已完成并验收）
+
+| 项 | 状态 |
+|---|---|
+| `spektra-roll-cli video`：解码 → 套 LUT → 编码，带原声，自动处理 -90 旋转 | ✅ 99 帧约 26 秒（无质感） |
+| `--start/--frames/--duration`（音画同步） | ✅ 24 帧片段验过 1.000 s / 1.021 s |
+| `--codec prores`（422 HQ，HDR 时带 PQ 标记） | ✅ 120 MB / 4.1 s |
+| 多线程（`--threads`，0=自动） | ✅ 套 LUT 96→17 ms |
+| 颗粒 + 光晕（确定性、逐帧） | ✅ `--grain` / `--halation`，`--grain-rate` |
+| 眩光 + 扩散 | ✅ `--glare` / `--diffusion` |
+| 颗粒时间连续（两场交叉淡化） | ✅ 帧间差 −44%，你确认不再闪 |
+| 宽模糊降采样（眩光 4×、光晕/扩散 2×） | ✅ 579→469 ms/帧，肉眼无差 |
+| `--crf` / `--preset` / `--encoder qsv` | ✅ QSV 在 2.6 MP 下收益有限 |
+| macOS `popen` 修复（issue #1） | ✅ CI 两平台都跑视频冒烟 |
+| `scripts\demo-m3.cmd`（干净帧 / 质感帧 / 整段视频） | ✅ |
+
+### 6. 改名与上线
 
 - [x] 产品名定案 **SpektraRoll**，全仓库同步改名
   - 本地目录 `X:\agent\spektravideo` → `X:\agent\SpektraRoll`
@@ -97,7 +146,7 @@
 - [x] M0 历史 6 个 commit 已全部推送；M1 已提交并推送（`f493ee9`），CI 双平台绿
 - [x] CI 现在在 Windows + macOS 都烘 M1 LUT 并和冻结参考对比（D019）
 
-### 5. 实测数据（本机，真实跑出来的）
+### 7. 实测数据（本机，真实跑出来的）
 
 | 项 | 结果 |
 |---|---|
@@ -107,9 +156,11 @@
 | 编译器 | MinGW-w64 GCC 16.2.0（便携版，无管理员权限） |
 | CMake | 4.4.4（`C:\Program Files\CMake\bin\cmake.exe`） |
 | Ninja | 1.13.2（`X:\agent\tools\ninja\ninja.exe`） |
-| 单元测试 | 4/4 程序通过（LUT 6 组 + 胶片模型 + 图像 I/O + Apple Log） |
+| 单元测试 | **6/6** 程序通过（LUT、胶片模型、图像 I/O、Apple Log/传输、色域、质感） |
 | 33³ LUT 烘焙 | **约 108 ms**（多线程，含写文件）；单线程 198 ms |
-| 0.92 MP 套 33³ LUT（16-bit） | **约 17 ms**（2.6 MP 实测，多线程）；单线程 96 ms |
+| 2.6 MP 套 33³ LUT（16-bit） | **约 17 ms**（多线程）；单线程 96 ms |
+| 视频渲染（2.6 MP，HEVC） | 无质感 **187 ms/帧**；全质感 **469 ms/帧**；4.1 s 素材约 46 秒 |
+| 颗粒时间稳定性 | 帧间差 0.0025（rate 1）→ **0.0014**（rate 3） |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，max \\|diff\\| 4.57e-4，ΔE76 max 0.0065 |
 | Apple Log 解码 vs colour-science | 2.6 MP 帧，max \\|diff\\| **1.53e-5**（= 16-bit 1 LSB），mean 1.9e-8 |
 | Apple Log 素材 | 2160x1214，24p，HEVC 10-bit 4:2:2，BT.2020 |
@@ -118,7 +169,7 @@
 | 印片曝光因子 | 0.837773013976（上游含一次 sRGB→sRGB 往返，0.837787256300） |
 | 产物 | `build\spektra-roll-cli.exe`，静态链接，无 DLL 依赖 |
 
-**重要推论**：套 LUT 已经压到 17 ms/2.6 MP，视频剩下的时间几乎都在 x265 编码上（214 ms/帧里约 180 ms）。下一步提速只能换编码器设置或硬件编码，那是 M4 的事。
+**重要推论**：套 LUT 已经压到 17 ms/2.6 MP；视频剩下的时间主要在**质感计算（约 280 ms）和管道/格式转换**上，不在编码器。下一步提速的关键是**颗粒场缓存**（rate=3 时一个场可复用 3 帧）。
 
 ---
 
@@ -144,6 +195,7 @@
 | **D019** | CI 覆盖 M1 | **Windows + macOS 都烘 LUT 并和参考对比** | 光谱链退化会在 CI 直接变红 |
 | **D020** | M2 顺序 | **先色彩（真实照片 + Apple Log/HDR）→ 再视频编解码** | M2 颜色、M3 视频、M4 质感与性能、M5 界面 |
 | **D021** | Apple Log / HDR | **Apple Log 输入 → 线性宽色域 → 胶片模型 → SDR 或 HDR(PQ/HLG) 输出** | HDR 曝光映射做成参数；动态元数据不做 |
+| **D022** | 视频读写形态 | **独立程序 + FFmpeg 子进程**（你选的） | `spektra-roll-cli video` 直接吃 .mov；不把 FFmpeg 链进 exe |
 | **D023** | Apple Log 输入落地 | **LUT 定义域改为 Apple Log 码值，内部解码到线性 BT.2020 → sRGB** | 与 colour-science 逐点一致（≤1 LSB）；负值暂时钳制 |
 | **D024** | 扫描负片 | **反相 + 去片基 + D50 扫描 + 灰点中性化** | 天空 0.48–0.70、暗部死黑 7.7%→2.5%；无上游 parity |
 | **D025** | 出片路径 | **负片为推荐路径，印片保留对比；反差做成 `--contrast`** | 1.0 保留余量，1.15 稍加反差，暗部比例随反差上升 |
@@ -151,7 +203,6 @@
 | **D027** | 输出色域压缩 | **OkLCh 色度压缩，膝点 0.8/1.0/2.0** | Apple Log 默认开（负值 3,763→0）；sRGB 默认关保 M1 parity |
 | **D028** | DIR 耦合剂 | **自层 + 层间抑制矩阵，Apple Log 默认开** | 与上游 PSNR 80.75 dB；饱和色增强，中性灰不变 |
 | **D029** | HDR 输出 | **PQ / HLG 末端编码，白色 = `--peak` 尼特（默认 1000）** | 1.0 → PQ 0.75183；Air 是 SDR 屏，验收要靠 iPhone |
-| **D022** | 视频读写形态 | **独立程序 + FFmpeg 子进程**（你选的） | `spektra-roll-cli video` 直接吃 .mov；不把 FFmpeg 链进 exe |
 | **D031** | 帧区间 / ProRes | **`--start/--frames/--duration` + `--codec prores`（422 HQ）** | 音画同步；ProRes 120 MB / 4.1 s |
 | **D032** | 多线程（提前） | **`parallelChunks` + `--threads`，0=自动** | 套 LUT 96→17 ms；视频 268→214 ms/帧（瓶颈转编码） |
 | **D033** | 胶片质感 | **确定性颗粒 + 暖色光晕，逐帧叠加（不进 LUT）** | 同 seed/帧可复现；视频 +97 ms/帧；光晕半径仍是画幅比例 |
@@ -163,7 +214,6 @@
 | **待定 D009** | Windows UI 技术栈 | 建议 **WinUI 3（C++/WinRT）** | 尚未确认；选定后需要装 MSVC（目前只有 MinGW） |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
-| **待定 D022** | 视频读写形态 | 独立程序（FFmpeg）还是 Resolve 插件 | 和 D010 一起定，M3 之前必须拍板 |
 
 ### 还有一些"我代你做的技术决定"（也记录在案）
 
@@ -176,55 +226,33 @@
 
 ## 三、未完成的待办
 
-### 🔴 立即要做（M2 · 颜色正确）
+### 🔴 下一步（按建议顺序）
 
-已完成：
+1. **颗粒场缓存**（性价比最高）：`--grain-rate 3` 时一个噪声场能用 3 帧，现在每帧都新建两个场。预期 469 → 约 350 ms/帧，整段 46 → 34 秒
+2. **断点续渲 + 时间码**：分段渲染、中断后从上一段继续；输出带上原始 timecode
+3. **界面**：需要先拍板 D009（WinUI 3 还是 Qt）
+4. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应该换成微米级、随分辨率缩放的核
+5. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付
 
-- [x] **Apple Log 输入**（D023）：`lut bake --input apple-log`、`convert --from apple-log`，和 colour-science 逐点一致（16-bit 误差 ≤ 1 LSB）
-- [x] **真实画面样张**：`scripts\demo-m2.cmd` 直接从你的 `.mov` 抽帧，出"只解码 / 印片 / 负片"三张图
-- [x] **扫描负片模式**（D024）：`lut bake --scan negative`，天空 0.48–0.70（有云），暗部死黑 7.7%→2.5%
-- [x] **负片定为推荐路径**（D025），新增 `--contrast`（1.0 保留余量，1.15 稍加反差）
-- [x] **默认反差定为 1.15**（D026，你确认；`--contrast 1.0` 拿回全余量版本）
-- [x] **输出色域压缩**（D027）：`--gamut oklch`，Apple Log 印片负值 3,763→0；sRGB 路径默认关，M1 parity 不变
-- [x] **DIR 耦合剂**（D028）：`--couplers on|off`，Apple Log 默认开；与上游参考 PSNR 80.75 dB
-- [x] **HDR 输出**（D029）：`--hdr pq|hlg --peak 1000`，demo 出 16-bit PQ PNG + HEVC 10-bit 片段
-- [x] **M3 第一步**（D022）：`spektra-roll-cli video` 直接读 `.mov`、逐帧套 LUT、带原声编码；99 帧约 30 秒
-- [x] **帧区间 + ProRes**（D031）：`--start/--frames/--duration`、`--codec prores`（422 HQ）
-- [x] **多线程**（D032，提前做）：套 LUT 96→17 ms；视频 268→214 ms/帧
-- [x] **胶片质感**（D033）：`--grain` / `--halation`，颗粒逐帧变化、可复现；`scripts\demo-m3.cmd`
-- [x] **颗粒调轻**（D034，按你的反馈）：模糊半径修正，默认 0.4 / 0.45，std 0.014→0.0053（**你已确认观感可以**）
-- [x] **眩光 + 扩散**（D035）：`--glare` / `--diffusion`，demo 默认 0.2 / 0.1
-- [x] **颗粒时间连续**（D036，按你的反馈）：两场交叉淡化，`--grain-rate 3`，帧间差 −44%
-- [x] **模糊降采样 + 编码开关**（D037）：579→469 ms/帧，`--crf` / `--preset` 可用
-- [x] **硬件编码选项**（D038）：`--encoder qsv`，HDR 仍是 HEVC Main10；2.6 MP 下收益有限
-- [x] **macOS 修复**（issue #1）：POSIX `popen` 只接受 `"r"/"w"`，我们传了 `"rb"/"wb"`，macOS 直接返回 NULL → 视频命令起不来。已修，CI 现在两个平台都跑视频冒烟
-- [x] 素材已收到：`X:\agent\footage\A001_11011538_C001.mov`（iPhone 16 Pro，HEVC 10-bit 4:2:2，BT.2020，24p，4.1 s）
-
-还没做：
-
-1. **输出色域压缩**：CAM16-UCS + 亮度压缩，把负值和超 1 的结果合法压回色域（D014 的欠账）
-2. **耦合剂（couplers）**：先做 `dir_couplers`，用上游同一套参数（D015 的欠账）
-3. **HDR 输出**：PQ / HLG + Rec.2020 + 10-bit，HDR 曝光映射做成参数（D021）
-4. **LUT 形态**：HDR 用 1D shaper + 3D LUT（或 65³）
-
-### 🟡 中期（M2–M5）
+### 🟡 中期路线（M4–M5）
 
 | 阶段 | 内容 |
 |---|---|
-| **M2** | 真实照片样张、色域压缩、耦合剂、Apple Log 输入、HDR 输出（D020/D021） |
-| **M3** | 视频读写（已完成第一步：`video` 命令吃 .mov）→ 时间码 / 帧区间 / 断点续渲 |
-| **M4** | 颗粒 / 光晕 / 扩散 / 眩光、确定性种子、SIMD / 多线程 / GPU、浮点 / EXR |
-| **M5** | Windows WinUI 3（**需要先装 MSVC**）、macOS SwiftUI（需要 Mac）、OFX 插件、渲染农场命令行 |
+| **M4** | 颗粒场缓存、真实扩散核、SIMD/GPU、浮点/EXR、断点续渲 |
+| **M5** | Windows WinUI 3（**需要先装 MSVC**）、macOS SwiftUI、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
 
-- [ ] **macOS 本机验收** → 有 MacBook Air M1，双击 `scripts\verify-macos.command` 即可编译+测试+烘 LUT；但它还没在本机跑过，先跑一次再谈"画面证据"
-- [x] ~~8bit 输出~~ → M1 已支持 16-bit PNG；浮点 / EXR 仍未做
-- [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；现在只有 display-encoded sRGB，Apple Log/HDR 是 M2 的任务（D021）
-- [ ] **没有时间维度** → 现在的 CLI 只处理单张图，还不能读视频 / 图像序列
-- [ ] **没有确定性颗粒种子** → 计划 `seed = f(timecode, layer, sublayer)`，M4 实现
-- [ ] **Windows 代码签名** → 可选，Azure Trusted Signing 约 $10/月，不签用户会看到"未知发布者"
-- [ ] **法律风险未处理** → 上游 README 声称"直接受其方法启发的作品也算衍生"，若将来想闭源必须先找 Andrea Volpato 谈双授权
+- [x] ~~macOS 本机验收~~ → 已在 MacBook Air M1 上跑通（编译、6/6 测试、LUT parity、视频路径）
+- [x] ~~没有时间维度~~ → `video` 命令已能吃 `.mov`、带原声、支持帧区间
+- [x] ~~没有确定性颗粒种子~~ → `--seed` + `--grain-rate`，同 seed/帧逐位可复现
+- [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；Apple Log 是手写解码，不是 OCIO 配置
+- [ ] **浮点 / EXR** → 只有 16-bit PNG
+- [ ] **空间效果不是物理核** → 光晕/眩光/扩散都用画幅比例，不是微米
+- [ ] **没有视频解码的硬件加速** → 解码/编码都是软件，QSV 只接了编码且收益有限
+- [ ] **Windows 代码签名** → 可选，Azure Trusted Signing 约 $10/月
+- [ ] **法律风险未处理** → 上游 README 声称"直接受其方法启发的作品也算衍生"，闭源前必须先谈双授权
+- [ ] **M2 遗留**：hanatos2025 上采样、1D shaper LUT、Dolby Vision 元数据
 
 ---
 
@@ -262,28 +290,45 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-### 你（产品负责人）只需要双击的六个文件
+### 你（产品负责人）只需要双击的文件
 
 ```
-scripts\dev-install.cmd   装工具链（只做一次，不需要管理员权限）
-scripts\build.cmd         编译 + 跑测试
-scripts\demo-m1.cmd       M1 真正的胶片样张（前后对比，自动打开两张图）
-scripts\demo-m2.cmd       M2 Apple Log 素材 → Portra 400（自动抽帧 + 打开两张图）
-scripts\verify-m1.cmd     一键验收：编译 + 测试 + 烘 LUT + 和参考对比
-scripts\demo.cmd          M0 的合成 LUT 冒烟测试（不是胶片）
-scripts\push.cmd          登录 GitHub 并推送
+scripts\dev-install.cmd         装工具链（只做一次，不需要管理员权限）
+scripts\build.cmd               编译 + 跑测试
+scripts\demo-m1.cmd             M1 胶片样张（前后对比）
+scripts\demo-m2.cmd             Apple Log → 印片 / 负片 / HDR 片段
+scripts\demo-m3.cmd             胶片质感（干净帧 / 质感帧 / 整段视频）
+scripts\verify-m1.cmd           一键验收：编译 + 测试 + 烘 LUT + 和参考对比
+scripts\demo.cmd                M0 的合成 LUT 冒烟测试（不是胶片）
+scripts\push.cmd                登录 GitHub 并推送
 ```
 
-### 验证 M1 是否还健康
+macOS 上双击 `scripts\verify-macos.command`（需要 `xcode-select --install` 和 `brew install cmake ffmpeg`）。
+
+### 验证是否还健康
 
 ```powershell
 cd X:\agent\SpektraRoll
 .\build\spektra-roll-cli.exe version        # 应输出 spektra-roll-cli 0.1.0
-ctest --test-dir build --output-on-failure # 应 4/4 通过
+ctest --test-dir build --output-on-failure # 应 6/6 通过
 .\build\spektra-roll-cli.exe lut bake --out out\check.cube
 .\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\check.cube
 # 应输出 PSNR ≈ 88 dB, PASS
 ```
+
+### 视频命令（M3 核心）
+
+```powershell
+# 整段：解码 → 套 LUT → 带原声重新编码
+.\build\spektra-roll-cli.exe video --lut out\m3-applelog-sdr.cube `
+    --in X:\agent\footage\A001_11011538_C001.mov --out out\graded.mov `
+    --trc srgb --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1 `
+    --ffmpeg J:\ffmpeg\bin\ffmpeg.exe
+```
+
+- 没有 `--ffmpeg` 时用 PATH 里的 ffmpeg，也可以用环境变量 `SPEKTRA_FFMPEG`
+- `--trc pq|hlg` 出 HDR；`--codec prores` 出 ProRes 422 HQ
+- 帧区间：`--start 00:00:12.5 --frames 240`（或 `--duration 10`）
 
 ### parity 工具链（只给 AI / 技术朋友）
 
@@ -298,7 +343,7 @@ tools\parity\README.md                                     怎么跑、当前数
 Python 环境里已装：numpy、scipy、colour-science 0.4.7、opt_einsum、numba、matplotlib、scikit-image。
 导入上游时要 stub 掉 exiv2 / lensfunpy / rawpy / OpenImageIO，`reference_model.py` 已经处理好。
 
-### M2 素材（Apple Log / ProRes）
+### 素材（Apple Log / ProRes）
 
 ```
 X:\agent\footage\A001_11011538_C001.mov    已收到（仓库外，不进 git）
@@ -307,10 +352,10 @@ X:\agent\footage\A001_11011538_C001.mov    已收到（仓库外，不进 git）
 规格（ffprobe）：iPhone 16 Pro + Blackmagic Cam，HEVC Rext 4:2:2 10-bit，
 1214x2160 竖拍（rotation -90，显示为 2160x1214），BT.2020 非恒定亮度，
 transfer = unknown（即 Apple Log），24 fps，4.125 s，99 帧。
-ffmpeg 抽帧时要带上 `scale=in_color_matrix=bt2020:in_range=tv:out_range=full`
-并用 `-ss` 自动旋转，`scripts\demo-m2.ps1` 已经封装。
 
-C++ 还不能读 `.mov`，M2 阶段先用 `ffmpeg` 抽一张 16-bit PNG 做验收，不动视频链路（M3）。
+`video` 命令会自动处理这个旋转（ffprobe 读 side_data rotation 后交换宽高）。
+抽单帧时仍然要带 `scale=in_color_matrix=bt2020:in_range=tv:out_range=full`，
+`scripts\demo-m2.ps1` 已经封装。
 
 ---
 
@@ -318,10 +363,10 @@ C++ 还不能读 `.mov`，M2 阶段先用 `ffmpeg` 抽一张 16-bit PNG 做验�
 
 ```
 X:\agent\SpektraRoll\
-├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, transfer, spectral_data）
+├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, transfer, gamut, texture, parallel, spectral_data）
 ├── src/core/src/            实现 + 生成的 spectral_tables.cpp
-├── src/cli/main.cpp         命令行入口（gen / bake / apply / compare / info / version）
-├── tests/                   4 个测试程序 + reference/ 冻结参考 LUT
+├── src/cli/main.cpp         命令行入口（gen / convert / video / lut bake|apply|compare|info / version）
+├── tests/                   6 个测试程序 + reference/ 冻结参考 LUT
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
 ├── third_party/stb/         stb_image / stb_image_write（单头文件）
@@ -347,6 +392,9 @@ X:\agent\SpektraRoll\
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
 - ❌ **不要把 16-bit PNG 当成终点**，浮点 / EXR 仍是欠账（D017）
 - ❌ **不要说“没有 Mac”**，产品负责人有 MacBook Air M1；macOS 相关先让他双击 `scripts\verify-macos.command` 拿结果
+- ❌ **不要只在一个平台验证改动的路径**（issue #1 的教训）：CI 的 macOS 视频冒烟现在开着，别关掉
+- ❌ **不要把颗粒的 `--grain-rate` 默认改回 1**，那是数字沸腾（D036）
+- ❌ **不要在没有基准数字的情况下改质感默认值**，颗粒/眩光都是按你的反馈调过的（D034/D036）
 - ❌ **不要偷懒改品牌**，SpektraRoll 已定案，改一次要动二进制名/CI/文档
 
 ---
@@ -355,11 +403,12 @@ X:\agent\SpektraRoll\
 
 你说一句：
 
-> “读 progress.md，我们从 M3 开始。”
+> “读 progress.md，继续。”
 
-AI 就应该先跑一遍 `scripts\verify-m1.cmd` 确认基线没坏，再跑一遍
-`scripts\demo-m2.cmd -NoOpen` 确认 Apple Log / 负片 / HDR 链路没坏，然后做 M3：
+AI 就应该：
 
-1. 先拍板 D022（独立程序 + FFmpeg，还是 Resolve 插件）
-2. 视频读写：FFmpeg / ProRes、时间维度、帧区间批处理
-3. 回归：`lut compare` 的 M1 parity 不能从 88 dB 掉下来
+1. 先跑 `scripts\verify-m1.cmd -NoOpen` 确认 M1 parity 还是 88.07 dB
+2. 再跑 `scripts\demo-m3.cmd -NoOpen` 确认视频 + 质感链路没坏（约 1 分钟）
+3. 看 §三 的"下一步"，从**颗粒场缓存**开始
+
+约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 6 个测试程序。
