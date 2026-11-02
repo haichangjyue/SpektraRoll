@@ -12,7 +12,16 @@
 #include <cstring>
 #include <vector>
 
-#ifdef _WIN32
+// D3D11 is only compiled on Windows. Defining SR_GPU_DISABLED builds the CPU
+// stub instead, which keeps the fallback path compilable (and testable) on any
+// platform.
+#if defined(_WIN32) && !defined(SR_GPU_DISABLED)
+#define SR_HAVE_D3D11 1
+#else
+#define SR_HAVE_D3D11 0
+#endif
+
+#if SR_HAVE_D3D11
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #endif
@@ -20,7 +29,7 @@
 namespace sr {
 namespace {
 
-#ifdef _WIN32
+#if SR_HAVE_D3D11
 
 const char* kShader = R"HLSL(
 cbuffer Params : register(b0) {
@@ -345,12 +354,12 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 }
 )HLSL";
 
-#endif  // _WIN32
+#endif  // SR_HAVE_D3D11
 
 }  // namespace
 
 struct GpuFilm::Impl {
-#ifdef _WIN32
+#if SR_HAVE_D3D11
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* context = nullptr;
     ID3D11ComputeShader* shader = nullptr;
@@ -362,7 +371,6 @@ struct GpuFilm::Impl {
     ID3D11Buffer* staging = nullptr;
     ID3D11Query* stopQuery = nullptr;
     std::size_t capacity = 0;
-    double lastMs = 0.0;
     // Reused between frames so a video render does not allocate 42 MB per frame.
     std::vector<float> packed;
 
@@ -407,10 +415,13 @@ struct GpuFilm::Impl {
         float pad1;
     } params;
 
+#endif
+
+    // Declared on every platform so the non-Windows stub definitions match.
+    double lastMs = 0.0;
     bool initialize(std::string& error);
     bool ensureCapacity(std::size_t pixels, std::string& error);
     void releaseSizeDependent();
-#endif
 };
 
 GpuFilm::GpuFilm() : impl_(std::make_unique<Impl>()) {}
@@ -418,7 +429,7 @@ GpuFilm::GpuFilm() : impl_(std::make_unique<Impl>()) {}
 double GpuFilm::lastMilliseconds() const { return impl_->lastMs; }
 
 bool GpuFilm::available(std::string& error) {
-#ifndef _WIN32
+#if !SR_HAVE_D3D11
     error = "the GPU spectral engine is only available on Windows (D3D11)";
     return false;
 #else
@@ -428,7 +439,7 @@ bool GpuFilm::available(std::string& error) {
 }
 
 bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std::string& error) {
-#ifndef _WIN32
+#if !SR_HAVE_D3D11
     (void)model;
     (void)options;
     error = "the GPU spectral engine is only available on Windows (D3D11)";
@@ -509,7 +520,7 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
 
 bool GpuFilm::process(const float* rgb, std::size_t pixels, float* out, float strength,
                       std::string& error) {
-#ifndef _WIN32
+#if !SR_HAVE_D3D11
     (void)rgb;
     (void)pixels;
     (void)out;
@@ -576,7 +587,7 @@ bool GpuFilm::process(const float* rgb, std::size_t pixels, float* out, float st
 #endif
 }
 
-#ifdef _WIN32
+#if SR_HAVE_D3D11
 bool GpuFilm::Impl::initialize(std::string& error) {
     if (device != nullptr) return true;
     D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
@@ -694,7 +705,7 @@ void GpuFilm::Impl::releaseSizeDependent() {}
 
 GpuFilm::~GpuFilm() {
     if (!impl_) return;
-#ifdef _WIN32
+#if SR_HAVE_D3D11
     impl_->releaseSizeDependent();
     if (impl_->constantBuffer != nullptr) impl_->constantBuffer->Release();
     if (impl_->stopQuery != nullptr) impl_->stopQuery->Release();
