@@ -157,7 +157,7 @@ scripts\demo-spread.cmd            # 左旧 / 右新，打印 PSNR 与 ms/帧
 
 ### 四、未完成的待办（按建议顺序）
 
-- [ ] **真实点扩散核**：眩光 / 光晕 / 扩散仍是“画幅比例 + 盒状模糊”，应换成微米级、随分辨率缩放的核。
+- [x] ~~**真实点扩散核**~~ → D054 已完成（微米 + 双高斯重尾核，box 模型保留对照）
 - [ ] **浮点 / EXR**（D017 欠账）：16-bit PNG 之外没有浮点交付。
 - [ ] **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
 - [ ] **代理清理策略**：`out/ui-proxy/` 会按素材累积，可加 LRU 或“删除代理”按钮。
@@ -229,7 +229,7 @@ $env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
 
 - [ ] **颜色 + 质感合并成一次 GPU 提交**：视频仍是 245 ms/帧，空管道约 207 ms。
 - [ ] **预览缓存放到磁盘 / 代理文件**：现在只有内存缓存，长片超出后回退单帧；可生成半分辨率代理。
-- [ ] **真实点扩散核**：眩光 / 光晕 / 扩散仍是画幅比例 + 盒状模糊。
+- [x] ~~**真实点扩散核**~~ → D054 已完成（微米 + 双高斯重尾核）。
 - [ ] **CI 上的真实 GPU 覆盖**：`gpu_film` / `gpu_texture` 在公有 runner 上会 skip。
 - [ ] **macOS 的 GPU 路线**：Metal 或继续 CPU。
 - [ ] 浮点 / EXR（D017 欠账）。
@@ -299,7 +299,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 - [ ] **颜色 + 质感合并成一次 GPU 提交**：现在两段各自上传/回读 42 MB，空管道仍约 207 ms/帧；合并后预计再省 15–30 ms/帧，并消掉一次 16-bit 往返。
 - [ ] **预览实时化**：GPU 颜色已够快，但 UI 预览仍是 “ffmpeg 抽帧 → 写 PNG → CLI 进程 → 读回”，整链 0.3–0.5 s；可做常驻进程或低分辨率直出。
-- [ ] **真实点扩散核**：眩光 / 光晕 / 扩散仍是画幅比例 + 盒状模糊（GPU 只是照搬）。
+- [x] ~~**真实点扩散核**~~ → D054 已完成（微米 + 双高斯重尾核，GPU 与 CPU 同一组权重）。
 - [ ] **CI 上的真实 GPU 覆盖**：`gpu_film` 和 `gpu_texture` 在公有 runner 上会 skip。
 - [ ] **macOS 的 GPU 路线**：Metal 或继续 CPU（当前选择）。
 - [ ] **队列多任务/多段并行**：GPU 已释放 CPU。
@@ -358,7 +358,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 - [ ] **CI 上的真实 GPU 覆盖**：公有 runner 一般没有可用 D3D11 设备，`gpu_film` 会被 skip；需要在有 GPU 的机器上跑一次（或加 WARP 检查）才能保证着色器编译不退化。
 - [ ] **macOS 的 GPU 路线**：Metal 或继续 CPU 光谱（当前选择），若要 macOS 也快需要单独一层。
 - [ ] 队列**多任务/多段并行**：GPU 已释放 CPU，可以并行渲染多个任务。
-- [ ] 真实点扩散核（现在的光晕/眩光/扩散仍是画幅比例的盒状模糊）。
+- [x] ~~真实点扩散核~~ → D054 已完成（微米 + 重尾核）。
 
 ### 复现命令
 
@@ -706,7 +706,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 - [ ] **macOS 没有 GPU 物理路径** → 只能 CPU 光谱 / LUT（Metal 未做）
 - [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；Apple Log 是手写解码，不是 OCIO 配置
 - [ ] **浮点 / EXR** → 只有 16-bit PNG
-- [ ] **空间效果不是物理核** → 光晕/眩光/扩散都用画幅比例，不是微米
+- [x] ~~**空间效果不是物理核**~~ → D054 微米 + 双高斯重尾核；box 模型保留对照
 - [x] ~~没有视频解码的硬件加速~~ → 实测 QSV 解码+下载 21.8 ms/帧 vs 软解 19.5 ms/帧，**不值得做**；QSV 编码在管道修好后有意义（H.264 77 vs 104 ms/帧）
 - [x] ~~长片预览只能缩成缩略图~~ → D053 960 px 全 I 帧代理，30 秒素材 960×540 · 100 ms/帧
 - [ ] **Windows 代码签名** → 可选，Azure Trusted Signing 约 $10/月
@@ -891,7 +891,7 @@ X:\agent\SpektraRoll\
 - ❌ **不要删掉 GPU 着色器里的 `density != density` 判空**：有几条波长的 film density 是 NaN，CPU 参考同样跳过它们；少这个保护整条光谱和会变 NaN，输出直接全黑（D046）
 - ❌ **不要把 `--engine spectral-gpu` 改成硬失败**：没有 D3D11 设备时必须回退 CPU 光谱，macOS 才能继续用（D045/D046）
 - ❌ **不要在 CLI / UI 里另写一份质感顺序**：`sr::applyTexture()` 是唯一 CPU 参考链，GPU parity 测试也拿它当基准（D047）
-- ❌ **不要把盒状模糊改成并行前缀和或换累加顺序**：GPU 现在逐位对齐 CPU 靠的就是“一行一列顺序累加”，换了就过不了 143 dB 的 parity（D047）
+- ❌ **不要把盒状模糊改成并行前缀和或换累加顺序**：GPU 现在逐位对齐 CPU 靠的就是“一行一列顺序累加”，换了就过不了 parity（D047；物理核时代实测 149–178 dB，见 D054）
 - ❌ **不要把 `--texture-engine gpu` 改成硬失败**：编译失败、无设备、运行时错误都要回退 CPU 并只 warning 一次（D047）
 - ❌ **不要在 GPU 质感里省略颗粒的两场交叉淡化或 `norm`**：那是 D036 防闪烁的根，改了颗粒会重新沸腾（D047）
 - ❌ **不要把 `--texture-engine` 漏出分段签名**：否则 CPU/GPU 质感的分段会被混着续渲（D047）
