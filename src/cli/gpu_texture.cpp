@@ -599,8 +599,9 @@ bool GpuTexture::Impl::runChain(int width, int height, const TextureParams& para
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
             .count();
     return true;
-#endif
 }
+
+#endif
 
 #if SR_HAVE_D3D11
 
