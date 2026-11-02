@@ -58,6 +58,7 @@
 5. **`ffprobe` 提速**：`probeGeometry` 改成一次 `-show_streams`；原来单独查 `side_data=rotation` 在这支素材上要 **3.8 s**，合并后 **42 ms**。
 6. **旧路径保留为回退**：服务启动失败 / 超出缓存 / 无 ffmpeg 时仍然能出图。
 7. **`--preview-selftest`**：启动界面后跑两次真实预览并打印状态行，脚本可验收。
+8. **CI**：新增预览服务端协议冒烟（`look` / `open` / `frame` / `raw` + 输出尺寸），run **57** Windows + macOS 双绿（顺手修了 BSD `wc -c` 补齐空格导致 macOS 断言失败）。
 
 ### 实测
 
