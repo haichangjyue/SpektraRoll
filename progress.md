@@ -60,6 +60,10 @@
 - film dispatch 后没解绑 UAV，质感读同一 buffer 得到全黑；
 - `attach()` 后 `initialize()` 误以为已初始化，着色器没编译 → 访问冲突。
 
+（还有一个只在非 Windows 构建出现：`#endif` 放进了函数体，导致 macOS 的占位实现括号错位；本地用 `-DSR_GPU_DISABLED` 编译时发现并修掉。）
+
+CI：run **60** Windows + macOS 双绿。
+
 ### 未完成 / 下一步
 
 - [ ] **管道成为唯一瓶颈**：207 ms/帧已经等于空管道；下一步是 ffmpeg 硬件解码（D3D11VA/QSV）或并行编码。
