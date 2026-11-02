@@ -1985,7 +1985,7 @@ private:
 
         if (previewClip_ != clip) {
             QString reply;
-            if (!sendPreview(QStringLiteral("open ") + quoted(clip), &reply, 120000) ||
+            if (!sendPreview(QStringLiteral("open ") + quoted(clip), &reply, 600000) ||
                 !reply.startsWith(QStringLiteral("ok open"))) {
                 if (log != nullptr) *log += QString::fromUtf8(previewServer_->readAllStandardError());
                 stopPreviewServer();
@@ -1995,7 +1995,9 @@ private:
             if (parts.size() >= 6) {
                 previewWidth_ = parts[2].toInt();
                 previewHeight_ = parts[3].toInt();
-                previewFrames_ = parts[4].toInt();
+                // parts[4] is the RAM cache depth, parts[5] the clip length; the
+                // server can serve every frame (RAM or proxy, D053).
+                previewFrames_ = parts[5].toInt();
             }
             previewClip_ = clip;
             mark("open");
@@ -2007,12 +2009,13 @@ private:
         return previewFrames_ > 0;
     }
 
-    bool loadPreviewRgba(const QString& path, QImage* image, QString* log) {
+    bool loadPreviewRgba(const QString& path, int width, int height, QImage* image,
+                         QString* log) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) return false;
         const QByteArray data = file.readAll();
         file.close();
-        const qsizetype expected = static_cast<qsizetype>(previewWidth_) * previewHeight_ * 4;
+        const qsizetype expected = static_cast<qsizetype>(width) * height * 4;
         if (data.size() != expected) {
             if (log != nullptr) {
                 *log += QStringLiteral("preview frame is %1 bytes, expected %2\n")
@@ -2021,8 +2024,8 @@ private:
             }
             return false;
         }
-        const QImage view(reinterpret_cast<const uchar*>(data.constData()), previewWidth_,
-                          previewHeight_, previewWidth_ * 4, QImage::Format_RGBA8888);
+        const QImage view(reinterpret_cast<const uchar*>(data.constData()), width, height,
+                          width * 4, QImage::Format_RGBA8888);
         *image = view.copy();
         return !image->isNull();
     }
@@ -2068,11 +2071,20 @@ private:
         if (!sendPreview(command, &reply, 60000) || !reply.startsWith(QStringLiteral("ok"))) {
             return false;
         }
+        int width = previewWidth_;
+        int height = previewHeight_;
+        // Reply: "ok frame <n> <w> <h>". Frames can come from the RAM cache or
+        // from the proxy, which may have different sizes (D053).
+        const QStringList parts = reply.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (parts.size() >= 5) {
+            width = parts[3].toInt();
+            height = parts[4].toInt();
+        }
         if (debug) {
             std::fprintf(stderr, "preview frame    %5lld ms\n",
                          static_cast<long long>(timer.elapsed()));
         }
-        const bool loaded = loadPreviewRgba(raw, image, log);
+        const bool loaded = loadPreviewRgba(raw, width, height, image, log);
         if (debug) {
             std::fprintf(stderr, "preview load     %5lld ms\n",
                          static_cast<long long>(timer.elapsed()));

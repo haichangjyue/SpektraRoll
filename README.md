@@ -128,6 +128,12 @@ on a 30 s clip in six parts the LUT + CPU-texture path went from 158 to
 **84 s (1.88x)**; the GPU path is GPU-bound on one card (1.10x). Output matches
 the sequential render bit for bit.
 
+Long clips do not shrink the preview to a thumbnail: when the RAM cache cannot
+hold the whole clip at 960 px, the preview server builds one half-resolution,
+all-intra proxy under `out/ui-proxy/` (8.7 s and 31 MB for a 30 s clip) and
+decodes frames from it on demand. A 30 s clip previews at **960x540, 100 ms per
+frame**, and reopening it takes 48 ms. Short clips keep the 1600 px RAM path.
+
 Hardware decode was measured and rejected: QSV plus the download step is
 21.8 ms/frame against 19.5 ms for the software decoder on this footage.
 `--encoder qsv` is now worth using for H.264 (77 vs 104 ms/frame).

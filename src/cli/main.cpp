@@ -2028,6 +2028,10 @@ struct Server {
     long cached = 0;
     long total = 0;
     double fps = 24.0;
+    // D053: long clips use a half-resolution proxy on disk instead of shrinking
+    // the RAM cache until the preview is a thumbnail.
+    bool useProxy = false;
+    std::string proxyPath;
     std::vector<std::vector<unsigned short>> frames;
     std::vector<float> pixels;
     std::vector<unsigned char> rgba;
@@ -2094,6 +2098,59 @@ int evenDimension(double value) {
     return std::max(2, result);
 }
 
+// D053: one half-resolution, all-intra proxy per clip, reused across sessions.
+std::string proxyCachePath(const std::string& clip, const Geometry& info, int width, int height) {
+    std::error_code ec;
+    const auto stamp = std::filesystem::last_write_time(clip, ec).time_since_epoch().count();
+    const std::string key = clip + "|" + std::to_string(stamp) + "|" +
+                            std::to_string(info.width) + "x" + std::to_string(info.height) + "|" +
+                            std::to_string(width) + "x" + std::to_string(height);
+    const std::string hash = std::to_string(std::hash<std::string>{}(key));
+    return "out/ui-proxy/" + hash + ".mov";
+}
+
+bool buildProxy(const Server& server, const std::string& clip, int width, int height,
+                const std::string& path, std::string& error) {
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+    std::filesystem::remove(path, ec);
+    const std::string command =
+        shellQuote(server.ffmpeg) + " -v error -y -i " + shellQuote(clip) + " -an -vf " +
+        shellQuote("scale=" + std::to_string(width) + ":" + std::to_string(height) +
+                   ":in_color_matrix=" + server.inMatrix + ":in_range=tv:out_range=full") +
+        " -c:v libx264 -preset veryfast -crf 18 -g 1 -pix_fmt yuv420p " + shellQuote(path);
+    if (runCommand(command) != 0 || !std::filesystem::exists(path)) {
+        error = "could not build the preview proxy for " + clip;
+        return false;
+    }
+    return true;
+}
+
+bool decodeProxyFrame(Server& server, int index, std::string& error) {
+    const double seconds = server.fps > 0.0 ? index / server.fps : 0.0;
+    const std::string command = shellQuote(server.ffmpeg) + " -v error -ss " +
+                                formatSeconds(seconds) + " -i " + shellQuote(server.proxyPath) +
+                                " -frames:v 1 -pix_fmt rgb48le -f rawvideo -";
+    FILE* pipe = openPipe(command, "r");
+    if (!pipe) {
+        error = "cannot read the preview proxy";
+        return false;
+    }
+    const size_t values = static_cast<size_t>(server.width) * server.height * 3;
+    std::vector<unsigned short> buffer(values);
+    const size_t got = std::fread(buffer.data(), sizeof(unsigned short), values, pipe);
+    closePipe(pipe);
+    if (got != values) {
+        error = "preview proxy has no frame " + std::to_string(index);
+        return false;
+    }
+    server.pixels.resize(values);
+    for (size_t i = 0; i < values; ++i) {
+        server.pixels[i] = static_cast<float>(buffer[i]) * (1.0f / 65535.0f);
+    }
+    return true;
+}
+
 bool openClip(Server& server, const std::string& path, std::string& error) {
     if (path == server.clip && server.cached > 0) return true;
 
@@ -2121,6 +2178,49 @@ bool openClip(Server& server, const std::string& path, std::string& error) {
                          : 1;
     maxCached = std::max(1L, maxCached);
     if (info.frames > 0 && maxCached > info.frames) maxCached = info.frames;
+
+    // Long clips: caching every frame would force the preview down to a
+    // thumbnail, so build one half-resolution proxy and decode frames from it
+    // on demand instead (D053).
+    const bool fitsRam = info.frames > 0 && maxCached >= info.frames;
+    const bool sharpEnough =
+        std::max(width, height) >= 960 || std::max(info.width, info.height) <= 960;
+    if (info.frames > 0 && (!fitsRam || !sharpEnough)) {
+        const double side = std::min(1.0, 960.0 / std::max(info.width, info.height));
+        const int proxyWidth = evenDimension(info.width * side);
+        const int proxyHeight = evenDimension(info.height * side);
+        const std::string proxyPath = proxyCachePath(path, info, proxyWidth, proxyHeight);
+        bool ready = std::filesystem::exists(proxyPath);
+        if (!ready) {
+            const auto buildStart = std::chrono::steady_clock::now();
+            ready = buildProxy(server, path, proxyWidth, proxyHeight, proxyPath, error);
+            if (ready) {
+                const auto ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - buildStart)
+                                    .count();
+                std::fprintf(stderr, "proxy: built %s (%dx%d) in %.0f ms\n", proxyPath.c_str(),
+                             proxyWidth, proxyHeight, ms);
+            } else {
+                std::fprintf(stderr, "warning: %s; using the RAM cache\n", error.c_str());
+            }
+        }
+        if (ready) {
+            server.useProxy = true;
+            server.proxyPath = proxyPath;
+            server.clip = path;
+            server.width = proxyWidth;
+            server.height = proxyHeight;
+            server.fps = info.fps;
+            server.cached = 0;
+            server.total = info.frames;
+            server.frames.clear();
+            server.pixels.assign(static_cast<size_t>(proxyWidth) * proxyHeight * 3, 0.0f);
+            server.rgba.assign(static_cast<size_t>(proxyWidth) * proxyHeight * 4, 0);
+            std::fprintf(stderr, "proxy: %ld frames at %dx%d\n", server.total, proxyWidth,
+                         proxyHeight);
+            return true;
+        }
+    }
 
     const std::string decodeCmd =
         shellQuote(server.ffmpeg) + " -v error -i " + shellQuote(path) + " -vf " +
@@ -2189,9 +2289,9 @@ bool writeRgba(const std::string& path, const std::vector<unsigned char>& out,
 // decoded to display sRGB, which is what the UI's "hold to compare" needs.
 bool renderFrame(Server& server, int index, const std::string& outPath, bool graded,
                  std::string& error) {
-    if (index < 0 || index >= server.cached) {
-        error = "frame " + std::to_string(index) + " is outside the decoded cache (" +
-                std::to_string(server.cached) + " frames)";
+    if (index < 0 || index >= server.total) {
+        error = "frame " + std::to_string(index) + " is outside this clip (" +
+                std::to_string(server.total) + " frames)";
         return false;
     }
     const auto started = std::chrono::steady_clock::now();
@@ -2204,10 +2304,18 @@ bool renderFrame(Server& server, int index, const std::string& outPath, bool gra
         stage = now;
     };
     const size_t count = static_cast<size_t>(server.width) * server.height;
-    const std::vector<unsigned short>& raw = server.frames[static_cast<size_t>(index)];
-    server.pixels.resize(count * 3);
-    for (size_t i = 0; i < count * 3; ++i) {
-        server.pixels[i] = static_cast<float>(raw[i]) * (1.0f / 65535.0f);
+    if (index >= server.cached) {
+        if (!server.useProxy) {
+            error = "frame " + std::to_string(index) + " is outside the decoded cache";
+            return false;
+        }
+        if (!decodeProxyFrame(server, index, error)) return false;
+    } else {
+        const std::vector<unsigned short>& raw = server.frames[static_cast<size_t>(index)];
+        server.pixels.resize(count * 3);
+        for (size_t i = 0; i < count * 3; ++i) {
+            server.pixels[i] = static_cast<float>(raw[i]) * (1.0f / 65535.0f);
+        }
     }
     mark("unpack");
 
@@ -2400,7 +2508,8 @@ int run(const Args& startup) {
                                     command == "frame", error)) {
                 std::printf("error %s\n", error.c_str());
             } else {
-                std::printf("ok %s %d\n", command.c_str(), std::atoi(tokens[1].c_str()));
+                std::printf("ok %s %d %d %d\n", command.c_str(), std::atoi(tokens[1].c_str()),
+                            server.width, server.height);
             }
             std::fflush(stdout);
             continue;
