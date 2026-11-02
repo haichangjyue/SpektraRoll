@@ -124,6 +124,7 @@ D050 后的分段计时是 `read 14 / convert 9 / process 44 / pack 5 / write 7`
 - 30 秒素材：代理 **8.7 s / 30.6 MB**；预览 960×540，**100 ms/帧**（原先只能到约 640 px）；重开 48 ms。
 - 4 秒素材不变：内存缓存 1600×898、47 ms。
 - 协议：`frame` 回复带实际宽高，`open` 的 total 变成可预览总帧数。
+- CI：首次提交的 macOS 编译失败——`std::filesystem::file_time_type::count()` 在 libc++ 上比 `long long` 宽，`std::to_string` 重载歧义；改成 `static_cast<long long>` 后 **Windows + macOS 双绿**。
 
 ---
 
