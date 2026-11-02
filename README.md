@@ -110,9 +110,19 @@ Spatial texture (grain, halation, glare, diffusion) can also run on the GPU:
 the UI has a **GPU 质感** checkbox). On 2.6 MP video the full texture chain drops
 from about 160 to **38 ms/frame**, which took a full-frame render from 382 to
 **245 ms/frame (1.6×)**. The shaders mirror the CPU reference pass by pass,
-including the separable box blur's summation order, so the two agree at
-**143–166 dB PSNR** (worst deviation 4.5e-7); `ctest` enforces that too, and a
+including the separable convolution's summation order, so the two agree at
+**149–178 dB PSNR** (worst deviation 3e-7); `ctest` enforces that too, and a
 device failure falls back to the CPU chain instead of failing the render.
+
+Since D054 the three spatial effects are sized on the film instead of on the
+frame: `--halation-spread` / `--glare-spread` / `--diffusion-spread` are effective
+sigmas in micrometres on the negative, mapped to pixels through
+`--frame-width-mm` (36 mm by default, so the same look survives 1080p, 4K or a
+different aspect ratio). The kernel is a sharp core plus a wide skirt (two
+Gaussians normalised to the requested sigma), which keeps 7–10x the energy of a
+plain Gaussian beyond three sigma - the part that reads as halation through the
+base, veiling glare in the lens and a Pro-Mist style bloom. `--spread-model box`
+restores the old fraction-of-width box blur for comparison.
 
 Colour and texture share one device: the film pass leaves its result on the
 card and the texture chain reads that buffer directly, so a frame is uploaded

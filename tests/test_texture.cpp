@@ -95,31 +95,77 @@ int main() {
               "grain is weaker at black than at mid-grey");
     }
 
+    // Physical sizing (D054): the same distance on the negative stays the same
+    // physical size at every render resolution.
+    {
+        const float half = sr::spreadSigmaPixels(225.0f, 36.0f, 1080);
+        const float full = sr::spreadSigmaPixels(225.0f, 36.0f, 2160);
+        check(std::fabs(full - 2.0f * half) < 1e-3f, "spread scales with the frame width");
+        check(std::fabs(full - 13.5f) < 0.01f, "225 um on 36 mm film is 13.5 px at 2160 wide");
+        check(sr::spreadDownsampleFactor(sr::SpreadKind::Halation, 0.4f) == 1,
+              "sub-pixel spreads are not downsampled");
+        check(sr::spreadDownsampleFactor(sr::SpreadKind::Halation, 400.0f) > 1,
+              "wide spreads are downsampled");
+
+        const sr::SpreadKernel kernel = sr::buildSpreadKernel(sr::SpreadKind::Halation, 8.0f);
+        check(kernel.radius == 53, "kernel is truncated at three sigma of its widest part");
+        check(kernel.taps.size() == 107, "kernel has one tap per pixel in its radius");
+        float sum = 0.0f;
+        for (float tap : kernel.taps) sum += tap;
+        check(std::fabs(sum - 1.0f) < 1e-4f, "kernel taps are normalised");
+        bool symmetric = true;
+        for (int i = 0; i < kernel.radius; ++i) {
+            symmetric = symmetric &&
+                        kernel.taps[static_cast<size_t>(i)] ==
+                            kernel.taps[kernel.taps.size() - 1 - static_cast<size_t>(i)];
+        }
+        check(symmetric, "kernel is symmetric");
+
+        // The skirt carries far more energy beyond three sigma than a plain
+        // Gaussian (erfc(3 / sqrt(2)) ~= 0.0027), which is what makes the
+        // spread read as film and glass instead of a generic blur.
+        float tail = 0.0f;
+        for (int i = 0; i < kernel.radius; ++i) {
+            const float distance = static_cast<float>(kernel.radius - i);
+            if (distance > 24.0f) tail += 2.0f * kernel.taps[static_cast<size_t>(i)];
+        }
+        check(tail > 0.01f, "the point spread has a heavy skirt");
+    }
+
     // Halation blooms around a highlight and leaves the far corner alone.
     {
-        std::vector<float> image = flat(w, h, 0.02f);
-        const int cx = w / 2;
-        const int cy = h / 2;
+        constexpr int hw = 640;
+        constexpr int hh = 480;
+        std::vector<float> image = flat(hw, hh, 0.02f);
+        const int cx = hw / 2;
+        const int cy = hh / 2;
         for (int y = cy - 1; y <= cy + 1; ++y) {
             for (int x = cx - 1; x <= cx + 1; ++x) {
-                float* px = &image[(static_cast<size_t>(y) * w + x) * 3];
+                float* px = &image[(static_cast<size_t>(y) * hw + x) * 3];
                 px[0] = px[1] = px[2] = 1.0f;
             }
         }
         sr::HalationParams params;
         params.amount = 0.8f;
-        params.radius = 0.05f;
+        params.spreadMicrons = 225.0f;
         params.threshold = 0.7f;
         std::vector<float> before = image;
-        sr::applyHalation(image.data(), w, h, params);
+        sr::applyHalation(image.data(), hw, hh, params);
 
         auto at = [&](int x, int y, int c) {
-            return image[(static_cast<size_t>(y) * w + x) * 3 + static_cast<size_t>(c)];
+            return image[(static_cast<size_t>(y) * hw + x) * 3 + static_cast<size_t>(c)];
         };
         check(at(cx + 6, cy, 0) > 0.02f, "halation brightens red near the highlight");
         check(at(cx + 6, cy, 0) > at(cx + 6, cy, 2), "halation is warm");
         check(std::fabs(at(1, 1, 0) - 0.02f) < 1e-4f, "far corner is untouched");
         check(!identical(image, before), "halation changes the image");
+
+        // The box model stays available and is a different kernel.
+        std::vector<float> boxed = before;
+        sr::SpreadContext box;
+        box.model = sr::SpreadModel::Box;
+        sr::applyHalation(boxed.data(), hw, hh, params, box);
+        check(!identical(boxed, image), "the box model still blooms");
     }
 
     // Temporal coherence: a cross-faded field changes much less between frames
@@ -181,17 +227,21 @@ int main() {
 
     // Glare lifts the blacks with a wide veil of light; diffusion softens.
     {
-        std::vector<float> image = flat(w, h, 0.05f);
+        constexpr int gw = 640;
+        constexpr int gh = 480;
+        std::vector<float> image = flat(gw, gh, 0.05f);
         float* corner = &image[0];
         corner[0] = corner[1] = corner[2] = 1.0f;  // one bright pixel
         sr::GlareParams glare;
         glare.amount = 0.5f;
-        glare.radius = 0.3f;
+        glare.spreadMicrons = 725.0f;
         std::vector<float> before = image;
-        sr::applyGlare(image.data(), w, h, glare);
+        sr::applyGlare(image.data(), gw, gh, glare);
         check(!identical(image, before), "glare changes the image");
-        const float far = image[(static_cast<size_t>(h - 1) * w + (w - 1)) * 3];
-        check(far > 0.05f, "glare lifts the far corner");
+        const float near = image[(static_cast<size_t>(20) * gw + 20) * 3];
+        check(near > 0.05f, "glare lifts the area around the highlight");
+        const float far = image[(static_cast<size_t>(gh - 1) * gw + (gw - 1)) * 3];
+        check(far > 0.05f - 1e-4f, "glare does not darken the far corner");
         check(far < 0.5f, "glare stays subtle");
 
         std::vector<float> smooth = flat(w, h, 0.05f);
@@ -201,19 +251,19 @@ int main() {
         check(identical(smooth, flat(w, h, 0.05f)), "diffusion 0 is a no-op");
 
         diffusion.amount = 0.8f;
-        diffusion.radius = 0.1f;
-        std::vector<float> edge = flat(w, h, 0.0f);
-        for (int y = 0; y < h; ++y) {
-            for (int x = w / 2; x < w; ++x) {
-                float* px = &edge[(static_cast<size_t>(y) * w + x) * 3];
+        diffusion.spreadMicrons = 122.0f;
+        std::vector<float> edge = flat(gw, gh, 0.0f);
+        for (int y = 0; y < gh; ++y) {
+            for (int x = gw / 2; x < gw; ++x) {
+                float* px = &edge[(static_cast<size_t>(y) * gw + x) * 3];
                 px[0] = px[1] = px[2] = 1.0f;
             }
         }
         std::vector<float> edgeBefore = edge;
-        sr::applyDiffusion(edge.data(), w, h, diffusion);
-        const float leftOfEdge = edge[(static_cast<size_t>(h / 2) * w + (w / 2 - 2)) * 3];
+        sr::applyDiffusion(edge.data(), gw, gh, diffusion);
+        const float leftOfEdge = edge[(static_cast<size_t>(gh / 2) * gw + (gw / 2 - 2)) * 3];
         check(leftOfEdge > 0.0f, "diffusion bleeds across the edge");
-        check(edge[(static_cast<size_t>(h / 2) * w + (w / 2 + 2)) * 3] < 1.0f,
+        check(edge[(static_cast<size_t>(gh / 2) * gw + (gw / 2 + 2)) * 3] < 1.0f,
               "diffusion softens the bright side too");
         check(!identical(edge, edgeBefore), "diffusion changes the image");
     }

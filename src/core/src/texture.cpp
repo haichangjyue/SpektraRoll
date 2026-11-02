@@ -122,6 +122,90 @@ void blurWide(std::vector<float>& buffer, int width, int height, int radius, int
     }
 }
 
+// Separable convolution with a symmetric kernel. The summation order is
+// left-to-right (then top-to-bottom) on every thread because the D3D11 pass
+// does exactly the same thing; keeping the order identical keeps the two
+// backends within a few ULP (D047 parity, D054 kernels).
+void convolveSeparable(std::vector<float>& buffer, std::vector<float>& scratch, int width,
+                       int height, const SpreadKernel& kernel) {
+    const int radius = kernel.radius;
+    if (radius < 1 || static_cast<int>(kernel.taps.size()) != radius * 2 + 1) return;
+
+    for (int y = 0; y < height; ++y) {
+        const float* src = &buffer[static_cast<size_t>(y) * width];
+        float* dst = &scratch[static_cast<size_t>(y) * width];
+        for (int x = 0; x < width; ++x) {
+            float sum = 0.0f;
+            for (int k = -radius; k <= radius; ++k) {
+                sum += kernel.taps[static_cast<size_t>(k + radius)] *
+                       src[std::clamp(x + k, 0, width - 1)];
+            }
+            dst[x] = sum;
+        }
+    }
+
+    for (int x = 0; x < width; ++x) {
+        for (int y = 0; y < height; ++y) {
+            float sum = 0.0f;
+            for (int k = -radius; k <= radius; ++k) {
+                sum += kernel.taps[static_cast<size_t>(k + radius)] *
+                       scratch[static_cast<size_t>(std::clamp(y + k, 0, height - 1)) * width + x];
+            }
+            buffer[static_cast<size_t>(y) * width + x] = sum;
+        }
+    }
+}
+
+// Physical spread (D054): same downsample/blur/upsample structure as the box
+// chain, but with the PSF built for this sigma. The kernel is rebuilt at the
+// low resolution so its physical width stays the same after the reduction.
+void spreadWide(std::vector<float>& buffer, int width, int height, SpreadKind kind,
+                float sigmaPx) {
+    const int factor = spreadDownsampleFactor(kind, sigmaPx);
+    const int radiusFull = spreadKernelRadius(kind, sigmaPx);
+    if (radiusFull < 1) return;
+
+    std::vector<float> scratch(buffer.size());
+    if (factor <= 1 || radiusFull < factor * 2) {
+        convolveSeparable(buffer, scratch, width, height, buildSpreadKernel(kind, sigmaPx));
+        return;
+    }
+
+    const int lowWidth = (width + factor - 1) / factor;
+    const int lowHeight = (height + factor - 1) / factor;
+    std::vector<float> low(static_cast<size_t>(lowWidth) * lowHeight, 0.0f);
+    const float inv = 1.0f / static_cast<float>(factor * factor);
+    for (int y = 0; y < height; ++y) {
+        const int ly = y / factor;
+        for (int x = 0; x < width; ++x) {
+            low[static_cast<size_t>(ly) * lowWidth + x / factor] +=
+                buffer[static_cast<size_t>(y) * width + x] * inv;
+        }
+    }
+
+    std::vector<float> lowScratch(low.size());
+    convolveSeparable(low, lowScratch, lowWidth, lowHeight,
+                      buildSpreadKernel(kind, sigmaPx / static_cast<float>(factor)));
+
+    for (int y = 0; y < height; ++y) {
+        const float fy = (static_cast<float>(y) + 0.5f) / static_cast<float>(factor) - 0.5f;
+        const int y0 = std::clamp(static_cast<int>(std::floor(fy)), 0, lowHeight - 1);
+        const int y1 = std::min(lowHeight - 1, y0 + 1);
+        const float ty = std::clamp(fy - static_cast<float>(y0), 0.0f, 1.0f);
+        for (int x = 0; x < width; ++x) {
+            const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(factor) - 0.5f;
+            const int x0 = std::clamp(static_cast<int>(std::floor(fx)), 0, lowWidth - 1);
+            const int x1 = std::min(lowWidth - 1, x0 + 1);
+            const float tx = std::clamp(fx - static_cast<float>(x0), 0.0f, 1.0f);
+            const float top = low[static_cast<size_t>(y0) * lowWidth + x0] * (1.0f - tx) +
+                              low[static_cast<size_t>(y0) * lowWidth + x1] * tx;
+            const float bottom = low[static_cast<size_t>(y1) * lowWidth + x0] * (1.0f - tx) +
+                                 low[static_cast<size_t>(y1) * lowWidth + x1] * tx;
+            buffer[static_cast<size_t>(y) * width + x] = top * (1.0f - ty) + bottom * ty;
+        }
+    }
+}
+
 // One blurred noise field. The grain is generated at full resolution and then
 // softened twice with the box blur, which is what turns per-pixel noise into
 // clumps that read as film grain rather than digital hash.
@@ -140,6 +224,89 @@ std::vector<float> buildGrainField(unsigned seed, int width, int height, int rad
 }
 
 }  // namespace
+
+float spreadSigmaPixels(float microns, float frameWidthMm, int width) {
+    if (!(microns > 0.0f) || width <= 0) return 0.0f;
+    const float widthMm = frameWidthMm > 0.0f ? frameWidthMm : 36.0f;
+    return microns * 0.001f * static_cast<float>(width) / widthMm;
+}
+
+int spreadKernelRadius(SpreadKind kind, float sigmaPx) {
+    if (!(sigmaPx > 0.5f)) return 0;
+    // The widest component decides the truncation, so the skirt is not cut off
+    // at three effective sigma.
+    float widest = 1.0f;
+    if (kind == SpreadKind::Halation) widest = 2.2f;
+    if (kind == SpreadKind::Glare) widest = 2.8f;
+    if (kind == SpreadKind::Diffusion) widest = 1.8f;
+    return static_cast<int>(std::ceil(3.0f * widest * sigmaPx));
+}
+
+int spreadDownsampleFactor(SpreadKind kind, float sigmaPx) {
+    if (!(sigmaPx > 0.5f)) return 1;
+    // About 16 taps per side at the reduced resolution: cheap, and the kernel
+    // is far wider than the pixel it samples.
+    constexpr float kTargetRadius = 16.0f;
+    int factor = static_cast<int>(
+        std::ceil(static_cast<float>(spreadKernelRadius(kind, sigmaPx)) / kTargetRadius));
+    factor = std::clamp(factor, 1, 8);
+    // The D3D11 kernel buffer holds 132 taps; never build a wider kernel.
+    while (factor < 32 && spreadKernelRadius(kind, sigmaPx / static_cast<float>(factor)) > 120) {
+        ++factor;
+    }
+    return factor;
+}
+
+SpreadKernel buildSpreadKernel(SpreadKind kind, float sigmaPx) {
+    if (!(sigmaPx > 0.5f)) return SpreadKernel{{1.0f}, 0};
+
+    // Weights and relative sigmas. Normalising by the mixture's effective
+    // sigma keeps the requested distance meaningful, while the wide, light
+    // component carries the skirt: beyond three sigma this kernel keeps 7-10x
+    // the energy of a single Gaussian with the same total variance, which is
+    // what reads as halation through the base, veiling glare in the lens and
+    // the long bloom of a diffusion filter (D054).
+    struct Component {
+        float weight;
+        float scale;
+    };
+    static const Component kHalation[] = {{0.88f, 0.69f}, {0.12f, 2.20f}};
+    static const Component kGlare[] = {{0.90f, 0.49f}, {0.10f, 2.80f}};
+    static const Component kDiffusion[] = {{0.82f, 0.713f}, {0.18f, 1.80f}};
+
+    const Component* parts = kHalation;
+    int count = 2;
+    if (kind == SpreadKind::Glare) parts = kGlare;
+    if (kind == SpreadKind::Diffusion) parts = kDiffusion;
+
+    float variance = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        variance += parts[i].weight * parts[i].scale * parts[i].scale;
+    }
+    const float normalise = variance > 0.0f ? 1.0f / std::sqrt(variance) : 1.0f;
+
+    const int radius = spreadKernelRadius(kind, sigmaPx);
+    SpreadKernel kernel;
+    kernel.radius = radius;
+    kernel.taps.assign(static_cast<size_t>(radius) * 2 + 1, 0.0f);
+
+    constexpr float kInvSqrtTwoPi = 0.39894228040143267794f;
+    for (int i = 0; i < count; ++i) {
+        const float sigma = sigmaPx * parts[i].scale * normalise;
+        if (!(sigma > 0.0f)) continue;
+        const float gain = parts[i].weight * kInvSqrtTwoPi / sigma;
+        for (int x = -radius; x <= radius; ++x) {
+            const float t = static_cast<float>(x) / sigma;
+            kernel.taps[static_cast<size_t>(x + radius)] += gain * std::exp(-0.5f * t * t);
+        }
+    }
+
+    float total = 0.0f;
+    for (float tap : kernel.taps) total += tap;
+    if (!(total > 0.0f)) return SpreadKernel{{1.0f}, 0};
+    for (float& tap : kernel.taps) tap /= total;
+    return kernel;
+}
 
 const std::vector<float>& GrainFieldCache::field(unsigned seed, int width, int height, int radius,
                                                  std::uint32_t index) {
@@ -175,7 +342,8 @@ const std::vector<float>& GrainFieldCache::field(unsigned seed, int width, int h
     return victim->data;
 }
 
-void applyHalation(float* pixels, int width, int height, const HalationParams& params) {
+void applyHalation(float* pixels, int width, int height, const HalationParams& params,
+                   const SpreadContext& spread) {
     if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
 
     const size_t count = static_cast<size_t>(width) * height;
@@ -189,10 +357,14 @@ void applyHalation(float* pixels, int width, int height, const HalationParams& p
         glow[i] = excess * excess;  // soft knee, only real highlights bloom
     }
 
-    const int radius =
-        std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
-    std::vector<float> scratch(count);
-    blurWide(glow, width, height, radius, 2);
+    if (spread.model == SpreadModel::Box) {
+        const int radius =
+            std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
+        blurWide(glow, width, height, radius, 2);
+    } else {
+        spreadWide(glow, width, height, SpreadKind::Halation,
+                   spreadSigmaPixels(params.spreadMicrons, spread.frameWidthMm, width));
+    }
 
     // Warm bleed: red scatters most, blue least, like the antihalation layer
     // failing to catch everything.
@@ -209,21 +381,26 @@ void applyHalation(float* pixels, int width, int height, const HalationParams& p
     });
 }
 
-void applyGlare(float* pixels, int width, int height, const GlareParams& params) {
+void applyGlare(float* pixels, int width, int height, const GlareParams& params,
+                const SpreadContext& spread) {
     if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
 
     const size_t count = static_cast<size_t>(width) * height;
-    const int radius =
-        std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
     std::vector<float> veil(count);
-    std::vector<float> scratch(count);
     for (size_t i = 0; i < count; ++i) {
         const float* px = &pixels[i * 3];
         veil[i] = 0.2126f * px[0] + 0.7152f * px[1] + 0.0722f * px[2];
     }
     // Veiling glare in a lens is essentially neutral, so one wide blur of the
     // luminance is enough; a slight warm tint keeps it from looking digital.
-    blurWide(veil, width, height, radius, 4);
+    if (spread.model == SpreadModel::Box) {
+        const int radius =
+            std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
+        blurWide(veil, width, height, radius, 4);
+    } else {
+        spreadWide(veil, width, height, SpreadKind::Glare,
+                   spreadSigmaPixels(params.spreadMicrons, spread.frameWidthMm, width));
+    }
 
     const float amount = std::min(1.0f, params.amount);
     const float tint[3] = {1.0f, 0.96f, 0.92f};
@@ -239,19 +416,24 @@ void applyGlare(float* pixels, int width, int height, const GlareParams& params)
     });
 }
 
-void applyDiffusion(float* pixels, int width, int height, const DiffusionParams& params) {
+void applyDiffusion(float* pixels, int width, int height, const DiffusionParams& params,
+                    const SpreadContext& spread) {
     if (params.amount <= 0.0f || width <= 0 || height <= 0) return;
 
     const size_t count = static_cast<size_t>(width) * height;
-    const int radius =
-        std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
     std::vector<float> blurred(count);
-    std::vector<float> scratch(count);
     for (size_t i = 0; i < count; ++i) {
         const float* px = &pixels[i * 3];
         blurred[i] = 0.2126f * px[0] + 0.7152f * px[1] + 0.0722f * px[2];
     }
-    blurWide(blurred, width, height, radius, 2);
+    if (spread.model == SpreadModel::Box) {
+        const int radius =
+            std::max(1, static_cast<int>(std::lround(params.radius * static_cast<float>(width))));
+        blurWide(blurred, width, height, radius, 2);
+    } else {
+        spreadWide(blurred, width, height, SpreadKind::Diffusion,
+                   spreadSigmaPixels(params.spreadMicrons, spread.frameWidthMm, width));
+    }
 
     // Add the local luminance difference back to every channel: bright areas
     // soften and dark areas next to them pick up a little light, while hue is
@@ -330,9 +512,11 @@ void applyGrain(float* pixels, int width, int height, const GrainParams& params,
 
 void applyTexture(float* pixels, int width, int height, const TextureParams& params, int frame,
                   GrainFieldCache* cache) {
-    if (params.halation.amount > 0.0f) applyHalation(pixels, width, height, params.halation);
-    if (params.glare.amount > 0.0f) applyGlare(pixels, width, height, params.glare);
-    if (params.diffusion.amount > 0.0f) applyDiffusion(pixels, width, height, params.diffusion);
+    if (params.halation.amount > 0.0f)
+        applyHalation(pixels, width, height, params.halation, params.spread);
+    if (params.glare.amount > 0.0f) applyGlare(pixels, width, height, params.glare, params.spread);
+    if (params.diffusion.amount > 0.0f)
+        applyDiffusion(pixels, width, height, params.diffusion, params.spread);
     if (params.grain.amount > 0.0f) {
         GrainParams grain = params.grain;
         grain.frame = frame;

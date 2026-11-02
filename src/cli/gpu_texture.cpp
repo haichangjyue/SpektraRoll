@@ -54,11 +54,19 @@ cbuffer Params : register(b0) {
     float pad1;
     float pad2;
     float pad3;
+    // Radius of the separabale PSF in tapsIn; the taps themselves live in a
+    // structured buffer because HLSL pads constant-buffer arrays to 16 bytes
+    // per element, which would not match the CPU kernel (D054).
+    int kernelRadius;
+    float pad4;
+    float pad5;
+    float pad6;
 };
 
 StructuredBuffer<float4> rgbIn : register(t0);
 StructuredBuffer<float> scalarIn : register(t1);
 StructuredBuffer<float> scalarIn2 : register(t2);
+StructuredBuffer<float> tapsIn : register(t3);
 RWStructuredBuffer<float4> rgbOut : register(u0);
 RWStructuredBuffer<float> scalarOut : register(u1);
 
@@ -118,6 +126,38 @@ float lumaOf(float3 c) {
         scalarOut[(uint)y * (uint)w + (uint)x] = sum / float(window);
         sum -= scalarIn[(uint)clamp(y - r, 0, h - 1) * (uint)w + (uint)x];
         sum += scalarIn[(uint)clamp(y + r + 1, 0, h - 1) * (uint)w + (uint)x];
+    }
+}
+
+// --- separable convolution (D054 physical spread) -------------------------
+
+[numthreads(1, 64, 1)] void CSConvolveH(uint3 id : SV_DispatchThreadID) {
+    int y = (int)id.y;
+    if (y >= blurHeight) return;
+    int w = blurWidth;
+    int r = kernelRadius;
+    uint row = (uint)y * (uint)w;
+    for (int x = 0; x < w; ++x) {
+        float sum = 0.0;
+        for (int k = -r; k <= r; ++k) {
+            sum += tapsIn[k + r] * scalarIn[row + (uint)clamp(x + k, 0, w - 1)];
+        }
+        scalarOut[row + (uint)x] = sum;
+    }
+}
+
+[numthreads(64, 1, 1)] void CSConvolveV(uint3 id : SV_DispatchThreadID) {
+    int x = (int)id.x;
+    if (x >= blurWidth) return;
+    int w = blurWidth;
+    int h = blurHeight;
+    int r = kernelRadius;
+    for (int y = 0; y < h; ++y) {
+        float sum = 0.0;
+        for (int k = -r; k <= r; ++k) {
+            sum += tapsIn[k + r] * scalarIn[(uint)clamp(y + k, 0, h - 1) * (uint)w + (uint)x];
+        }
+        scalarOut[(uint)y * (uint)w + (uint)x] = sum;
     }
 }
 
@@ -254,6 +294,8 @@ struct GpuTexture::Impl {
         kLuma,
         kBlurH,
         kBlurV,
+        kConvolveH,
+        kConvolveV,
         kDownsample,
         kUpsample,
         kHalationApply,
@@ -287,6 +329,10 @@ struct GpuTexture::Impl {
         float pad1;
         float pad2;
         float pad3;
+        int kernelRadius;
+        float pad4;
+        float pad5;
+        float pad6;
     };
 
     ID3D11Device* device = nullptr;
@@ -303,6 +349,9 @@ struct GpuTexture::Impl {
     // Wide-blur pyramid.
     Res low;
     Res lowScratch;
+    // PSF taps, uploaded per effect (D054); 132 floats is the largest kernel
+    // the builder can produce after the downsample factor is chosen.
+    Res kernelTaps;
     // Grain fields are produced last, so they get their own pair.
     Res grain0;
     Res grain1;
@@ -336,7 +385,7 @@ struct GpuTexture::Impl {
     bool runChain(int width, int height, const TextureParams& params, int frame, float* out,
                   std::string& error);
     bool dispatch(Shader shader, UINT groupsX, UINT groupsY, Res* srv0, Res* srv1, Res* srv2,
-                  int uavSlot, Res* uav, std::string& error);
+                  Res* srv3, int uavSlot, Res* uav, std::string& error);
     // Scalar passes read t1 (scalarIn) and write u1 (scalarOut).
     bool runScalar(Shader shader, UINT groupsX, UINT groupsY, Res* input, Res* output,
                    std::string& error);
@@ -348,7 +397,11 @@ struct GpuTexture::Impl {
                 std::string& error);
     bool runGrain(Shader shader, UINT groupsX, UINT groupsY, Res* rgb, Res* fieldA, Res* fieldB,
                   Res* output, std::string& error);
+    bool runConvolve(Shader shader, UINT groupsX, UINT groupsY, Res* input, Res* output,
+                     std::string& error);
     bool blurWide(Res& buffer, int radius, int factor, std::string& error);
+    bool spreadWide(Res& buffer, SpreadKind kind, float sigmaPx, std::string& error);
+    bool setKernel(const SpreadKernel& kernel, std::string& error);
     bool buildGrainField(unsigned seed, int index, int radius, Res& target, std::string& error);
     void resetParams();
 #endif
@@ -478,7 +531,8 @@ bool GpuTexture::processBuffer(void* input, int width, int height, const Texture
     // ping-ponging between rgbA and rgbB exactly like the staged path.
     const UINT groups = static_cast<UINT>((count + 63) / 64);
     g.resetParams();
-    if (!g.dispatch(Impl::kCopy, groups, 1, &g.external, nullptr, nullptr, 0, &g.rgbA, error)) {
+    if (!g.dispatch(Impl::kCopy, groups, 1, &g.external, nullptr, nullptr, nullptr, 0, &g.rgbA,
+                    error)) {
         return false;
     }
     return g.runChain(width, height, params, frame, out, error);
@@ -507,7 +561,13 @@ bool GpuTexture::Impl::runChain(int width, int height, const TextureParams& para
 
         const int radius =
             std::max(1, static_cast<int>(std::lround(params.halation.radius * width)));
-        if (!g.blurWide(g.full0, radius, 2, error)) return false;
+        if (params.spread.model == SpreadModel::Box) {
+            if (!g.blurWide(g.full0, radius, 2, error)) return false;
+        } else {
+            const float sigma = spreadSigmaPixels(params.halation.spreadMicrons,
+                                                  params.spread.frameWidthMm, width);
+            if (!g.spreadWide(g.full0, SpreadKind::Halation, sigma, error)) return false;
+        }
 
         g.resetParams();
         g.params.amount = params.halation.amount * 0.55f;
@@ -524,7 +584,13 @@ bool GpuTexture::Impl::runChain(int width, int height, const TextureParams& para
         if (!g.runSource(Impl::kLuma, fullGroups, 1, current, &g.full0, error))
             return false;
         const int radius = std::max(1, static_cast<int>(std::lround(params.glare.radius * width)));
-        if (!g.blurWide(g.full0, radius, 4, error)) return false;
+        if (params.spread.model == SpreadModel::Box) {
+            if (!g.blurWide(g.full0, radius, 4, error)) return false;
+        } else {
+            const float sigma = spreadSigmaPixels(params.glare.spreadMicrons,
+                                                  params.spread.frameWidthMm, width);
+            if (!g.spreadWide(g.full0, SpreadKind::Glare, sigma, error)) return false;
+        }
 
         g.resetParams();
         g.params.amount = std::min(1.0f, params.glare.amount);
@@ -542,7 +608,13 @@ bool GpuTexture::Impl::runChain(int width, int height, const TextureParams& para
             return false;
         const int radius =
             std::max(1, static_cast<int>(std::lround(params.diffusion.radius * width)));
-        if (!g.blurWide(g.full0, radius, 2, error)) return false;
+        if (params.spread.model == SpreadModel::Box) {
+            if (!g.blurWide(g.full0, radius, 2, error)) return false;
+        } else {
+            const float sigma = spreadSigmaPixels(params.diffusion.spreadMicrons,
+                                                  params.spread.frameWidthMm, width);
+            if (!g.spreadWide(g.full0, SpreadKind::Diffusion, sigma, error)) return false;
+        }
 
         g.resetParams();
         g.params.amount = std::min(1.0f, params.diffusion.amount);
@@ -619,8 +691,9 @@ bool GpuTexture::Impl::initialize(std::string& error) {
 
     static const char* kEntries[kShaderCount] = {
         "CSHalationSource", "CSLuma",       "CSBlurH",      "CSBlurV",
-        "CSDownsample",     "CSUpsample",   "CSHalationApply", "CSGlareApply",
-        "CSDiffusionApply", "CSGrainField", "CSGrainApply", "CSCopyRgb",
+        "CSConvolveH",      "CSConvolveV",  "CSDownsample", "CSUpsample",
+        "CSHalationApply",  "CSGlareApply", "CSDiffusionApply", "CSGrainField",
+        "CSGrainApply",     "CSCopyRgb",
     };
     for (int i = 0; i < kShaderCount; ++i) {
         ID3DBlob* code = nullptr;
@@ -728,9 +801,9 @@ void GpuTexture::Impl::releaseExternal() {
 
 void GpuTexture::Impl::releaseResources() {
     if (context != nullptr) {
-        ID3D11ShaderResourceView* nullSrv[2] = {nullptr, nullptr};
+        ID3D11ShaderResourceView* nullSrv[4] = {nullptr, nullptr, nullptr, nullptr};
         ID3D11UnorderedAccessView* nullUav[1] = {nullptr};
-        context->CSSetShaderResources(0, 2, nullSrv);
+        context->CSSetShaderResources(0, 4, nullSrv);
         context->CSSetUnorderedAccessViews(0, 1, nullUav, nullptr);
     }
     releaseRes(rgbA);
@@ -739,6 +812,7 @@ void GpuTexture::Impl::releaseResources() {
     releaseRes(full1);
     releaseRes(low);
     releaseRes(lowScratch);
+    releaseRes(kernelTaps);
     releaseRes(grain0);
     releaseRes(grain1);
     releaseRes(staging);
@@ -768,15 +842,18 @@ bool GpuTexture::Impl::ensureCapacity(int w, int h, std::string& error) {
         return false;
     }
 
-    // The pyramid is sized for the widest factor the effects use (2x for
-    // halation/diffusion, 4x for glare), so the 2x slice is the largest one.
-    lowWidth = (w + 1) / 2;
-    lowHeight = (h + 1) / 2;
+    // The pyramid is sized for the largest factor any effect asks for. Since
+    // D054 the physical kernels pick their factor from the physical spread and
+    // can go up to 8x, so the low-resolution scratch is allocated at full size
+    // (it is only ever read, never all of it at once).
+    lowWidth = w;
+    lowHeight = h;
     const UINT maxLow = static_cast<UINT>(lowWidth) * static_cast<UINT>(lowHeight);
     if (!createRes(maxLow, scalarStride, low, error) ||
         !createRes(maxLow, scalarStride, lowScratch, error)) {
         return false;
     }
+    if (!createRes(132, scalarStride, kernelTaps, error)) return false;
 
     D3D11_BUFFER_DESC stagingDesc{};
     stagingDesc.ByteWidth = pixels * rgbStride;
@@ -803,7 +880,7 @@ void GpuTexture::Impl::resetParams() {
 }
 
 bool GpuTexture::Impl::dispatch(Shader shader, UINT groupsX, UINT groupsY, Res* srv0, Res* srv1,
-                                Res* srv2, int uavSlot, Res* uav, std::string& error) {
+                                Res* srv2, Res* srv3, int uavSlot, Res* uav, std::string& error) {
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(context->Map(constantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
         error = "could not map the GPU texture constant buffer";
@@ -815,40 +892,48 @@ bool GpuTexture::Impl::dispatch(Shader shader, UINT groupsX, UINT groupsY, Res* 
     ID3D11Buffer* cbs[] = {constantBuffer};
     ID3D11ShaderResourceView* srvs[] = {srv0 != nullptr ? srv0->srv : nullptr,
                                         srv1 != nullptr ? srv1->srv : nullptr,
-                                        srv2 != nullptr ? srv2->srv : nullptr};
+                                        srv2 != nullptr ? srv2->srv : nullptr,
+                                        srv3 != nullptr ? srv3->srv : nullptr};
     ID3D11UnorderedAccessView* uavs[2] = {nullptr, nullptr};
     uavs[uavSlot] = uav != nullptr ? uav->uav : nullptr;
     context->CSSetShader(shaders[shader], nullptr, 0);
     context->CSSetConstantBuffers(0, 1, cbs);
-    context->CSSetShaderResources(0, 3, srvs);
+    context->CSSetShaderResources(0, 4, srvs);
     context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
     context->Dispatch(groupsX, groupsY, 1);
 
     // Unbind so the same buffer can be read by the next pass.
-    ID3D11ShaderResourceView* nullSrv[3] = {nullptr, nullptr, nullptr};
+    ID3D11ShaderResourceView* nullSrv[4] = {nullptr, nullptr, nullptr, nullptr};
     ID3D11UnorderedAccessView* nullUav[2] = {nullptr, nullptr};
-    context->CSSetShaderResources(0, 3, nullSrv);
+    context->CSSetShaderResources(0, 4, nullSrv);
     context->CSSetUnorderedAccessViews(0, 2, nullUav, nullptr);
     return true;
 }
 
 bool GpuTexture::Impl::runScalar(Shader shader, UINT groupsX, UINT groupsY, Res* input,
                                  Res* output, std::string& error) {
-    return dispatch(shader, groupsX, groupsY, nullptr, input, nullptr, 1, output, error);
+    return dispatch(shader, groupsX, groupsY, nullptr, input, nullptr, nullptr, 1, output, error);
 }
 bool GpuTexture::Impl::runSource(Shader shader, UINT groupsX, UINT groupsY, Res* rgb,
                                  Res* output, std::string& error) {
-    return dispatch(shader, groupsX, groupsY, rgb, nullptr, nullptr, 1, output, error);
+    return dispatch(shader, groupsX, groupsY, rgb, nullptr, nullptr, nullptr, 1, output, error);
 }
 
 bool GpuTexture::Impl::runRgb(Shader shader, UINT groupsX, UINT groupsY, Res* rgb, Res* scalar,
                               Res* output, std::string& error) {
-    return dispatch(shader, groupsX, groupsY, rgb, scalar, nullptr, 0, output, error);
+    return dispatch(shader, groupsX, groupsY, rgb, scalar, nullptr, nullptr, 0, output, error);
 }
 
 bool GpuTexture::Impl::runGrain(Shader shader, UINT groupsX, UINT groupsY, Res* rgb, Res* fieldA,
                                 Res* fieldB, Res* output, std::string& error) {
-    return dispatch(shader, groupsX, groupsY, rgb, fieldA, fieldB, 0, output, error);
+    return dispatch(shader, groupsX, groupsY, rgb, fieldA, fieldB, nullptr, 0, output, error);
+}
+
+// The convolve passes read the scalar map at t1 and the taps at t3.
+bool GpuTexture::Impl::runConvolve(Shader shader, UINT groupsX, UINT groupsY, Res* input,
+                                   Res* output, std::string& error) {
+    return dispatch(shader, groupsX, groupsY, nullptr, input, nullptr, &kernelTaps, 1, output,
+                    error);
 }
 
 bool GpuTexture::Impl::blurWide(Res& buffer, int radius, int factor, std::string& error) {
@@ -896,6 +981,69 @@ bool GpuTexture::Impl::blurWide(Res& buffer, int radius, int factor, std::string
                       error)) {
             return false;
         }
+    }
+
+    params.factor = factor;
+    params.lowWidth = lw;
+    params.lowHeight = lh;
+    return runScalar(kUpsample, fullGroups, 1, &low, &buffer, error);
+}
+
+bool GpuTexture::Impl::setKernel(const SpreadKernel& kernel, std::string& error) {
+    constexpr std::size_t kMaxTaps = 132;
+    params.kernelRadius = kernel.radius;
+    float taps[kMaxTaps] = {};
+    const std::size_t count = std::min(kernel.taps.size(), kMaxTaps);
+    for (std::size_t i = 0; i < count; ++i) taps[i] = kernel.taps[i];
+    if (kernelTaps.buffer == nullptr) {
+        error = "the GPU kernel buffer is not allocated";
+        return false;
+    }
+    // Structured buffer: HLSL pads constant-buffer arrays to 16 bytes per
+    // element, so the taps cannot ride along with the scalar parameters.
+    context->UpdateSubresource(kernelTaps.buffer, 0, nullptr, taps, 0, 0);
+    return true;
+}
+
+bool GpuTexture::Impl::spreadWide(Res& buffer, SpreadKind kind, float sigmaPx,
+                                  std::string& error) {
+    const int radiusFull = spreadKernelRadius(kind, sigmaPx);
+    if (radiusFull < 1) return true;
+
+    const int factor = spreadDownsampleFactor(kind, sigmaPx);
+    const UINT fullGroups = (params.count + 63) / 64;
+
+    if (factor <= 1 || radiusFull < factor * 2) {
+        params.blurWidth = width;
+        params.blurHeight = height;
+        if (!setKernel(buildSpreadKernel(kind, sigmaPx), error)) return false;
+        if (!runConvolve(kConvolveH, 1, static_cast<UINT>((height + 63) / 64), &buffer, &full1,
+                         error)) {
+            return false;
+        }
+        return runConvolve(kConvolveV, static_cast<UINT>((width + 63) / 64), 1, &full1, &buffer,
+                           error);
+    }
+
+    const int lw = (width + factor - 1) / factor;
+    const int lh = (height + factor - 1) / factor;
+    params.factor = factor;
+    params.lowWidth = lw;
+    params.lowHeight = lh;
+    if (!runScalar(kDownsample, static_cast<UINT>((lw * lh + 63) / 64), 1, &buffer, &low, error)) {
+        return false;
+    }
+
+    params.blurWidth = lw;
+    params.blurHeight = lh;
+    if (!setKernel(buildSpreadKernel(kind, sigmaPx / static_cast<float>(factor)), error)) {
+        return false;
+    }
+    if (!runConvolve(kConvolveH, 1, static_cast<UINT>((lh + 63) / 64), &low, &lowScratch, error)) {
+        return false;
+    }
+    if (!runConvolve(kConvolveV, static_cast<UINT>((lw + 63) / 64), 1, &lowScratch, &low, error)) {
+        return false;
     }
 
     params.factor = factor;

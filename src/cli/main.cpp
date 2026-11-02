@@ -71,6 +71,9 @@ void printUsage() {
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
         "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
+        "                         [--spread-model physical|box] [--frame-width-mm 36]\n"
+        "                         [--halation-spread 225] [--glare-spread 725]\n"
+        "                         [--diffusion-spread 122]\n"
         "                         [--segment SEC] [--resume] [--keep-parts] [--jobs N]\n"
         "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
         "                         [--texture-engine auto|cpu|gpu] [--ffmpeg <path>]\n"
@@ -90,6 +93,12 @@ void printUsage() {
         "      device is available. --texture-engine gpu moves grain, halation,\n"
         "      glare and diffusion onto the same GPU (D047); the default 'auto'\n"
         "      does this whenever the colour engine is spectral-gpu.\n"
+        "      Halation, glare and diffusion are physical point spreads since D054:\n"
+        "      --halation-spread/--glare-spread/--diffusion-spread are effective\n"
+        "      sigmas in micrometres on the negative (--frame-width-mm maps them to\n"
+        "      pixels, 36 mm = full frame). --spread-model box reproduces the old\n"
+        "      fraction-of-width box blur with --halation-radius/-glare-radius/\n"
+        "      -diffusion-radius.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -126,6 +135,7 @@ void printUsage() {
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
         "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
+        "                             [--spread-model physical|box] [--frame-width-mm 36]\n"
         "                             [--texture-engine auto|cpu|gpu]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "      --engine spectral runs the per-pixel physical chain instead of a LUT\n"
@@ -150,6 +160,8 @@ void printUsage() {
         "        look <args...>        load a LUT or the spectral engine\n"
         "        open <clip>           decode the clip into the cache\n"
         "        texture <11 numbers>  grain/halation/glare/diffusion\n"
+        "                [model]      1 = physical kernels (default), 0 = box blur\n"
+        "                [frameWidthMm] negative width used by the physical kernels\n"
         "        frame <n> <out.raw>   graded frame, 8-bit RGBA\n"
         "        raw <n> <out.raw>     decoded frame, 8-bit RGBA\n"
         "        quit\n"
@@ -500,11 +512,27 @@ sr::TextureParams parseTexture(const Args& args) {
     texture.grain.rate = std::max(1, args.getInt("grain-rate", 3));
     texture.halation.amount = static_cast<float>(args.getDouble("halation", 0.0));
     texture.halation.radius = static_cast<float>(args.getDouble("halation-radius", 0.006));
+    texture.halation.spreadMicrons =
+        static_cast<float>(args.getDouble("halation-spread", 225.0));
     texture.halation.threshold = static_cast<float>(args.getDouble("halation-threshold", 0.72));
     texture.glare.amount = static_cast<float>(args.getDouble("glare", 0.0));
     texture.glare.radius = static_cast<float>(args.getDouble("glare-radius", 0.02));
+    texture.glare.spreadMicrons = static_cast<float>(args.getDouble("glare-spread", 725.0));
     texture.diffusion.amount = static_cast<float>(args.getDouble("diffusion", 0.0));
     texture.diffusion.radius = static_cast<float>(args.getDouble("diffusion-radius", 0.004));
+    texture.diffusion.spreadMicrons =
+        static_cast<float>(args.getDouble("diffusion-spread", 122.0));
+    texture.spread.frameWidthMm = static_cast<float>(args.getDouble("frame-width-mm", 36.0));
+
+    // D054: physical kernels by default; `box` reproduces the pre-D054 look.
+    const std::string spread = args.get("spread-model", "physical");
+    if (spread == "physical") {
+        texture.spread.model = sr::SpreadModel::Physical;
+    } else if (spread == "box") {
+        texture.spread.model = sr::SpreadModel::Box;
+    } else {
+        std::fprintf(stderr, "warning: --spread-model expects 'physical' or 'box'\n");
+    }
     return texture;
 }
 
@@ -1025,6 +1053,11 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
               << job.texture.halation.threshold << " " << job.texture.glare.amount << " "
               << job.texture.glare.radius << " " << job.texture.diffusion.amount << " "
               << job.texture.diffusion.radius << "\n"
+              << "spread "
+              << (job.texture.spread.model == sr::SpreadModel::Box ? "box" : "physical") << " "
+              << job.texture.spread.frameWidthMm << " " << job.texture.halation.spreadMicrons
+              << " " << job.texture.glare.spreadMicrons << " "
+              << job.texture.diffusion.spreadMicrons << "\n"
               << "texture-engine " << (job.textureGpu != nullptr ? "gpu" : "cpu") << "\n";
     return signature.str();
 }
@@ -2408,7 +2441,9 @@ bool renderFrame(Server& server, int index, const std::string& outPath, bool gra
 bool applyTextureCommand(Server& server, const std::vector<std::string>& tokens,
                          std::string& error) {
     // texture grain grainSize seed rate halAmount halRadius halThreshold
-    //         glareAmount glareRadius diffAmount diffRadius
+    //         glareAmount glareRadius diffAmount diffRadius [model frameWidthMm]
+    // `model` is 1 for the physical kernels (default) and 0 for the pre-D054
+    // box chain; the spread distances themselves keep the CLI defaults.
     if (tokens.size() < 12) {
         error = "texture needs 11 numbers";
         return false;
@@ -2425,6 +2460,13 @@ bool applyTextureCommand(Server& server, const std::vector<std::string>& tokens,
     server.texture.glare.radius = at(9);
     server.texture.diffusion.amount = at(10);
     server.texture.diffusion.radius = at(11);
+    if (tokens.size() > 12) {
+        server.texture.spread.model =
+            std::atoi(tokens[12].c_str()) == 0 ? sr::SpreadModel::Box : sr::SpreadModel::Physical;
+    }
+    if (tokens.size() > 13) {
+        server.texture.spread.frameWidthMm = at(13);
+    }
     return true;
 }
 

@@ -101,14 +101,26 @@ stay in sync, and `--codec prores` swaps the encoder for ProRes 422 HQ (D031).
 
 Grain and halation (D033) run after the LUT, per frame, because they are
 spatial: grain is a seeded hash field blurred into clumps and weighted toward
-mid-tones, halation is a thresholded highlight mask blurred three times and
-tinted warm. The seed and frame index make the field reproducible.
+mid-tones, halation is a thresholded highlight mask spread by the halation PSF
+and tinted warm. The seed and frame index make the field reproducible.
 
-Glare and diffusion (D035) follow: glare blurs the whole luminance very widely
+Glare and diffusion (D035) follow: glare spreads the whole luminance very widely
 and screens it back (veiling light, so blacks lift and highlights stay), while
-diffusion adds the blurred-minus-original luminance back to all three channels,
+diffusion adds the spread-minus-original luminance back to all three channels,
 softening detail without shifting hue. Order is halation, glare, diffusion,
 grain.
+
+Since D054 the three spreads are measured on the negative instead of on the
+frame: `spreadMicrons` is the effective sigma of a two-Gaussian kernel (a tight
+core plus a wide skirt) and `frameWidthMm` converts it to pixels, so 1080p and
+4K renders of the same shot carry the same physical glow. The kernel is
+truncated at three sigma of its widest component, normalised to sum to one, and
+generated on the CPU (`buildSpreadKernel`) for both backends; D3D11 uploads the
+same taps through a structured buffer instead of recomputing them in HLSL, and
+each thread walks `-r..+r` in the same order as the CPU convolution. Kernels
+wider than a few pixels are evaluated at 1/2..1/8 resolution and bilinearly
+upsampled, which keeps the cost close to the old box blur. `--spread-model box`
+still selects the pre-D054 fraction-of-width box chain.
 
 Grain is cross-faded across frames (D036): two independent fields are mixed over
 `--grain-rate` frames instead of replacing the field every frame, because a

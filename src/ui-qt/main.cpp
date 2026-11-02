@@ -1860,9 +1860,11 @@ private:
         return key;
     }
 
-    // Keep in step with the CLI defaults: the server takes all eleven values.
+    // Keep in step with the CLI defaults: the server takes all eleven values,
+    // then the spread model (1 = physical, D054) and the negative width.
     QString previewTextureLine() const {
-        return QStringLiteral("texture %1 1.4 1 %2 %3 0.006 0.72 %4 0.02 %5 0.004")
+        return QStringLiteral(
+                   "texture %1 1.4 1 %2 %3 0.006 0.72 %4 0.02 %5 0.004 1 36")
             .arg(number(grain_->value()))
             .arg(grainRate_->value())
             .arg(number(halation_->value()))

@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-03（D049–D053 已整理成交接摘要）
-> **当前里程碑**：**M5 进行中 · 颜色与质感都在 GPU**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理，D041–D053）
+> **最后更新**：2026-11-03（D049–D054 已整理成交接摘要）
+> **当前里程碑**：**M5 进行中 · 颜色 / 质感 / 空间扩散都在 GPU**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理，D041–D054）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,75 @@
 
 ---
 
-## 零之一、最近一次会话：D049–D053（融合提交 → 管道 → 并行 → 预览代理）
+## 零之一、最近一次会话：D054（真实点扩散核）
+
+会话目标：按建议做 **A（真实点扩散核）**。动手前先跑完健康检查：9/9 测试、M1 parity 88.07 dB、`demo-m3` 220.8 ms/帧、`demo-m4` 续渲正常、Qt 界面能编译、预览第二次 45 ms。
+
+### 一、已完成的事项
+
+**D054 · 光晕 / 眩光 / 扩散换成物理点扩散核**
+- 参数从"画幅比例"改成"底片微米"：`--halation-spread 225`、`--glare-spread 725`、`--diffusion-spread 122`（有效 σ，µm），`--frame-width-mm 36` 负责换算；1080p / 4K / 8K 渲染出来是同一个物理大小。
+- 核形状：窄芯 + 宽裙的双高斯混合，按有效 σ 归一化（总展宽不变，只改形状）；截断在**最宽分量**的 3σ，3σ 之外的裙部能量是同等方差高斯的 **7–10×**。
+- 成本：按核半径自动降采样 1–8×，核按同样比例缩小；结构仍是"降采样 → 分离卷积 → 双线性升采样"（D037 的思路）。
+- **CPU / GPU 同一组权重**：核由 `sr::buildSpreadKernel` 在 CPU 生成，GPU 用 structured buffer `t3` 上传，HLSL 只做 `-r..+r` 顺序累加，和 `convolveSeparable` 完全同序。
+- `--spread-model box` 保留 D033–D037 的"画幅比例 + 盒状模糊"，两条老路径都没删，旧观感随时可回。
+- 预览协议 `texture` 后面新增 `model frameWidthMm` 两个数；渲染签名新增 `spread ...` 一行（换模型/尺度不会混着续渲）。
+- 新增双击验收 `scripts\demo-spread.cmd`：同一帧 + 同一段 1 秒视频各渲 box / physical 两遍，打印 PSNR、ms/帧，并排对比。
+- 测试：`test_texture` 新增物理尺度、归一化、对称、重尾与 box 回退检查；`test_gpu_texture` 九组配置全过。
+
+### 二、一条关键决策（详见 DECISIONS D054）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D054 | 真实点扩散核 | 微米单位 + 双高斯重尾；CPU 生成核权重、GPU 只做卷积；box 模型保留 |
+
+### 三、踩过并修掉的坑（下次别再踩）
+
+1. **HLSL 常量缓冲里的数组是 16 字节/元素**，taps 按 4 字节排进去，GPU 读到的是错位权重，parity 直接掉到 **19–48 dB**；改成 `StructuredBuffer<float> tapsIn : register(t3)` 后 **149–178 dB**。
+2. 第一版混合核按"有效 σ"归一化后，3σ 外的裙部反而比同方差高斯**更薄**；把截断改成按最宽分量 3σ，才有真正的重尾。
+3. 单元测试里 64 px 的画面在 225 µm 下只有 0.4 px 的扩散，等于没效果；物理核的测试要按底片宽度选画面尺寸（640 px 对应 4 px σ）。
+
+### 四、实测（本机，2160×1214）
+
+| 场景 | 结果 |
+|---|---|
+| 默认值与旧观感的对应 | 225 / 725 / 122 µm ≈ 13.5 / 43.5 / 7.3 px 有效 σ，强度档位不用改 |
+| 同帧 box vs physical | **57.03 dB**（差异集中在高光边缘的柔化与外晕） |
+| GPU 视频（光谱 GPU + GPU 质感，ProRes） | **82.2 ms/帧**（D051 时 79.2，+3.8%） |
+| LUT + CPU 质感视频 | box 231.8 → physical **251.4 ms/帧**（+8.5%） |
+| `demo-m3`（LUT + CPU 质感，H.264） | 220.8 → **235.1 ms/帧**（+6.5%） |
+| 单帧 `lut apply`（含 PNG I/O） | box 275.7 → physical **297.6 ms** |
+| `demo-gpu-texture` | CPU 236.7 / GPU **82.6 ms/帧（2.87×）**，编码后 PSNR **85.6 dB** |
+| GPU parity | `test_gpu_texture` **149.3–177.7 dB**（最差 2.98e-7） |
+| 预览 | 第二次 **49 ms**（与之前 45 ms 持平） |
+
+### 五、未完成的待办（按建议顺序）
+
+- [ ] **浮点 / EXR**（D017 欠账）：16-bit PNG 之外没有浮点交付。
+- [ ] **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
+- [ ] **代理清理策略 / 4K 预览**：`out/ui-proxy/` 会按素材累积；4K 素材可考虑 1280 px 代理。
+- [ ] **核形状仍是近似**：双高斯是工程近似，没有按胶片层厚/折射率算；要更真需要实测的 halation/glare PSF。
+
+### 六、复现 / 验收
+
+```powershell
+scripts\demo-spread.cmd            # 左旧 / 右新，打印 PSNR 与 ms/帧
+
+# 同一帧两种模型
+.\build\spektra-roll-cli.exe lut apply --lut out\m3-applelog-sdr.cube `
+  --in out\m3-frame.png --out out\spread-physical.png `
+  --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1
+.\build\spektra-roll-cli.exe lut apply ... --spread-model box --out out\spread-box.png
+
+# 自定义物理尺度（微米）
+.\build\spektra-roll-cli.exe video --lut out\m3-applelog-sdr.cube --in X:\agent\footage\A001_11011538_C001.mov `
+  --out out\spread-custom.mov --halation 0.45 --glare 0.2 --diffusion 0.1 `
+  --halation-spread 120 --glare-spread 500 --diffusion-spread 80 --frame-width-mm 24.9
+```
+
+---
+
+## 零之二、上一次会话：D049–D053（融合提交 → 管道 → 并行 → 预览代理）
 
 会话目标：产品负责人依次选了 **B（融合提交）→ B2（视频管道）→ 并行分段 → 预览代理**。下面按交付编号整理，所有数字都是本机（i5-10600KF / Arc A750 / 32 GB）实测。
 
@@ -114,7 +182,7 @@ $env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
 
 ---
 
-## 零之二、上一次会话：预览实时化（D048）
+## 零之三、上一次会话：预览实时化（D048）
 
 会话目标：按建议先做 **A（预览实时化）**。先把旧预览链拆开量，再决定改法。
 
@@ -184,7 +252,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之三、上一次会话：空间质感上 GPU（D047）
+## 零之四、上一次会话：空间质感上 GPU（D047）
 
 会话目标：D046 之后颜色只剩约 50 ms/帧，视频却仍要约 380 ms/帧。先把时间花在哪量清楚，再决定要不要移植。
 
@@ -257,7 +325,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之四、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
+## 零之五、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
 
 会话目标：按你的要求，**能物理算的地方不要再靠 LUT 采样**，并且用满本机（i5-10600KF / 32 GB / Arc A750）。
 
@@ -312,7 +380,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之五、更早的一次会话（M3 阶段）做了什么
+## 零之六、更早的一次会话（M3 阶段）做了什么
 
 一次会话把项目从"M2 尾声"推到"M3 完成"，按时间顺序：
 
@@ -471,6 +539,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **读写重叠（D051）** | 视频 **85–92 → 79.2 ms/帧**；`demo-m3` 245.5 → 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
 | **并行分段（D052）** | CPU 路径 **157.98 → 84.19 s（1.88×）**；GPU 路径 1.10×（单卡）；输出逐位相同；并行续渲正常 |
 | **长片预览代理（D053）** | 30 秒素材代理 8.7 s / 30.6 MB；预览 **960×540 · 100 ms/帧**（原先约 640 px）；重开 48 ms；4 秒素材不变 |
+| **物理点扩散核（D054）** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB；parity 149–178 dB |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -591,6 +660,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D051** | 读写线程重叠 | **解码双缓冲 + 编码两槽位后台线程，读写不再阻塞 GPU 处理** | 视频 85–92 → **79.2 ms/帧**；`demo-m3` 226.8；分段/续渲不变；输出逐位相同 |
 | **D052** | 并行分段渲染 | **`--jobs N`：每 worker 独立 GPU 对象/颗粒缓存，原子计数器领段；默认 min(3, 核数/4, 段数)** | CPU 路径 30 秒素材 **157.98 → 84.19 s（1.88×）**；GPU 路径 1.10×（单卡）；输出逐位相同 |
 | **D053** | 长片预览代理 | **整段进内存会把最长边压到 960 px 以下时，生成 960 px 全 I 帧代理（`out/ui-proxy/`），按需取帧；失败回退内存缓存** | 30 秒素材 960×540 **100 ms/帧**（原先约 640 px）；重开 48 ms；4 秒素材不变 |
+| **D054** | 真实点扩散核 | **光晕/眩光/扩散改用底片微米 + 双高斯重尾核（窄芯 + 宽裙），按 `--frame-width-mm` 换算；CPU 生成权重、GPU structured buffer 上传；`--spread-model box` 保留旧盒状模糊** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**；LUT+CPU 质感 +8.5%；parity **149–178 dB**；`test_texture` 新增物理核检查 |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -608,18 +678,18 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应换成微米级、随分辨率缩放的核（GPU 只是照搬形状）。
-2. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。
-3. **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
-4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积（可加 LRU 或按钮）；4K 素材可考虑 1280 px 代理。
+1. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。
+2. **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
+3. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积（可加 LRU 或按钮）；4K 素材可考虑 1280 px 代理。
+4. **更真的核形状**：双高斯仍是工程近似，要按实测 PSF 或层厚模型才算真物理。
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核。
 
 ### 🟡 中期路线（M4–M5）
 
 | 阶段 | 内容 |
 |---|---|
-| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色/质感、✅ 融合提交、✅ 并行分段、✅ 预览代理；待做：真实扩散核、浮点/EXR |
+| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色/质感、✅ 融合提交、✅ 并行分段、✅ 预览代理、✅ 真实点扩散核；待做：浮点/EXR |
 | **M5** | ✅ Qt 6 桌面界面主体、✅ 预览实时化；待做：macOS 同套 Qt、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
@@ -703,6 +773,7 @@ scripts\demo-m2.cmd             Apple Log → 印片 / 负片 / HDR 片段
 scripts\demo-m3.cmd             胶片质感（干净帧 / 质感帧 / 整段视频）
 scripts\demo-m4.cmd             分段渲染 + 模拟崩溃 + 断点续渲 + timecode
 scripts\demo-gpu-texture.cmd     GPU 质感对比（CPU vs GPU 的 ms/帧与 PSNR）
+scripts\demo-spread.cmd          空间扩散对比（旧盒状模糊 vs 新物理核，并排图 + ms/帧）
 scripts\build-ui.cmd            编译 Qt 6 界面、部署 DLL 并启动（首次约 1–2 分钟）
 scripts\verify-m1.cmd           一键验收：编译 + 测试 + 烘 LUT + 和参考对比
 scripts\demo.cmd                M0 的合成 LUT 冒烟测试（不是胶片）
@@ -829,6 +900,11 @@ X:\agent\SpektraRoll\
 - ❌ **不要在拖动时间线时走单帧慢路径**：超出缓存的帧在拖动中直接跳过，松手才允许回退（D048）
 - ❌ **不要把预览缓存设成无上限**：默认 1024 MB / 最长边 1600，长片会吃掉内存（D048）
 - ❌ **不要把 `std::filesystem::file_time_type::count()` 直接塞进 `std::to_string`**：libc++ 的 rep 比 `long long` 宽，重载会歧义，只有 macOS 编译失败（D053）；先 `static_cast<long long>`
+- ❌ **不要把 PSF 的 taps 塞进 D3D11 常量缓冲**：HLSL 的常量缓冲数组是 **16 字节/元素**，按 4 字节排会读到错位权重（parity 掉到 19–48 dB）；用 structured buffer + `kernelRadius`（D054）
+- ❌ **不要在 HLSL 里重新算 `exp` 生成核权重**：CPU `sr::buildSpreadKernel` 是唯一来源，GPU 必须上传同一组 float 才能过 150 dB 的 parity（D054）
+- ❌ **不要把光晕/眩光/扩散的尺寸改回"画幅比例"**：现在按底片微米算，`--frame-width-mm` 决定换算；改回比例会让 1080p 和 4K 观感不一致（D054）
+- ❌ **不要删掉 `--spread-model box`**：那是旧观感的回退路径，也是新旧核对比的唯一途径（D054）
+- ❌ **不要在物理核的测试里用 64 px 小图**：225 µm 在 64 px 宽上只有 0.4 px，等于没效果；按 `width / frameWidthMm` 选尺寸（640 px ≈ 4 px σ）（D054）
 
 ---
 
@@ -846,10 +922,11 @@ AI 就应该：
 4. 再跑 `scripts\demo-m4.cmd -NoOpen` 确认分段 + 续渲 + timecode（约 20 秒）
 5. 跑 `scripts\build-ui.cmd -NoLaunch` 确认 Qt 界面还能编译部署
 6. 颜色路径改过就补一次 GPU 校验：`lut apply --engine spectral` 与 `--engine spectral-gpu` 出图做 PSNR（应 ≥60 dB，本机实测 ≥82 dB）
-7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（融合后本机约 1.8×、83 dB）
-8. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应 <100 ms（短片 47 ms；长片走 960 px 代理约 100 ms）
-9. 视频管道改过就设 `SPEKTRA_VIDEO_DEBUG=1` 跑一次 2 秒渲染：应看到 `wait / convert / process / pack` 四项，总时长约 79 ms/帧
-10. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
-11. 看 §三 的"下一步"（当前最该做：真实点扩散核）
+7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（物理核后本机约 2.9×、85.6 dB）
+8. 空间扩散改过就跑 `scripts\demo-spread.cmd -NoOpen`：box vs physical 的 PSNR 与 ms/帧；GPU 视频应约 82 ms/帧
+9. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应 <100 ms（短片 47 ms；长片走 960 px 代理约 100 ms）
+10. 视频管道改过就设 `SPEKTRA_VIDEO_DEBUG=1` 跑一次 2 秒渲染：应看到 `wait / convert / process / pack` 四项，总时长约 79–82 ms/帧
+11. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
+12. 看 §三 的"下一步"（当前最该做：浮点 / EXR）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。
