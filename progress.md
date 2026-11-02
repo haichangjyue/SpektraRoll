@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-03（长片预览代理，D053）
+> **最后更新**：2026-11-03（D049–D053 已整理成交接摘要）
 > **当前里程碑**：**M5 进行中 · 颜色与质感都在 GPU**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理，D041–D053）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
@@ -33,98 +33,84 @@
 
 ---
 
-## 零之一、最近一次会话：颜色 + 质感合并提交（D049）
+## 零之一、最近一次会话：D049–D053（融合提交 → 管道 → 并行 → 预览代理）
 
-会话目标：按产品负责人的选择做 **B**，把颜色和质感合并成一次 GPU 提交，少一次 42 MB 上传 + 回读。
+会话目标：产品负责人依次选了 **B（融合提交）→ B2（视频管道）→ 并行分段 → 预览代理**。下面按交付编号整理，所有数字都是本机（i5-10600KF / Arc A750 / 32 GB）实测。
 
-### 已完成
+### 一、已完成的事项
 
-1. **共用设备**：`GpuFilm::attach()` / `GpuTexture::attach()`，质感后端在 film 的设备上初始化。
-2. **拆开 film 的两端**：`processToDevice()` + `readback()`；融合路径中间结果不回 CPU。
-3. **质感直接吃 film 输出**：`GpuTexture::processBuffer()` 对 film 的 output buffer 建 SRV，先 GPU 内拷贝进 ping-pong 缓冲，再跑原链，只回读一次。
-4. **回退**：融合失败自动退回分段提交并 warning 一次；CPU 质感 / LUT 引擎路径完全不变。
-5. **`tests/test_gpu_chain.cpp`**：融合 vs CPU 参考 **124.1 dB**，并检查确定性。
+**D049 · 颜色 + 质感合并成一次 GPU 提交**
+- `GpuFilm::attach()` / `GpuTexture::attach()`：两个后端共用一个 D3D11 设备（所有权仍在 film）。
+- `GpuFilm::processToDevice()` + `readback()`：中间结果不回 CPU。
+- `GpuTexture::processBuffer()`：对 film 输出 buffer 建 SRV，GPU 内拷贝进 ping-pong 缓冲，只回读一次。
+- `tests/test_gpu_chain.cpp`：融合 vs CPU 参考 **124.1 dB**，并检查确定性。
+- 视频 **233.6 → 207.1 ms/帧**，与分段路径输出 **逐位相同**；预览 43 → 38 ms。
 
-### 实测
+**D050 · 视频管道修复**
+- 分段计时发现 **130 ms/帧** 花在 `float → uint16` 的 `std::lround`；改成乘加并并行两个整帧循环。
+- 视频 **207.1 → 85–92 ms/帧**；`demo-m3` 358.7 → 245.5；输出逐位相同。
+- 硬件解码测量后**不采用**：QSV+`hwdownload` 21.8 ms/帧 vs 软解 19.5 ms/帧；d3d11va 23 ms/帧。
+- 编码器成本终于可见：ProRes 85、H.264+QSV **77**、H.264 软编 104、HEVC 软编 104 ms/帧。
 
-| 项 | 之前 | 现在 |
+**D051 · 解码/编码与处理重叠**
+- `FramePipeReader`（双缓冲）+ `FramePipeWriter`（两槽位），读写线程在 `closePipe` 前 join。
+- 视频 **85–92 → 79.2 ms/帧**；`demo-m3` 226.8；相对 D046 的 379 累计 **4.8×**；输出逐位相同。
+
+**D052 · 并行分段**
+- `--jobs N`（默认 `0` = `min(3, 核数/4, 段数)`；`1` 回到顺序）；每 worker 独立 `GpuFilm`/`GpuTexture`/颗粒缓存，原子计数器领段。
+- 30 秒素材 / 6 段 × 5 秒 / ProRes：**LUT + CPU 质感 157.98 → 84.19 s（1.88×）**；光谱 GPU 53.17 → 48.42 s（1.10×，单卡串行）。
+- 输出与顺序渲染 **逐位相同**；并行续渲正常（9 段删 1 补 1）。
+
+**D053 · 长片预览代理**
+- 整段进内存会把最长边压到 960 px 以下时，生成 960 px 全 I 帧代理（`out/ui-proxy/<hash>.mov`），`frame N` 按需 `-ss` 取帧；失败回退内存缓存。
+- 30 秒素材：代理 **8.7 s / 30.6 MB**，预览 **960×540 · 100 ms/帧**（原先约 640 px）；重开 **48 ms**。
+- 4 秒素材不变：内存缓存 1600×898 · 47 ms。
+- `frame` 回复带实际宽高；`open` 的 total = 可预览总帧数。
+
+### 二、五条关键决策（详见 DECISIONS D049–D053）
+
+| 编号 | 决策 | 结论 |
 |---|---|---|
-| 视频（2.6 MP，ProRes，全质感） | 233.6 ms/帧 | **207.1 ms/帧** |
-| 相对 D046（379 ms/帧） | 1.62× | **1.83×** |
-| 预览（光谱 GPU + GPU 质感） | 43 ms/帧 | **38 ms/帧** |
-| 与分段路径输出 | — | **逐位相同**（PSNR inf） |
+| D049 | 融合提交 | 两个 GPU 后端共设备、一次上传/回读；失败回退分段 |
+| D050 | 管道修复 | 去掉 `std::lround`；**不**做硬件解码（实测更慢） |
+| D051 | 读写重叠 | 解码双缓冲 + 编码后台线程，不再阻塞 GPU |
+| D052 | 并行分段 | 默认最多 3 个 worker；每个 worker 独立 GPU 对象 |
+| D053 | 预览代理 | 只对“装不下/不够清晰”的长片生成代理，短片仍走内存 |
 
-### 修掉的三个坑
+### 三、踩过并修掉的坑（下次别再踩）
 
-- film 输出 buffer 少了 `BIND_SHADER_RESOURCE`，质感无法建 SRV；
-- film dispatch 后没解绑 UAV，质感读同一 buffer 得到全黑；
-- `attach()` 后 `initialize()` 误以为已初始化，着色器没编译 → 访问冲突。
+1. film 输出 buffer 少了 `BIND_SHADER_RESOURCE`，质感建不了 SRV。
+2. film dispatch 后没解绑 UAV，质感读同一 buffer 得到**全黑帧**。
+3. `attach()` 后 `initialize()` 误判“已初始化”，着色器没编译 → 访问冲突。
+4. 非 Windows 构建里 `#endif` 放进了函数体 → macOS 占位实现括号错位。
+5. `std::filesystem::file_time_type::count()` 在 libc++ 上比 `long long` 宽，`std::to_string` 重载歧义 → 只有 macOS 编译失败，需 `static_cast<long long>`。
+6. CI 的 macOS 失败先看 job 耗时：1–2 分钟才是真跑；“not acquired by Runner” / “Internal server error” 是 GitHub 的问题，空提交重跑即可。
+7. workflow 现在会在构建失败时把 `error:` 行打成 annotation，直接在 run 页面可见。
 
-（还有一个只在非 Windows 构建出现：`#endif` 放进了函数体，导致 macOS 的占位实现括号错位；本地用 `-DSR_GPU_DISABLED` 编译时发现并修掉。）
+### 四、未完成的待办（按建议顺序）
 
-CI：run **60** Windows + macOS 双绿。
+- [ ] **真实点扩散核**：眩光 / 光晕 / 扩散仍是“画幅比例 + 盒状模糊”，应换成微米级、随分辨率缩放的核。
+- [ ] **浮点 / EXR**（D017 欠账）：16-bit PNG 之外没有浮点交付。
+- [ ] **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
+- [ ] **代理清理策略**：`out/ui-proxy/` 会按素材累积，可加 LRU 或“删除代理”按钮。
+- [ ] **4K / 更长片**：预览代理固定 960 px，4K 素材可考虑 1280；分段并行的显存上限需要在更小显存的机器上验证。
 
-### 未完成 / 下一步
-
-- [ ] **管道成为唯一瓶颈**：207 ms/帧已经等于空管道；下一步是 ffmpeg 硬件解码（D3D11VA/QSV）或并行编码。
-- [ ] **预览代理 / 磁盘缓存**：长片超出内存缓存后回退单帧。
-- [ ] 真实点扩散核、浮点/EXR、macOS GPU（Metal）。
-
-### 复现
+### 五、复现 / 验收
 
 ```powershell
+# 单帧/视频（应约 79 ms/帧，ProRes）
 .\build\spektra-roll-cli.exe video --engine spectral-gpu --input apple-log --exposure 0.7 `
   --scan negative --contrast 1.15 --couplers on --gamut oklch --grain 0.4 --halation 0.45 `
   --glare 0.2 --diffusion 0.1 --in X:\agent\footage\A001_11011538_C001.mov `
-  --duration 2 --codec prores --out out\fused.mov
+  --duration 2 --codec prores --out out\check.mov
 
-.\build\test_gpu_chain.exe        # 融合 vs CPU，应 ≥60 dB（本机 124 dB）
+$env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
+
+.\build\test_gpu_chain.exe                      # 融合 vs CPU，应 ≥60 dB（124 dB）
+.\build-ui\spektra-roll-ui.exe --preview-selftest   # 第二次预览应 <100 ms
 ```
 
-### 同一会话的第二段：B2（D050）
-
-产品负责人接着选了 B2（视频管道）。先给循环加分段计时，结果很意外：
-
-```
-timing: read 13  convert 4  process 44  pack 130  write 6 (ms/frame)
-```
-
-207 ms/帧里有 **130 ms 花在 `float → uint16` 的 `std::lround`**（每帧 780 万次库调用），GPU 颜色 + 质感只有 44 ms。
-
-- 修法：`static_cast<unsigned short>(value * 65535.0f + 0.5f)`，并把转换和打包两个整帧循环改成 `parallelChunks`。
-- 结果：视频 **207.1 → 85–92 ms/帧**（约 2.4×），输出与修改前 **逐位相同**。
-- LUT + CPU 质感也跟着受益：`demo-m3` 的 358.7 → 245.5 ms/帧。
-- 编码器终于变成可见成本：ProRes 85、H.264+QSV 77、H.264 软编 104、HEVC 软编 104 ms/帧。
-- **硬件解码测量后放弃**：`-hwaccel qsv` + `hwdownload,format=y210le` 是 **21.8 ms/帧**，软解 **19.5 ms/帧**；`-hwaccel d3d11va` 23 ms/帧。管道里下载/格式转换比省下的还贵，所以没有把 `--hwdecode` 做进产品。
-- 分段并行**本轮没做**：需要每个 worker 自己的 GPU 实例与 ffmpeg 管道，留给下一轮。
-
-复现：`$env:SPEKTRA_VIDEO_DEBUG="1"` 后跑上面的 video 命令，会打印分段耗时。
-
-### 同一会话的第三段：读写重叠（D051）
-
-D050 后的分段计时是 `read 14 / convert 9 / process 44 / pack 5 / write 7`——解码和编码各让循环空等十几毫秒。
-
-- `FramePipeReader`（双缓冲）+ `FramePipeWriter`（两槽位）：解码、编码分别和 GPU 处理重叠。
-- 结果：视频 **85–92 → 79.2 ms/帧**，输出 **逐位相同**；`timing: wait 4 convert 11 process 48 pack 5`。
-- `demo-m3` 245.5 → **226.8 ms/帧**；分段 + 续渲不受影响（84.4 ms/帧，`part 1/2: already done`）。
-- 相对 D046 的 379 ms/帧累计 **4.8×**。
-- CI：run 63 的 macOS job 因 GitHub runner 容量不足（“not acquired by Runner … after multiple attempts”）在排队 15 分钟后失败，**不是代码问题**；空提交重跑后 **Windows + macOS 双绿**。
-
-### 同一会话的第四段：并行分段（D052）
-- 每个 worker 一份 `VideoRender` + 自己的 GPU 对象与颗粒缓存，从原子计数器领段。
-- 默认 `--jobs 0` = `min(3, 核数/4, 段数)`；`--jobs 1` 回到顺序。
-- 实测 30 秒素材 / 6 段 × 5 秒 / ProRes：
-  - **LUT + CPU 质感：157.98 → 84.19 s（1.88×）**
-  - 光谱 GPU + GPU 质感：53.17 → 48.42 s（1.10×，单卡串行）
-  - 两种配置输出都与顺序渲染 **逐位相同**；并行续渲正常（9 段删 1 补 1）。
-
-### 同一会话的第五段：长片预览代理（D053）
-
-- 触发条件：整段进内存会把最长边压到 960 px 以下时，生成一张 960 px、全 I 帧的代理（`out/ui-proxy/`），之后按需取帧。
-- 30 秒素材：代理 **8.7 s / 30.6 MB**；预览 960×540，**100 ms/帧**（原先只能到约 640 px）；重开 48 ms。
-- 4 秒素材不变：内存缓存 1600×898、47 ms。
-- 协议：`frame` 回复带实际宽高，`open` 的 total 变成可预览总帧数。
-- CI：首次提交的 macOS 编译失败——`std::filesystem::file_time_type::count()` 在 libc++ 上比 `long long` 宽，`std::to_string` 重载歧义；改成 `static_cast<long long>` 后 **Windows + macOS 双绿**。
+界面：`scripts\build-ui.cmd` → 拖时间线（短片 47 ms；长片自动建 960 px 代理，100 ms）。
 
 ---
 
@@ -622,18 +608,19 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. ~~把空间质感搬上 GPU~~ ✅ **已完成（D047）**。~~预览实时化~~ ✅ **已完成（D048）**。~~颜色 + 质感合并提交~~ ✅ **已完成（D049）**：视频 207.1 ms/帧，已经等于空管道水平。
-2. ~~并行分段~~ ✅ **已完成（D052）**：CPU 路径 1.88×，GPU 路径受单卡限制 1.10×。
-3. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"。
-4. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。
-5. **macOS 的 GPU 路线**：Metal 或继续 CPU。
+1. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应换成微米级、随分辨率缩放的核（GPU 只是照搬形状）。
+2. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。
+3. **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
+4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积（可加 LRU 或按钮）；4K 素材可考虑 1280 px 代理。
+
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理。
 
 ### 🟡 中期路线（M4–M5）
 
 | 阶段 | 内容 |
 |---|---|
-| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色（D046）、✅ GPU 质感（D047）；待做：颜色+质感合并提交、真实扩散核、浮点/EXR、多段并行 |
-| **M5** | Qt 6 桌面界面（**D009 已定**）、预览实时化、macOS 同套 Qt、OFX 插件、渲染农场命令行 |
+| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色/质感、✅ 融合提交、✅ 并行分段、✅ 预览代理；待做：真实扩散核、浮点/EXR |
+| **M5** | ✅ Qt 6 桌面界面主体、✅ 预览实时化；待做：macOS 同套 Qt、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
 
@@ -644,13 +631,14 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 - [x] ~~输出丢时间码~~ → 自动复制源 timecode，`--timecode` / `--no-timecode` 可覆盖
 - [x] ~~颜色只能在 CPU 上物理算~~ → `--engine spectral-gpu`（D046），2.6 MP 单帧 50 ms；无显卡自动回退
 - [x] ~~空间质感还没上 GPU~~ → `--texture-engine gpu`（D047），视频 382.7 → 245.6 ms/帧；与 CPU 参考 143–166 dB
-- [ ] **颜色与质感仍是两次 GPU 提交** → 各上传/回读 42 MB，下一瓶颈；合并后预计再省 15–30 ms/帧
-- [ ] **CI 上没有真实 GPU** → `gpu_film` 在公有 runner 上会被 skip，着色器退化只能在本机或真机 CI 发现
+- [x] ~~颜色与质感仍是两次 GPU 提交~~ → D049 融合提交，207.1 ms/帧；D050/D051 修完管道到 **79.2 ms/帧**
+- [ ] **CI 上没有真实 GPU** → `gpu_film` / `gpu_texture` / `gpu_chain` 在公有 runner 上会 skip，着色器退化只能在本机或真机 CI 发现
 - [ ] **macOS 没有 GPU 物理路径** → 只能 CPU 光谱 / LUT（Metal 未做）
 - [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；Apple Log 是手写解码，不是 OCIO 配置
 - [ ] **浮点 / EXR** → 只有 16-bit PNG
 - [ ] **空间效果不是物理核** → 光晕/眩光/扩散都用画幅比例，不是微米
-- [ ] **没有视频解码的硬件加速** → 解码/编码都是软件，QSV 只接了编码且收益有限
+- [x] ~~没有视频解码的硬件加速~~ → 实测 QSV 解码+下载 21.8 ms/帧 vs 软解 19.5 ms/帧，**不值得做**；QSV 编码在管道修好后有意义（H.264 77 vs 104 ms/帧）
+- [x] ~~长片预览只能缩成缩略图~~ → D053 960 px 全 I 帧代理，30 秒素材 960×540 · 100 ms/帧
 - [ ] **Windows 代码签名** → 可选，Azure Trusted Signing 约 $10/月
 - [ ] **法律风险未处理** → 上游 README 声称"直接受其方法启发的作品也算衍生"，闭源前必须先谈双授权
 - [ ] **M2 遗留**：hanatos2025 上采样、1D shaper LUT、Dolby Vision 元数据
@@ -686,6 +674,12 @@ Qt GCC  X:\agent\tools\qt\Tools\mingw1310_64      13.1.0，只给 UI 构建用
 
 5. **Qt 自带的 MinGW 需要把它的 `bin` 放进 PATH**
    → `g++.exe` 本身能启动，但它调用的 `cc1plus.exe` 在 libexec 里，找不到同目录的 `libstdc++-6.dll` 会静默返回 0xC0000135。`build-ui.ps1` 已经先 `$env:PATH = "$mingw\bin;$qt\bin;..."`。
+
+6. **macOS 的 libc++ 比 libstdc++ 严**
+   → `std::filesystem::file_time_type::count()` 比 `long long` 宽，直接 `std::to_string` 会重载歧义；先 `static_cast<long long>`。CI 现在会在构建失败时把 `error:` 行打成 annotation。
+
+7. **调试开关与环境**
+   → `SPEKTRA_VIDEO_DEBUG=1` 打印视频分段耗时；`SPEKTRA_PREVIEW_DEBUG=1` 打印预览服务端的 look/open/frame 耗时；预览代理在 `out/ui-proxy/`（可随时删，会按素材重建）。
 
 ### 标准构建命令（脚本已经封装，这是底层等价写法）
 
@@ -852,8 +846,10 @@ AI 就应该：
 4. 再跑 `scripts\demo-m4.cmd -NoOpen` 确认分段 + 续渲 + timecode（约 20 秒）
 5. 跑 `scripts\build-ui.cmd -NoLaunch` 确认 Qt 界面还能编译部署
 6. 颜色路径改过就补一次 GPU 校验：`lut apply --engine spectral` 与 `--engine spectral-gpu` 出图做 PSNR（应 ≥60 dB，本机实测 ≥82 dB）
-7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（融合后本机约 1.85×、83 dB）
-8. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应打进 **100 ms 以内**（本机 47–64 ms）
-9. 看 §三 的"下一步"（当前最大收益：把颜色 + 质感合并成一次 GPU 提交）
+7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（融合后本机约 1.8×、83 dB）
+8. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应 <100 ms（短片 47 ms；长片走 960 px 代理约 100 ms）
+9. 视频管道改过就设 `SPEKTRA_VIDEO_DEBUG=1` 跑一次 2 秒渲染：应看到 `wait / convert / process / pack` 四项，总时长约 79 ms/帧
+10. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
+11. 看 §三 的"下一步"（当前最该做：真实点扩散核）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。
