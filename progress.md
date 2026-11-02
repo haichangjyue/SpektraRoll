@@ -66,7 +66,8 @@
    - 两段编码后视频 PSNR 83.6 dB（差异来自编码器）。
 5. **UI**：输出栏新增“GPU 质感（颗粒 / 光晕 / 眩光 / 扩散）”勾选框，默认开、随设置保存；预览、渲染、队列走同一条 `--texture-engine gpu`。
 6. **双击验收**：`scripts\demo-gpu-texture.cmd` 用同一条命令渲两遍（CPU / GPU），打印两条 ms/帧、加速比和编码后 PSNR。
-7. 文档同步：`DECISIONS.md` D047、本文件、`STATUS.md`、CLI `--help`。
+7. **CI**：新增 GPU 质感回退冒烟（`--texture-engine gpu` 在无显卡 runner 上必须自动退回 CPU），run **54** Windows + macOS 双绿。
+8. 文档同步：`DECISIONS.md` D047、本文件、`STATUS.md`、`README.md`、`RUN.md`、CLI `--help`。
 
 ### 关键决策（详见 D047）
 

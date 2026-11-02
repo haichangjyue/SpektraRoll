@@ -58,7 +58,7 @@
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
 - [x] 截图：`docs/ui-preview.png`、`docs/ui-queue.png`
-- [ ] 直方图叠加、适合/100% 缩放、裁切、macOS 打包
+- [ ] 裁切、macOS 打包
 
 ![Qt UI](docs/ui-preview.png)
 
