@@ -641,6 +641,29 @@
 
 ---
 
+## D046 · GPU 光谱后端落地（`--engine spectral-gpu`）
+
+- **日期**：2026-11-02
+- **背景**：D045 探针测得 81 波长扫描阶段 0.63 ms；CPU 完整链 1081 ms/2.6 MP，差距三个数量级。
+- **实现**：
+  - `src/cli/gpu_film.{hpp,cpp}`：D3D11 compute + 运行时 HLSL 编译，逐行翻译 `FilmModel::transformFrom`
+  - 负片扫描、印片、DIR 耦合剂、OkLCh 压缩、PQ/HLG、sRGB/Apple Log 解码、`--strength` 混合全部在着色器内完成
+  - 参数走一张 22.9 KB 的常量缓冲（曲线、密度、CMF、光源、矩阵、标量），输入/输出各一张 structured buffer，读回后按 3 通道解包
+  - `FilmModel::gpuData()` 把 double 常量摊平成 float32；曲线轴非均匀时拒绝 GPU
+  - 没有 D3D11 设备、着色器编译失败或运行时出错时，自动回退 CPU 光谱并在 stderr 打 warning
+  - 新增 `tests/test_gpu_film.cpp`（无显卡时 exit 77 记为 skipped），逐样本与 CPU 参考比对
+- **实测（本机 Arc A750）**：
+  - 2.6 MP 单帧 **50 ms**（含 42 MB 上传 + 42 MB 回读），CPU 光谱 1038–1158 ms，约 **21–23×**
+  - 2.6 MP 视频（ProRes 422 HQ，3 帧）：**1427 → 379 ms/帧**（含编码与管道），约 **3.8×**
+  - 与 CPU 光谱的 PSNR：负片 **119.1 dB**、印片 **inf（逐位相同）**、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB
+  - `test_gpu_film` 六组配置最差偏差 **3e-4**（编码空间），远优于 60 dB 目标
+- **后果**：
+  - UI 引擎下拉新增“光谱 GPU（物理，快）”，默认仍是 LUT；无显卡时界面无感回退
+  - 视频现在受限于编码与管道，颜色不再是瓶颈；空间质感仍由 CPU 叠加
+  - macOS 无 D3D11，继续走 CPU 光谱 / LUT（`gpu_film.cpp` 在非 Windows 上编译成占位实现）
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

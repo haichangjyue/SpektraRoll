@@ -358,6 +358,75 @@ double FilmModel::paperCurve(int sample, int channel) const {
     return paperCurves_[static_cast<size_t>(sample)][static_cast<size_t>(channel)];
 }
 
+bool FilmModel::gpuData(GpuFilmData& out) const {
+    if (!valid_) return false;
+    constexpr int kCurve = GpuFilmData::kCurveSamples;
+    if (static_cast<int>(filmCurves_.size()) != kCurve ||
+        static_cast<int>(paperCurves_.size()) != kCurve ||
+        static_cast<int>(filmLogExposure_.size()) != kCurve ||
+        static_cast<int>(paperLogExposure_.size()) != kCurve ||
+        (couplersActive_ && static_cast<int>(filmCurvesCoupler_.size()) != kCurve)) {
+        return false;
+    }
+    const auto uniform = [](const std::vector<double>& axis) {
+        if (axis.size() < 2) return false;
+        const double step = (axis.back() - axis.front()) /
+                            static_cast<double>(axis.size() - 1);
+        return std::abs((axis[1] - axis[0]) - step) < 1e-12;
+    };
+    if (!uniform(filmLogExposure_) || !uniform(paperLogExposure_)) return false;
+
+    out = GpuFilmData{};
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            out.filmMatrix[r][c] = static_cast<float>(filmMatrix_[r][c]);
+            out.couplersMatrix[r][c] = static_cast<float>(couplersMatrix_[r][c]);
+            out.xyzD50ToSrgb[r][c] = static_cast<float>(data::kXyzD50ToSrgb[r * 3 + c]);
+        }
+    }
+    for (int i = 0; i < kCurve; ++i) {
+        for (int c = 0; c < 3; ++c) {
+            out.filmCurves[i][c] = static_cast<float>(filmCurves_[i][c]);
+            out.filmCurvesCoupler[i][c] = static_cast<float>(
+                filmCurvesCoupler_.empty() ? filmCurves_[i][c] : filmCurvesCoupler_[i][c]);
+            out.paperCurves[i][c] = static_cast<float>(paperCurves_[i][c]);
+        }
+    }
+    for (int l = 0; l < GpuFilmData::kWavelengths; ++l) {
+        for (int c = 0; c < 3; ++c) {
+            out.filmDensity[l][c] = static_cast<float>(filmChannelDensity_[l][c]);
+            out.paperDensity[l][c] = static_cast<float>(paperChannelDensity_[l][c]);
+            out.paperSensitivity[l][c] = static_cast<float>(paperSensitivity_[l][c]);
+            out.cmfs[l][c] = static_cast<float>(data::kCmfs[l * 3 + c]);
+        }
+        out.printIlluminant[l] = static_cast<float>(printIlluminant_[l]);
+        out.viewingIlluminant[l] = static_cast<float>(viewingIlluminant_[l]);
+        out.filmBaseDensity[l] = static_cast<float>(filmBaseDensity_[l]);
+        out.paperBaseDensity[l] = static_cast<float>(paperBaseDensity_[l]);
+    }
+
+    out.filmAxisStart = static_cast<float>(filmLogExposure_.front());
+    out.filmAxisStep = static_cast<float>((filmLogExposure_.back() - filmLogExposure_.front()) /
+                                          (kCurve - 1));
+    out.paperAxisStart = static_cast<float>(paperLogExposure_.front());
+    out.paperAxisStep =
+        static_cast<float>((paperLogExposure_.back() - paperLogExposure_.front()) /
+                           (kCurve - 1));
+    out.filmMidgrayGreen = static_cast<float>(filmMidgrayGreen_);
+    out.printExposureFactor = static_cast<float>(printExposureFactor_);
+    out.scanNormalization = static_cast<float>(scanNormalization_);
+    out.negativeGreyLuma = static_cast<float>(negativeGreyLuma_);
+    for (int c = 0; c < 3; ++c) {
+        out.filmMaxCmy[c] = static_cast<float>(filmMaxCmy_[c]);
+        out.negativeWhite[c] = static_cast<float>(negativeWhite_[c]);
+        out.negativeBlack[c] = static_cast<float>(negativeBlack_[c]);
+        out.negativeGamma[c] = static_cast<float>(negativeGamma_[c]);
+    }
+    out.couplersActive = couplersActive_;
+    out.filmIsPositive = filmIsPositive_;
+    return true;
+}
+
 Rgb FilmModel::transform(Rgb srgb) const {
     double linear[3] = {srgbDecode(srgb.r), srgbDecode(srgb.g), srgbDecode(srgb.b)};
     BakeOptions defaults;

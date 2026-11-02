@@ -38,8 +38,11 @@ target_compile_options(sr_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>)
 
-add_executable(spektra-roll-cli src/cli/main.cpp)
+add_executable(spektra-roll-cli src/cli/main.cpp src/cli/gpu_film.cpp)
 target_link_libraries(spektra-roll-cli PRIVATE sr_core)
+if(WIN32)
+    target_link_libraries(spektra-roll-cli PRIVATE d3d11 dxgi d3dcompiler)
+endif()
 
 # Ship one self-contained .exe: no MinGW runtime DLLs to hunt for.
 if(MINGW)
@@ -103,6 +106,20 @@ if(SR_BUILD_TESTS)
         target_link_options(test_texture PRIVATE -static)
     endif()
     add_test(NAME texture COMMAND test_texture)
+
+    # The GPU parity test skips itself (exit 77) when no D3D11 device exists.
+    add_executable(test_gpu_film tests/test_gpu_film.cpp src/cli/gpu_film.cpp)
+    target_link_libraries(test_gpu_film PRIVATE sr_core)
+    target_compile_definitions(test_gpu_film PRIVATE
+        SR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(WIN32)
+        target_link_libraries(test_gpu_film PRIVATE d3d11 dxgi d3dcompiler)
+    endif()
+    if(MINGW)
+        target_link_options(test_gpu_film PRIVATE -static)
+    endif()
+    add_test(NAME gpu_film COMMAND test_gpu_film)
+    set_tests_properties(gpu_film PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

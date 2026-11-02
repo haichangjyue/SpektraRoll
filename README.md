@@ -97,6 +97,14 @@ frame** (12 threads). It is the fully physical option for short/final renders;
 the LUT stays the default for interactive preview and long clips. On the same
 frame the 33³ LUT and the physical path agree at **62.2 dB PSNR**.
 
+`--engine spectral-gpu` runs that same chain as a D3D11 compute shader (Windows;
+the UI lists it as **光谱 GPU**). A 2.6 MP still takes **50 ms** end to end
+(upload, 81-wavelength scan, readback) and video dropped from 1427 to
+**379 ms/frame**, so colour is no longer the bottleneck there. The GPU output
+matches the CPU reference at **82–119 dB PSNR** (several configs bit-identical)
+and `ctest` enforces that parity; without a D3D11 device the CLI falls back to
+the CPU engine with a warning.
+
 ![Post-dev inspector](docs/ui-postdev.png)
 
 ![Render queue](docs/ui-queue.png)

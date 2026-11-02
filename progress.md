@@ -458,7 +458,7 @@ X:\agent\SpektraRoll\
 ├── src/core/src/            实现 + 生成的 spectral_tables.cpp
 ├── src/cli/main.cpp         命令行入口（gen / convert / video / lut bake|apply|compare|info / version）
 ├── src/ui-qt/main.cpp       Qt 6 桌面界面（D009），调用 CLI，不复制管线
-├── tests/                   6 个测试程序 + reference/ 冻结参考 LUT
+├── tests/                   7 个测试程序 + reference/ 冻结参考 LUT
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
 ├── third_party/stb/         stb_image / stb_image_write（单头文件）
@@ -470,7 +470,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D045
+├── DECISIONS.md             决策台账 D001–D046
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -479,7 +479,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D045**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D046**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
@@ -497,6 +497,8 @@ X:\agent\SpektraRoll\
 - ❌ **不要直接把 SpektraLab 的 QML 源码/图标搬进来**：只借鉴布局和令牌，来源与许可见 `docs/ui-analysis-spektralab.md`（D041）
 - ❌ **不要把参数再堆回左栏**：左栏是材料，参数在右栏；画布必须保持最大
 - ❌ **不要偷懒改品牌**，SpektraRoll 已定案，改一次要动二进制名/CI/文档
+- ❌ **不要删掉 GPU 着色器里的 `density != density` 判空**：有几条波长的 film density 是 NaN，CPU 参考同样跳过它们；少这个保护整条光谱和会变 NaN，输出直接全黑（D046）
+- ❌ **不要把 `--engine spectral-gpu` 改成硬失败**：没有 D3D11 设备时必须回退 CPU 光谱，macOS 才能继续用（D045/D046）
 
 ---
 
@@ -514,4 +516,4 @@ AI 就应该：
 4. 跑 `scripts\build-ui.cmd -NoLaunch` 确认 Qt 界面还能编译部署
 5. 看 §三 的"下一步"（D009 已定 Qt，界面首版已交付）
 
-约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 6 个测试程序。
+约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 7 个测试程序。

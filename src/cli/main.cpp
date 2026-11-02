@@ -30,6 +30,8 @@
 #include "sr/profile.hpp"
 #include "sr/texture.hpp"
 
+#include "gpu_film.hpp"
+
 namespace {
 
 constexpr const char* kVersion = "0.1.0";
@@ -52,7 +54,7 @@ void printUsage() {
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
-        "                         [--engine lut|spectral] [--input srgb|apple-log]\n"
+        "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log]\n"
         "                         [--film <json>] [--paper <json>]\n"
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
@@ -73,7 +75,9 @@ void printUsage() {
         "      to the output unless --no-timecode is given. With\n"
         "      --engine spectral the LUT is bypassed and every pixel runs the\n"
         "      physical film/paper chain (slow but physical; --film/--paper and\n"
-        "      --input choose the materials).\n"
+        "      --input choose the materials). --engine spectral-gpu runs the same\n"
+        "      chain on the D3D11 GPU and falls back to the CPU engine when no\n"
+        "      device is available.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -105,7 +109,7 @@ void printUsage() {
         "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
-        "                             [--engine lut|spectral] [--input srgb|apple-log]\n"
+        "                             [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log]\n"
         "                             [--film <json>] [--paper <json>]\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
@@ -563,20 +567,27 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
 
 int cmdLutApply(const Args& args) {
     const std::string engine = args.get("engine", "lut");
-    if (engine != "lut" && engine != "spectral") {
-        return fail("--engine expects 'lut' or 'spectral'");
+    if (engine != "lut" && engine != "spectral" && engine != "spectral-gpu") {
+        return fail("--engine expects 'lut', 'spectral' or 'spectral-gpu'");
     }
-    const bool spectral = engine == "spectral";
+    bool gpu = engine == "spectral-gpu";
+    const bool spectral = engine == "spectral" || gpu;
 
     const std::string lutPath = args.get("lut");
     sr::Lut3D lut;
     FilmRecipe recipe;
+    sr::GpuFilm gpuFilm;
     std::string error;
     if (!spectral) {
         if (lutPath.empty()) return fail("lut apply requires --lut <file.cube>");
         if (!lut.loadCube(lutPath, error)) return fail(error);
     } else {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+        if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
+        if (!gpu && engine == "spectral-gpu") {
+            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                         error.c_str());
+        }
     }
 
     const std::string interpName = args.get("interp", "tetra");
@@ -603,19 +614,28 @@ int cmdLutApply(const Args& args) {
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
-    sr::parallelChunks(count, threads, [&](size_t begin, size_t end) {
-        for (size_t i = begin; i < end; ++i) {
-            float* px = &image.pixels[i * 3];
-            const sr::Rgb src{px[0], px[1], px[2]};
-            const sr::Rgb mapped =
-                spectral ? recipe.model.transformFrom(recipe.options, src)
-                         : lut.apply(src, mode);
-            const sr::Rgb result = sr::mix(src, mapped, strength);
-            px[0] = result.r;
-            px[1] = result.g;
-            px[2] = result.b;
-        }
-    });
+    const auto applyCpu = [&]() {
+        sr::parallelChunks(count, threads, [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                float* px = &image.pixels[i * 3];
+                const sr::Rgb src{px[0], px[1], px[2]};
+                const sr::Rgb mapped =
+                    spectral ? recipe.model.transformFrom(recipe.options, src)
+                             : lut.apply(src, mode);
+                const sr::Rgb result = sr::mix(src, mapped, strength);
+                px[0] = result.r;
+                px[1] = result.g;
+                px[2] = result.b;
+            }
+        });
+    };
+    if (gpu && !gpuFilm.process(image.pixels.data(), count, image.pixels.data(), strength,
+                               error)) {
+        std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                     error.c_str());
+        gpu = false;
+    }
+    if (!gpu) applyCpu();
     applyTexture(image.pixels.data(), image.width, image.height, parseTexture(args), 0, nullptr);
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
@@ -624,8 +644,8 @@ int cmdLutApply(const Args& args) {
     if (!sr::saveImage(outPath, image, error, bits)) return fail(error);
 
     if (spectral) {
-        std::printf("engine: spectral %s + %s\n", recipe.film.info.name.c_str(),
-                    recipe.paper.info.name.c_str());
+        std::printf("engine: %s %s + %s\n", gpu ? "spectral-gpu" : "spectral",
+                    recipe.film.info.name.c_str(), recipe.paper.info.name.c_str());
         std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
                     outPath.c_str(), image.width, image.height, count, bits, sourceBits,
                     elapsed);
@@ -865,6 +885,7 @@ struct VideoRender {
     const sr::FilmModel* model = nullptr;
     sr::BakeOptions bake;
     bool spectral = false;
+    sr::GpuFilm* gpu = nullptr;
     sr::Interp interp = sr::Interp::Tetrahedral;
     float strength = 1.0f;
     int threads = 1;
@@ -921,7 +942,7 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
 // re-encodes audio and A/V sync cannot drift between parts. `rangeFrameBase` is
 // the frame index within the requested range and keeps grain continuous across
 // segment boundaries.
-bool renderRange(const VideoRender& job, long startFrame, long frameCount, long rangeFrameBase,
+bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeFrameBase,
                  const std::string& outPath, const std::string& timecode,
                  sr::GrainFieldCache* grainCache, long rangeTotal, size_t* rendered,
                  std::string& error) {
@@ -965,19 +986,27 @@ bool renderRange(const VideoRender& job, long startFrame, long frameCount, long 
         const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
         if (got < raw.size()) break;
         for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
-        sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
-            for (size_t i = begin; i < end; ++i) {
-                float* px = &frame[i * 3];
-                const sr::Rgb src{px[0], px[1], px[2]};
-                const sr::Rgb mapped = job.spectral
-                                           ? job.model->transformFrom(job.bake, src)
-                                           : job.lut->apply(src, job.interp);
-                const sr::Rgb result = sr::mix(src, mapped, job.strength);
-                px[0] = result.r;
-                px[1] = result.g;
-                px[2] = result.b;
-            }
-        });
+        if (job.gpu != nullptr &&
+            !job.gpu->process(frame.data(), pixels, frame.data(), job.strength, error)) {
+            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                         error.c_str());
+            job.gpu = nullptr;
+        }
+        if (job.gpu == nullptr) {
+            sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    float* px = &frame[i * 3];
+                    const sr::Rgb src{px[0], px[1], px[2]};
+                    const sr::Rgb mapped = job.spectral
+                                               ? job.model->transformFrom(job.bake, src)
+                                               : job.lut->apply(src, job.interp);
+                    const sr::Rgb result = sr::mix(src, mapped, job.strength);
+                    px[0] = result.r;
+                    px[1] = result.g;
+                    px[2] = result.b;
+                }
+            });
+        }
         applyTexture(frame.data(), job.width, job.height, job.texture,
                      static_cast<int>(rangeFrameBase + static_cast<long>(frames)), grainCache);
         for (size_t i = 0; i < raw.size(); ++i) {
@@ -1038,19 +1067,26 @@ int cmdVideo(const Args& args) {
     const std::string outPath = args.get("out");
     const std::string lutPath = args.get("lut");
     const std::string engine = args.get("engine", "lut");
-    if (engine != "lut" && engine != "spectral") {
-        return fail("--engine expects 'lut' or 'spectral'");
+    if (engine != "lut" && engine != "spectral" && engine != "spectral-gpu") {
+        return fail("--engine expects 'lut', 'spectral' or 'spectral-gpu'");
     }
-    const bool spectral = engine == "spectral";
+    bool gpu = engine == "spectral-gpu";
+    const bool spectral = engine == "spectral" || gpu;
     if (!spectral && lutPath.empty()) return fail("video requires --lut <file.cube>");
     if (inPath.empty()) return fail("video requires --in <clip>");
     if (outPath.empty()) return fail("video requires --out <clip>");
 
     sr::Lut3D lut;
     FilmRecipe recipe;
+    sr::GpuFilm gpuFilm;
     std::string error;
     if (spectral) {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+        if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
+        if (!gpu && engine == "spectral-gpu") {
+            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                         error.c_str());
+        }
     } else if (!lut.loadCube(lutPath, error)) {
         return fail(error);
     }
@@ -1198,6 +1234,7 @@ int cmdVideo(const Args& args) {
     job.spectral = spectral;
     job.lut = spectral ? nullptr : &lut;
     job.model = spectral ? &recipe.model : nullptr;
+    job.gpu = gpu ? &gpuFilm : nullptr;
     job.bake = recipe.options;
     job.interp = mode;
     job.strength = strength;
@@ -1238,8 +1275,8 @@ int cmdVideo(const Args& args) {
     std::printf("output: %s (%s, %s)\n", outPath.c_str(), codecName,
                 hdr ? (trc == "pq" ? "PQ" : "HLG") : "SDR");
     if (spectral) {
-        std::printf("engine: spectral %s + %s\n", recipe.film.info.name.c_str(),
-                    recipe.paper.info.name.c_str());
+        std::printf("engine: %s %s + %s\n", gpu ? "spectral-gpu" : "spectral",
+                    recipe.film.info.name.c_str(), recipe.paper.info.name.c_str());
     } else {
         std::printf("engine: lut %s\n", lutPath.c_str());
     }

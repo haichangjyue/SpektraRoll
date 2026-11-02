@@ -52,6 +52,44 @@ struct FilmModelOptions {
     bool couplers = false;
 };
 
+// Flattened, float32 copy of the per-pixel constants, for the GPU backend.
+// Curve axes are uniform in every shipped profile (256 samples); the GPU path
+// refuses other profiles rather than guessing.
+struct GpuFilmData {
+    static constexpr int kCurveSamples = 256;
+    static constexpr int kWavelengths = 81;
+
+    float filmMatrix[3][3]{};
+    float couplersMatrix[3][3]{};
+    float filmCurves[kCurveSamples][3]{};
+    float filmCurvesCoupler[kCurveSamples][3]{};
+    float paperCurves[kCurveSamples][3]{};
+    float filmDensity[kWavelengths][3]{};
+    float paperDensity[kWavelengths][3]{};
+    float paperSensitivity[kWavelengths][3]{};
+    float cmfs[kWavelengths][3]{};
+    float printIlluminant[kWavelengths]{};
+    float viewingIlluminant[kWavelengths]{};
+    float filmBaseDensity[kWavelengths]{};
+    float paperBaseDensity[kWavelengths]{};
+    float xyzD50ToSrgb[3][3]{};
+
+    float filmAxisStart = 0.0f;
+    float filmAxisStep = 0.0f;
+    float paperAxisStart = 0.0f;
+    float paperAxisStep = 0.0f;
+    float filmMidgrayGreen = 1.0f;
+    float printExposureFactor = 1.0f;
+    float scanNormalization = 1.0f;
+    float negativeGreyLuma = 0.18f;
+    float filmMaxCmy[3]{};
+    float negativeWhite[3]{};
+    float negativeBlack[3]{};
+    float negativeGamma[3]{};
+    bool couplersActive = false;
+    bool filmIsPositive = false;
+};
+
 // The M1 colour chain: display-encoded sRGB in, display-encoded sRGB out.
 //
 //   sRGB -> Mallett 2019 spectral upsampling -> film sensitivity
@@ -90,6 +128,10 @@ public:
     double printExposureFactor() const { return printExposureFactor_; }
     // Neutral print-filter values used, for reporting.
     std::array<double, 3> neutralFilters() const { return neutralFilters_; }
+
+    // Flattened constants for the GPU backend. Returns false when the profile
+    // uses a non-uniform curve axis or an unexpected sample count.
+    bool gpuData(GpuFilmData& out) const;
 
 private:
     Rgb transformLinear(const double linear[3], const BakeOptions& options) const;

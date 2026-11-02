@@ -1023,8 +1023,10 @@ private:
         engine_ = new QComboBox;
         engine_->addItem(QStringLiteral("LUT（快）"), QStringLiteral("lut"));
         engine_->addItem(QStringLiteral("光谱（物理，慢）"), QStringLiteral("spectral"));
+        engine_->addItem(QStringLiteral("光谱 GPU（物理，快）"), QStringLiteral("spectral-gpu"));
         engine_->setToolTip(
-            QStringLiteral("LUT：每帧查表，实时；光谱：逐像素物理链，约 1.2 秒 / 2.6 MP"));
+            QStringLiteral("LUT：每帧查表，实时；光谱：逐像素物理链，约 1.2 秒 / 2.6 MP；"
+                           "光谱 GPU：同一物理链在显卡上跑，约 50 毫秒 / 2.6 MP"));
         outputSection->addWidget(labeledRow(QStringLiteral("引擎"), engine_));
         codec_ = new QComboBox;
         codec_->addItem(QStringLiteral("H.264"), QStringLiteral("h264"));
@@ -1845,13 +1847,16 @@ private:
 
         QString outputText;
         QApplication::setOverrideCursor(Qt::WaitCursor);
-        status_->setText(spectralEngine() ? QStringLiteral("光谱预览中（逐像素物理链）…")
-                                          : QStringLiteral("LUT 预览中…"));
+        status_->setText(spectralEngine()
+                             ? (engineName() == QStringLiteral("spectral-gpu")
+                                    ? QStringLiteral("光谱 GPU 预览中（D3D11 逐像素物理链）…")
+                                    : QStringLiteral("光谱预览中（逐像素物理链）…"))
+                             : QStringLiteral("LUT 预览中…"));
         bool ok = runSync(ffmpegEdit_->text(), ffmpegArgs, &outputText);
         if (ok) {
             QStringList args{QStringLiteral("lut"), QStringLiteral("apply")};
             if (spectralEngine()) {
-                args << QStringLiteral("--engine") << QStringLiteral("spectral");
+                args << QStringLiteral("--engine") << engineName();
                 args << lookArgs(true);
             } else {
                 args << QStringLiteral("--lut") << lutEdit_->text();
@@ -1883,8 +1888,13 @@ private:
     }
 
     bool spectralEngine() const {
-        return engine_ != nullptr &&
-               engine_->currentData().toString() == QStringLiteral("spectral");
+        if (engine_ == nullptr) return false;
+        const QString data = engine_->currentData().toString();
+        return data == QStringLiteral("spectral") || data == QStringLiteral("spectral-gpu");
+    }
+
+    QString engineName() const {
+        return engine_ != nullptr ? engine_->currentData().toString() : QStringLiteral("lut");
     }
 
     // Everything the physical chain needs at run time, shared by the spectral
@@ -1916,9 +1926,14 @@ private:
         if (lutBrowseButton_ != nullptr) lutBrowseButton_->setEnabled(!spectral);
         if (bakeButton_ != nullptr) bakeButton_->setEnabled(!spectral);
         if (status_ != nullptr) {
+            const QString data = engineName();
             status_->setText(
-                spectral ? QStringLiteral("光谱引擎：逐像素物理链，约 1.2 s / 2.6 MP 每帧")
-                         : QStringLiteral("LUT 引擎：每帧查表"));
+                data == QStringLiteral("spectral-gpu")
+                    ? QStringLiteral("光谱 GPU 引擎：D3D11 上跑逐像素物理链，"
+                                     "无显卡时自动退回 CPU")
+                    : (spectral
+                           ? QStringLiteral("光谱引擎：逐像素物理链，约 1.2 s / 2.6 MP 每帧")
+                           : QStringLiteral("LUT 引擎：每帧查表")));
         }
     }
 
@@ -1926,7 +1941,7 @@ private:
                                const QString& lut) const {
         QStringList args{QStringLiteral("video")};
         if (spectralEngine()) {
-            args << QStringLiteral("--engine") << QStringLiteral("spectral");
+            args << QStringLiteral("--engine") << engineName();
             args << lookArgs(false);
         } else {
             args << QStringLiteral("--lut") << lut;
@@ -2178,7 +2193,8 @@ private:
             bool spectralJob = false;
             for (int i = 0; i + 1 < job.args.size(); ++i) {
                 if (job.args[i] == QStringLiteral("--engine") &&
-                    job.args[i + 1] == QStringLiteral("spectral")) {
+                    (job.args[i + 1] == QStringLiteral("spectral") ||
+                     job.args[i + 1] == QStringLiteral("spectral-gpu"))) {
                     spectralJob = true;
                 }
             }
