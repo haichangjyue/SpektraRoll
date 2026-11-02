@@ -123,6 +123,10 @@ from 207 to **85–92 ms/frame** (about 4.3x since the CPU colour path), with
 bit-identical output. `SPEKTRA_VIDEO_DEBUG=1` prints the per-stage timings.
 Decode and encode now also run in their own threads, so the loop no longer waits
 on the ffmpeg pipes: **79 ms/frame** (about 4.8x since D046), still bit-identical.
+Segmented renders run several parts at once (`--jobs N`, auto by default):
+on a 30 s clip in six parts the LUT + CPU-texture path went from 158 to
+**84 s (1.88x)**; the GPU path is GPU-bound on one card (1.10x). Output matches
+the sequential render bit for bit.
 
 Hardware decode was measured and rejected: QSV plus the download step is
 21.8 ms/frame against 19.5 ms for the software decoder on this footage.

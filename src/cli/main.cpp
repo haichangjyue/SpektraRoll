@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 SpektraRoll contributors
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -14,6 +15,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -69,7 +71,7 @@ void printUsage() {
         "                         [--interp tetra|tri] [--strength 0..1] [--threads N]\n"
         "                         [--grain 0..1] [--halation 0..1] [--seed N]\n"
         "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
-        "                         [--segment SEC] [--resume] [--keep-parts]\n"
+        "                         [--segment SEC] [--resume] [--keep-parts] [--jobs N]\n"
         "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
         "                         [--texture-engine auto|cpu|gpu] [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
@@ -77,7 +79,9 @@ void printUsage() {
         "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
         "      tags. --segment renders in chunks under <out>.parts and --resume\n"
         "      skips the chunks that already finished, so an interrupted long\n"
-        "      render continues where it stopped. The source timecode is copied\n"
+        "      render continues where it stopped. --jobs N renders N parts at a\n"
+        "      time (default: a conservative auto value; 1 keeps it sequential).\n"
+        "      The source timecode is copied\n"
         "      to the output unless --no-timecode is given. With\n"
         "      --engine spectral the LUT is bypassed and every pixel runs the\n"
         "      physical film/paper chain (slow but physical; --film/--paper and\n"
@@ -551,6 +555,21 @@ bool processFused(sr::GpuFilm& film, sr::GpuTexture& texture, float* pixels, int
 bool textureActive(const sr::TextureParams& texture) {
     return texture.halation.amount > 0.0f || texture.glare.amount > 0.0f ||
            texture.diffusion.amount > 0.0f || texture.grain.amount > 0.0f;
+}
+
+// D052: how many parts to render at the same time. `--jobs 0` (the default)
+// picks a conservative number: each worker owns a GPU device and two ffmpeg
+// processes, so more is not always faster.
+int resolveJobs(const Args& args, long parts) {
+    int jobs = args.getInt("jobs", 0);
+    if (jobs <= 0) {
+        const unsigned cores = std::thread::hardware_concurrency();
+        jobs = static_cast<int>(cores / 4);
+        jobs = std::min(jobs, 3);
+    }
+    jobs = std::max(1, jobs);
+    jobs = std::min<int>(jobs, static_cast<int>(std::max(1L, parts)));
+    return jobs;
 }
 
 // Applies the chain on the GPU when one is set up; on any device failure it
@@ -1630,9 +1649,19 @@ int cmdVideo(const Args& args) {
 
         std::printf("segments: %ld frames in %ld parts of up to %ld frames%s\n", totalFrames,
                     partTotal, segmentFrames, resume ? ", resuming" : "");
-        std::vector<std::filesystem::path> parts;
-        parts.reserve(static_cast<size_t>(partTotal));
-        for (long index = 0; index < partTotal; ++index) {
+        const int jobs = resolveJobs(args, partTotal);
+        if (jobs > 1) std::printf("workers: %d parts at a time\n", jobs);
+
+        std::vector<std::filesystem::path> parts(static_cast<size_t>(partTotal));
+        std::atomic<long> nextPart{0};
+        std::atomic<size_t> renderedTotal{0};
+        std::atomic<bool> failed{false};
+        std::mutex printMutex;
+        std::mutex errorMutex;
+        std::string firstError;
+
+        const auto renderPart = [&](long index, VideoRender& local,
+                                    sr::GrainFieldCache& cache) {
             const long offset = index * segmentFrames;
             const long count = std::min(segmentFrames, totalFrames - offset);
             const std::filesystem::path part =
@@ -1650,26 +1679,100 @@ int cmdVideo(const Args& args) {
                 }
             }
             if (done) {
+                std::lock_guard<std::mutex> lock(printMutex);
                 std::printf("part %ld/%ld: already done\n", index + 1, partTotal);
-                parts.push_back(part);
-                continue;
+                parts[static_cast<size_t>(index)] = part;
+                return true;
+            }
+            {
+                std::lock_guard<std::mutex> lock(printMutex);
+                std::printf("part %ld/%ld: frames %ld..%ld\n", index + 1, partTotal,
+                            startFrame + offset, startFrame + offset + count - 1);
+                std::fflush(stdout);
             }
 
-            std::printf("part %ld/%ld: frames %ld..%ld\n", index + 1, partTotal,
-                        startFrame + offset, startFrame + offset + count - 1);
             size_t partFrames = 0;
             std::string partError;
             const std::string partTimecode =
                 base.valid ? formatTimecode(addFrames(base, startFrame + offset, fps)) : "";
-            if (!renderRange(job, startFrame + offset, count, offset, part.string(), partTimecode,
-                             &grainCache, totalFrames, &partFrames, partError)) {
-                return fail(partError + " (finished parts are kept for --resume)");
+            if (!renderRange(local, startFrame + offset, count, offset, part.string(),
+                             partTimecode, &cache, totalFrames, &partFrames, partError)) {
+                std::lock_guard<std::mutex> lock(errorMutex);
+                if (firstError.empty()) {
+                    firstError = partError + " (finished parts are kept for --resume)";
+                }
+                failed = true;
+                return false;
             }
-            renderedFrames += partFrames;
+            renderedTotal += partFrames;
             std::ofstream state(marker, std::ios::trunc);
             state << (startFrame + offset) << " " << count << "\n";
-            parts.push_back(part);
+            parts[static_cast<size_t>(index)] = part;
+            return true;
+        };
+
+        if (jobs <= 1) {
+            for (long index = 0; index < partTotal && !failed; ++index) {
+                if (!renderPart(index, job, grainCache)) break;
+            }
+        } else {
+            std::vector<std::thread> workers;
+            workers.reserve(static_cast<size_t>(jobs));
+            for (int w = 0; w < jobs; ++w) {
+                workers.emplace_back([&] {
+                    VideoRender local = job;
+                    local.threads = std::max(1, job.threads / jobs);
+                    sr::GrainFieldCache cache;
+                    // Each worker needs its own device and shader objects: the
+                    // GPU backends are deliberately single-threaded (D047/D049).
+                    std::unique_ptr<sr::GpuFilm> film;
+                    std::unique_ptr<sr::GpuTexture> texture;
+                    std::string setupError;
+                    if (local.spectral && local.gpu != nullptr) {
+                        film = std::make_unique<sr::GpuFilm>();
+                        if (!film->configure(*local.model, local.bake, setupError)) {
+                            std::lock_guard<std::mutex> lock(errorMutex);
+                            if (firstError.empty()) firstError = setupError;
+                            failed = true;
+                            return;
+                        }
+                        local.gpu = film.get();
+                        if (job.textureGpu != nullptr) {
+                            texture = std::make_unique<sr::GpuTexture>();
+                            if (texture->attach(film->deviceHandle(), setupError) &&
+                                texture->prepare(setupError)) {
+                                local.textureGpu = texture.get();
+                            } else {
+                                std::lock_guard<std::mutex> lock(printMutex);
+                                std::fprintf(stderr,
+                                             "warning: %s; this worker uses the CPU texture chain\n",
+                                             setupError.c_str());
+                                local.textureGpu = nullptr;
+                            }
+                        }
+                    } else if (local.textureGpu != nullptr) {
+                        texture = std::make_unique<sr::GpuTexture>();
+                        if (texture->prepare(setupError)) {
+                            local.textureGpu = texture.get();
+                        } else {
+                            std::lock_guard<std::mutex> lock(printMutex);
+                            std::fprintf(stderr,
+                                         "warning: %s; this worker uses the CPU texture chain\n",
+                                         setupError.c_str());
+                            local.textureGpu = nullptr;
+                        }
+                    }
+                    while (!failed) {
+                        const long index = nextPart.fetch_add(1);
+                        if (index >= partTotal) break;
+                        if (!renderPart(index, local, cache)) break;
+                    }
+                });
+            }
+            for (std::thread& worker : workers) worker.join();
         }
+        if (failed) return fail(firstError);
+        renderedFrames = renderedTotal;
 
         // One concat list; the audio is copied once into the final file. Paths
         // are relative to the list, which sits in the parts directory.
