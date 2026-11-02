@@ -747,6 +747,34 @@
 
 ---
 
+## D050 · 视频管道修复（`std::lround` 是最大的单项开销）
+
+- **日期**：2026-11-03
+- **背景**：D049 之后视频是 207.1 ms/帧，怀疑是 ffmpeg 管道。给循环加分段计时后，结论完全不同：
+  ```
+  timing: read 13  convert 4  process 44  pack 130  write 6 (ms/frame)
+  ```
+- **原因**：RGB48 量化循环用了 `std::lround`，2.6 MP 每帧 780 万次库调用，**130 ms/帧**，比整个 GPU 颜色 + 质感（44 ms）还贵约 3 倍。预览服务端 D048 里已经踩过同一个坑。
+- **修改**：
+  - 量化改成 `static_cast<unsigned short>(value * 65535.0f + 0.5f)`；
+  - RGB48→float 与 float→RGB48 两个整帧循环改成 `sr::parallelChunks`；
+  - 新增 `SPEKTRA_VIDEO_DEBUG=1` 分段计时（read / convert / process / pack / write）。
+- **硬件解码（测量后不采用）**：
+  - 软解 2160×1214 HEVC 4:2:2 10-bit → rgb48：**19.5 ms/帧**
+  - `-hwaccel qsv -hwaccel_output_format qsv` + `hwdownload,format=y210le` + scale：**21.8 ms/帧**
+  - `-hwaccel d3d11va`：**23 ms/帧**
+  - 下载与格式转换比省下的解码时间更贵，所以没有把 `--hwdecode` 做进 CLI（探测命令还必须带上完整滤镜链，否则会“探测成功、渲染失败”）。
+- **实测**：
+  - 视频（光谱 GPU + GPU 质感，2.6 MP，ProRes）：**207.1 → 85.1/91.9 ms/帧**（2.4×）
+  - `demo-m3`（LUT + CPU 质感）：358.7 → **约 235 ms/帧**
+  - 输出与修改前 **逐位相同**（ffmpeg PSNR = inf）
+  - 编码器现在是可见成本：ProRes 85、H.264 + QSV **77**、H.264 软编 104、HEVC 软编 104 ms/帧（QSV 编码终于有意义了）
+- **后果**：
+  - 剩下的时间主要是 GPU 44 ms + 读 14 + 写 7；分段并行或读写线程重叠还能再省 15–20%，留给下一轮
+  - `--encoder qsv` 从“收益有限”变成 H.264 下约 1.35×，建议 H.264 输出默认尝试
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

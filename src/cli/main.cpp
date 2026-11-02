@@ -957,6 +957,7 @@ struct VideoRender {
     sr::GpuTexture* textureGpu = nullptr;
     // D049: texture shares the film device, so one submit does both.
     bool fuseTexture = true;
+
     std::string codecArgs;
     std::string outFormat;
     std::string inMatrix;
@@ -1017,11 +1018,14 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     const double start = static_cast<double>(startFrame) / job.fps;
     const std::string seek = start > 0.0 ? " -ss " + formatSeconds(start) : "";
     const std::string limit = frameCount > 0 ? " -frames:v " + std::to_string(frameCount) : "";
+    const std::string filter =
+        "scale=in_color_matrix=" + job.inMatrix + ":in_range=tv:out_range=full";
+    // Hardware decode was measured on this footage and is not a win: QSV plus
+    // hwdownload costs ~21.8 ms/frame against 19.5 ms for the software decoder
+    // (D050), so the software path stays.
     const std::string decodeCmd =
         shellQuote(job.ffmpeg) + " -v error" + seek + " -i " + shellQuote(job.inPath) + limit +
-        " -vf " +
-        shellQuote("scale=in_color_matrix=" + job.inMatrix + ":in_range=tv:out_range=full") +
-        " -pix_fmt rgb48le -f rawvideo -";
+        " -vf " + shellQuote(filter) + " -pix_fmt rgb48le -f rawvideo -";
 
     const std::string encodeCmd =
         shellQuote(job.ffmpeg) + " -v error -y -f rawvideo -pix_fmt rgb48le -s " +
@@ -1050,13 +1054,28 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     std::vector<float> frame(pixels * 3);
     size_t frames = 0;
     bool writeError = false;
+    const bool debugTiming = std::getenv("SPEKTRA_VIDEO_DEBUG") != nullptr;
+    double tRead = 0.0, tConvert = 0.0, tProcess = 0.0, tPack = 0.0, tWrite = 0.0;
+    const auto now = [] { return std::chrono::steady_clock::now(); };
     while (frameCount <= 0 || frames < static_cast<size_t>(frameCount)) {
+        auto mark = now();
         const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
         if (got < raw.size()) break;
-        for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
+        if (debugTiming) {
+            tRead += std::chrono::duration<double, std::milli>(now() - mark).count();
+            mark = now();
+        }
+        sr::parallelChunks(raw.size(), job.threads, [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                frame[i] = static_cast<float>(raw[i]) * (1.0f / 65535.0f);
+            }
+        });
+        if (debugTiming) {
+            tConvert += std::chrono::duration<double, std::milli>(now() - mark).count();
+            mark = now();
+        }
         const int frameIndex =
-            static_cast<int>(rangeFrameBase + static_cast<long>(frames));
-        bool fused = false;
+            static_cast<int>(rangeFrameBase + static_cast<long>(frames));        bool fused = false;
         if (job.gpu != nullptr && job.textureGpu != nullptr && textureActive(job.texture)) {
             fused = processFused(*job.gpu, *job.textureGpu, frame.data(), job.width, job.height,
                                  job.strength, job.texture, frameIndex, &job.fuseTexture, error);
@@ -1086,13 +1105,28 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
             applyTextureFrame(frame.data(), job.width, job.height, job.texture,
                               frameIndex, grainCache, &job.textureGpu);
         }
-        for (size_t i = 0; i < raw.size(); ++i) {
-            const float value = std::min(1.0f, std::max(0.0f, frame[i]));
-            raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
+        if (debugTiming) {
+            tProcess += std::chrono::duration<double, std::milli>(now() - mark).count();
+            mark = now();
+        }
+        sr::parallelChunks(raw.size(), job.threads, [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                const float value = std::min(1.0f, std::max(0.0f, frame[i]));
+                // Rounding without std::lround: the library call costs ~130 ms
+                // per 2.6 MP frame, more than the whole GPU pass (D050).
+                raw[i] = static_cast<unsigned short>(value * 65535.0f + 0.5f);
+            }
+        });
+        if (debugTiming) {
+            tPack += std::chrono::duration<double, std::milli>(now() - mark).count();
+            mark = now();
         }
         if (std::fwrite(raw.data(), sizeof(unsigned short), raw.size(), encoder) != raw.size()) {
             writeError = true;
             break;
+        }
+        if (debugTiming) {
+            tWrite += std::chrono::duration<double, std::milli>(now() - mark).count();
         }
         ++frames;
         if (frames % 24 == 0) {
@@ -1107,6 +1141,13 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     }
     closePipe(decoder);
     closePipe(encoder);
+
+    if (debugTiming && frames > 0) {
+        const double n = static_cast<double>(frames);
+        std::fprintf(stderr,
+                     "timing: read %.0f  convert %.0f  process %.0f  pack %.0f  write %.0f (ms/frame)\n",
+                     tRead / n, tConvert / n, tProcess / n, tPack / n, tWrite / n);
+    }
 
     if (rendered != nullptr) *rendered = frames;
     if (writeError) {
@@ -1304,6 +1345,8 @@ int cmdVideo(const Args& args) {
     // Lives for the whole render, including every segment.
     sr::GpuTexture textureGpuStorage;
 
+
+
     VideoRender job;
     job.ffmpeg = ffmpeg;
     job.inPath = inPath;
@@ -1321,6 +1364,7 @@ int cmdVideo(const Args& args) {
     job.texture = texture;
     job.textureGpu = prepareTextureGpu(args, engine, textureGpuStorage,
                                        gpu ? gpuFilm.deviceHandle() : nullptr);
+
     job.codecArgs = codecArgs;
     job.outFormat = outFormat;
     job.inMatrix = inMatrix;
@@ -1362,6 +1406,7 @@ int cmdVideo(const Args& args) {
         std::printf("engine: lut %s\n", lutPath.c_str());
     }
     if (job.textureGpu != nullptr) std::printf("texture: gpu (D3D11)\n");
+
 
     const std::filesystem::path outFile(outPath);
     std::string extension = outFile.extension().string();

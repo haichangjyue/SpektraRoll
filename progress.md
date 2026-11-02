@@ -81,6 +81,25 @@ CI：run **60** Windows + macOS 双绿。
 .\build\test_gpu_chain.exe        # 融合 vs CPU，应 ≥60 dB（本机 124 dB）
 ```
 
+### 同一会话的第二段：B2（D050）
+
+产品负责人接着选了 B2（视频管道）。先给循环加分段计时，结果很意外：
+
+```
+timing: read 13  convert 4  process 44  pack 130  write 6 (ms/frame)
+```
+
+207 ms/帧里有 **130 ms 花在 `float → uint16` 的 `std::lround`**（每帧 780 万次库调用），GPU 颜色 + 质感只有 44 ms。
+
+- 修法：`static_cast<unsigned short>(value * 65535.0f + 0.5f)`，并把转换和打包两个整帧循环改成 `parallelChunks`。
+- 结果：视频 **207.1 → 85–92 ms/帧**（约 2.4×），输出与修改前 **逐位相同**。
+- LUT + CPU 质感也跟着受益：`demo-m3` 的 358.7 → 245.5 ms/帧。
+- 编码器终于变成可见成本：ProRes 85、H.264+QSV 77、H.264 软编 104、HEVC 软编 104 ms/帧。
+- **硬件解码测量后放弃**：`-hwaccel qsv` + `hwdownload,format=y210le` 是 **21.8 ms/帧**，软解 **19.5 ms/帧**；`-hwaccel d3d11va` 23 ms/帧。管道里下载/格式转换比省下的还贵，所以没有把 `--hwdecode` 做进产品。
+- 分段并行**本轮没做**：需要每个 worker 自己的 GPU 实例与 ffmpeg 管道，留给下一轮。
+
+复现：`$env:SPEKTRA_VIDEO_DEBUG="1"` 后跑上面的 video 命令，会打印分段耗时。
+
 ---
 
 ## 零之二、上一次会话：预览实时化（D048）
@@ -436,6 +455,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **GPU 质感 vs CPU 参考** | 九组配置 **143–166 dB**（最差 4.5e-7）；真实负片帧 **123.1 dB** |
 | **UI 预览（D048，1600×898）** | **47–64 ms/帧**（旧链 1.7–2.2 s，约 30×）；光谱 GPU 43 ms；首次打开解码 2–4 s |
 | **融合提交（D049）** | 视频全质感 **207.1 ms/帧**（分段 233.6）；与分段输出 **逐位相同**；预览光谱 GPU **38 ms/帧** |
+| **管道修复（D050）** | 视频 **207.1 → 85–92 ms/帧**（2.4×）；输出逐位相同；`pack` 从 130 → 5 ms |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -552,6 +572,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D047** | 空间质感上 GPU | **`--texture-engine auto/cpu/gpu`：halation / glare / diffusion / grain 逐 pass 翻译成 D3D11 compute；模糊保持 CPU 的累加顺序，自动回退** | 视频 382.7 → 245.6 ms/帧（1.56×）；质感本身约 160 → 38 ms；与 CPU 参考 143–166 dB；`test_gpu_texture` 九组配置 |
 | **D048** | 预览实时化 | **`preview` 常驻进程：整段解码进内存（≤1024 MB、最长边 1600），`frame` 只跑颜色 + 质感并输出 8-bit RGBA；UI 拖动 90 ms 合并** | 预览 **1.7–2.2 s → 47–64 ms/帧**；首次打开 2.3–2.7 s；`ffprobe -show_streams` 一次取全（rotation 查询从 3.8 s 降到 42 ms） |
 | **D049** | 融合 GPU 提交 | **颜色与质感共用一个 D3D11 设备：film 结果留在显存，质感以 SRV 直接读，只上传/回读一次** | 视频 233.6 → **207.1 ms/帧**；与分段路径 **逐位相同**；`test_gpu_chain` 与 CPU 参考 124 dB |
+| **D050** | 视频管道修复 | **RGB48 量化去掉 `std::lround`（130 ms/帧），两个整帧循环并行；硬件解码实测更慢，不采用** | 视频 207.1 → **85–92 ms/帧**（2.4×）；`demo-m3` 358.7 → 245.5；输出逐位相同 |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -570,7 +591,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 ### 🔴 下一步（按建议顺序）
 
 1. ~~把空间质感搬上 GPU~~ ✅ **已完成（D047）**。~~预览实时化~~ ✅ **已完成（D048）**。~~颜色 + 质感合并提交~~ ✅ **已完成（D049）**：视频 207.1 ms/帧，已经等于空管道水平。
-2. **ffmpeg 硬件解码 / 并行编码**：207 ms/帧里几乎全是解码 + 编码；下一步是 D3D11VA/QSV 解码、分段并行（这是仅剩的大头）。
+2. **分段并行 / 管道重叠**：85–92 ms/帧 里 read 14 + write 7 + GPU 44；并行分段（每个 worker 独立 GPU 实例）或读/写线程重叠能再省 15–20%。这是 B2 剩下的一半。
 3. **预览代理 / 磁盘缓存**：内存缓存只覆盖 99 帧（853 MB），长片超出的帧回退单帧；可生成半分辨率代理文件。
 4. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"。
 5. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。

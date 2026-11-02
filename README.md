@@ -116,10 +116,15 @@ device failure falls back to the CPU chain instead of failing the render.
 
 Colour and texture share one device: the film pass leaves its result on the
 card and the texture chain reads that buffer directly, so a frame is uploaded
-and read back once instead of twice. 2.6 MP video went from 233 to
-**207 ms/frame**, which is the decode/encode pipe itself; the fused output is
-bit-identical to the staged path, and `tests/test_gpu_chain.cpp` checks it
-against the CPU reference (124 dB).
+and read back once instead of twice. The frame plumbing was the next surprise:
+turning the RGB48 quantise loop's `std::lround` into a multiply-and-add and
+running both full-frame conversions through the thread pool took 2.6 MP video
+from 207 to **85–92 ms/frame** (about 4.3x since the CPU colour path), with
+bit-identical output. `SPEKTRA_VIDEO_DEBUG=1` prints the per-stage timings.
+
+Hardware decode was measured and rejected: QSV plus the download step is
+21.8 ms/frame against 19.5 ms for the software decoder on this footage.
+`--encoder qsv` is now worth using for H.264 (77 vs 104 ms/frame).
 
 Preview uses a long-lived process (`spektra-roll-cli preview`) instead of
 spawning ffmpeg and the CLI per frame. It decodes the clip once into a bounded
