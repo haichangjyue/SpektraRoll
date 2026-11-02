@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
@@ -132,6 +133,20 @@ void printUsage() {
         "                               [--min-psnr 60]\n"
         "      Compare two LUTs entry by entry (PSNR and CIE76 delta E).\n"
         "      Exits non-zero when PSNR is below --min-psnr.\n"
+        "\n"
+        "  spektra-roll-cli preview [--ffmpeg <path>] [--in-matrix bt2020|bt709]\n"
+        "                           [--cache-mb 1024] [--max-side 1600]\n"
+        "                           [--texture-engine auto|cpu|gpu]\n"
+        "      Long-lived preview server for the UI (D048). Decodes the clip once\n"
+        "      into a bounded frame cache, then answers line commands on stdin:\n"
+        "        look <args...>        load a LUT or the spectral engine\n"
+        "        open <clip>           decode the clip into the cache\n"
+        "        texture <11 numbers>  grain/halation/glare/diffusion\n"
+        "        frame <n> <out.raw>   graded frame, 8-bit RGBA\n"
+        "        raw <n> <out.raw>     decoded frame, 8-bit RGBA\n"
+        "        quit\n"
+        "      Keeping the process alive skips the LUT parse, the PNG round trip\n"
+        "      and the GPU setup that used to run once per preview frame.\n"
         "\n"
         "  spektra-roll-cli version\n"
         "\n"
@@ -1504,6 +1519,521 @@ int cmdConvert(const Args& args) {    const std::string inPath = args.get("in");
     return 0;
 }
 
+// --- preview server (D048) -------------------------------------------------
+//
+// The UI needs a new frame every time the timeline moves. Spawning ffmpeg and
+// the CLI per frame costs far more than the grade itself (LUT text parse,
+// 16-bit PNG encode/decode, D3D device and shader setup), so preview keeps one
+// process alive: it decodes the clip once into a bounded frame cache and then
+// answers `frame N` with colour + texture only.
+//
+// Protocol: one command per line on stdin, one `ok`/`error` line on stdout.
+//   look <args...>        load a LUT or configure the spectral engine
+//   open <clip>           decode into the cache (no-op when already open)
+//   texture <11 numbers>  grain/halation/glare/diffusion parameters
+//   frame <n> <out.raw>   graded frame as 8-bit RGBA
+//   raw <n> <out.raw>     decoded frame as 8-bit RGBA (no grade)
+//   quit
+//
+// Paths are quoted with double quotes; the tokenizer strips the quotes only.
+
+namespace preview {
+
+struct Geometry {
+    int width = 0;
+    int height = 0;
+    double fps = 0.0;
+    long frames = 0;
+};
+
+bool probeGeometry(const std::string& ffprobe, const std::string& path, Geometry& info,
+                   std::string& error) {
+    // One -show_streams call is ~40 ms; asking for side_data=rotation alone
+    // costs seconds on some files, which is far too slow for a preview open.
+    const std::string text = runCapture(
+        shellQuote(ffprobe) + " -v error -select_streams v:0 -show_streams"
+                              " -of default=noprint_wrappers=1 " +
+        shellQuote(path));
+    if (text.empty()) {
+        error = "could not probe " + path + " (is ffprobe next to ffmpeg?)";
+        return false;
+    }
+    std::map<std::string, std::string> fields;
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        const auto equals = line.find('=');
+        if (equals == std::string::npos) continue;
+        // ffprobe 7+ can print a stream twice; the first value wins.
+        fields.emplace(line.substr(0, equals), line.substr(equals + 1));
+    }
+    const auto number = [&](const char* key) {
+        const auto it = fields.find(key);
+        return it == fields.end() ? std::string() : it->second;
+    };
+
+    info.width = std::atoi(number("width").c_str());
+    info.height = std::atoi(number("height").c_str());
+    const std::string rate = number("r_frame_rate");
+    const auto slash = rate.find('/');
+    if (slash != std::string::npos) {
+        const double num = std::atof(rate.substr(0, slash).c_str());
+        const double den = std::atof(rate.substr(slash + 1).c_str());
+        info.fps = den != 0.0 ? num / den : 0.0;
+    }
+    if (info.width <= 0 || info.height <= 0 || info.fps <= 0.0) {
+        error = "bad video geometry for " + path;
+        return false;
+    }
+
+    // ffmpeg autorotates, so a 90/270 display matrix means the decoded frames
+    // arrive with the sides swapped.
+    const int degrees = std::atoi(number("rotation").c_str());
+    if (degrees == 90 || degrees == -90 || degrees == 270 || degrees == -270) {
+        std::swap(info.width, info.height);
+    }
+    info.frames = std::atol(number("nb_frames").c_str());
+    if (info.frames <= 0) {
+        const double duration = std::atof(number("duration").c_str());
+        if (duration > 0.0) {
+            info.frames = static_cast<long>(std::lround(duration * info.fps));
+        }
+    }
+    return true;
+}
+
+std::vector<std::string> splitLine(const std::string& line) {
+    std::vector<std::string> tokens;
+    std::string token;
+    bool quoted = false;
+    for (const char ch : line) {
+        if (ch == '"') {
+            quoted = !quoted;
+            continue;
+        }
+        if (!quoted && (ch == ' ' || ch == '\t' || ch == '\r')) {
+            if (!token.empty()) {
+                tokens.push_back(token);
+                token.clear();
+            }
+            continue;
+        }
+        token.push_back(ch);
+    }
+    if (!token.empty()) tokens.push_back(token);
+    return tokens;
+}
+
+Args argsFromTokens(const std::vector<std::string>& tokens) {
+    std::vector<std::string> storage = tokens;
+    std::vector<char*> argv;
+    argv.push_back(const_cast<char*>("preview"));
+    for (std::string& token : storage) argv.push_back(token.data());
+    return parse(static_cast<int>(argv.size()), argv.data());
+}
+
+// Everything a preview keeps between frames: the look, the texture backend and
+// the decoded clip.
+struct Server {
+    std::string ffmpeg;
+    std::string ffprobe;
+    std::string inMatrix = "bt2020";
+    std::string textureMode = "auto";
+    int cacheMb = 1024;
+    int maxSide = 1600;
+    int threads = 1;
+    bool verbose = false;
+
+    bool spectral = false;
+    bool gpuColor = false;
+    bool appleLog = false;
+    sr::Lut3D lut;
+    FilmRecipe recipe;
+    sr::GpuFilm gpuFilm;
+    sr::GpuTexture gpuTexture;
+    sr::GpuTexture* textureGpu = nullptr;
+    bool texturePrepared = false;
+    bool textureWarned = false;
+    sr::TextureParams texture;
+    sr::GrainFieldCache grainCache;
+
+    std::string clip;
+    int width = 0;
+    int height = 0;
+    long cached = 0;
+    long total = 0;
+    double fps = 24.0;
+    std::vector<std::vector<unsigned short>> frames;
+    std::vector<float> pixels;
+    std::vector<unsigned char> rgba;
+};
+
+bool configureLook(Server& server, const Args& look, std::string& error) {
+    const std::string engine = look.get("engine", "lut");
+    if (engine != "lut" && engine != "spectral" && engine != "spectral-gpu") {
+        error = "--engine expects 'lut', 'spectral' or 'spectral-gpu'";
+        return false;
+    }
+    server.spectral = engine != "lut";
+    server.gpuColor = engine == "spectral-gpu";
+    server.appleLog = look.get("input", "srgb") == "apple-log";
+    if (!server.spectral) {
+        const std::string path = look.get("lut");
+        if (path.empty()) {
+            error = "look needs --lut <file.cube>";
+            return false;
+        }
+        if (!server.lut.loadCube(path, error)) return false;
+        return true;
+    }
+    if (!configureFilmRecipe(look, server.recipe, error)) return false;
+    if (server.gpuColor &&
+        !server.gpuFilm.configure(server.recipe.model, server.recipe.options, error)) {
+        std::fprintf(stderr, "warning: %s; using the CPU spectral engine\n", error.c_str());
+        server.gpuColor = false;
+    }
+    return true;
+}
+
+bool wantTextureGpu(Server& server) {
+    if (server.textureMode == "cpu") return false;
+    const bool wanted = server.textureMode == "gpu" || (server.gpuColor && server.spectral);
+    if (!wanted) return false;
+    if (server.texturePrepared) return server.textureGpu != nullptr;
+    std::string error;
+    if (!server.gpuTexture.prepare(error)) {
+        if (!server.textureWarned) {
+            std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
+            server.textureWarned = true;
+        }
+        server.texturePrepared = true;
+        server.textureGpu = nullptr;
+        return false;
+    }
+    server.texturePrepared = true;
+    server.textureGpu = &server.gpuTexture;
+    return true;
+}
+
+int evenDimension(double value) {
+    int result = static_cast<int>(std::lround(value));
+    result -= result % 2;
+    return std::max(2, result);
+}
+
+bool openClip(Server& server, const std::string& path, std::string& error) {
+    if (path == server.clip && server.cached > 0) return true;
+
+    Geometry info;
+    if (!probeGeometry(server.ffprobe, path, info, error)) return false;
+
+    double scale = 1.0;
+    if (server.maxSide > 0) {
+        scale = std::min(scale, static_cast<double>(server.maxSide) /
+                                   static_cast<double>(std::max(info.width, info.height)));
+    }
+    const long assumed = info.frames > 0 ? info.frames : 600;
+    const double budgetPixels = static_cast<double>(server.cacheMb) * 1024.0 * 1024.0 /
+                                (static_cast<double>(assumed) * 6.0);
+    const double fullPixels = static_cast<double>(info.width) * info.height;
+    if (budgetPixels > 0.0 && fullPixels > budgetPixels) {
+        scale = std::min(scale, std::sqrt(budgetPixels / fullPixels));
+    }
+    const int width = evenDimension(info.width * scale);
+    const int height = evenDimension(info.height * scale);
+    const long frameBytes = static_cast<long>(width) * height * 6;
+    long maxCached = frameBytes > 0
+                         ? static_cast<long>(static_cast<double>(server.cacheMb) * 1024.0 * 1024.0 /
+                                             static_cast<double>(frameBytes))
+                         : 1;
+    maxCached = std::max(1L, maxCached);
+    if (info.frames > 0 && maxCached > info.frames) maxCached = info.frames;
+
+    const std::string decodeCmd =
+        shellQuote(server.ffmpeg) + " -v error -i " + shellQuote(path) + " -vf " +
+        shellQuote("scale=" + std::to_string(width) + ":" + std::to_string(height) +
+                   ":in_color_matrix=" + server.inMatrix + ":in_range=tv:out_range=full") +
+        " -pix_fmt rgb48le -f rawvideo -";
+
+    FILE* pipe = openPipe(decodeCmd, "rb");
+    if (!pipe) {
+        error = "failed to start ffmpeg for the preview cache";
+        return false;
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    server.frames.clear();
+    server.frames.reserve(static_cast<size_t>(maxCached));
+    const size_t values = static_cast<size_t>(width) * height * 3;
+    while (static_cast<long>(server.frames.size()) < maxCached) {
+        server.frames.emplace_back(values);
+        if (std::fread(server.frames.back().data(), sizeof(unsigned short), values, pipe) !=
+            values) {
+            server.frames.pop_back();
+            break;
+        }
+    }
+    closePipe(pipe);
+
+    if (server.frames.empty()) {
+        error = "ffmpeg decoded no frames for " + path;
+        return false;
+    }
+    server.clip = path;
+    server.width = width;
+    server.height = height;
+    server.fps = info.fps;
+    server.cached = static_cast<long>(server.frames.size());
+    server.total = info.frames > 0 ? info.frames : server.cached;
+    server.pixels.assign(static_cast<size_t>(width) * height * 3, 0.0f);
+    server.rgba.assign(static_cast<size_t>(width) * height * 4, 0);
+
+    const auto elapsed =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+            .count();
+    std::fprintf(stderr, "decoded %ld/%ld frames at %dx%d in %.0f ms\n", server.cached, server.total,
+                width, height, elapsed);
+    return true;
+}
+
+bool writeRgba(const std::string& path, const std::vector<unsigned char>& out,
+               std::string& error) {
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (file == nullptr) {
+        error = "cannot write " + path;
+        return false;
+    }
+    const size_t written = std::fwrite(out.data(), 1, out.size(), file);
+    std::fclose(file);
+    if (written != out.size()) {
+        error = "short write to " + path;
+        return false;
+    }
+    return true;
+}
+
+// `graded` runs the look and the texture chain; otherwise the frame is only
+// decoded to display sRGB, which is what the UI's "hold to compare" needs.
+bool renderFrame(Server& server, int index, const std::string& outPath, bool graded,
+                 std::string& error) {
+    if (index < 0 || index >= server.cached) {
+        error = "frame " + std::to_string(index) + " is outside the decoded cache (" +
+                std::to_string(server.cached) + " frames)";
+        return false;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    auto stage = started;
+    const auto mark = [&](const char* name) {
+        if (!server.verbose) return;
+        const auto now = std::chrono::steady_clock::now();
+        std::fprintf(stderr, "stage %-8s %.1f ms\n", name,
+                    std::chrono::duration<double, std::milli>(now - stage).count());
+        stage = now;
+    };
+    const size_t count = static_cast<size_t>(server.width) * server.height;
+    const std::vector<unsigned short>& raw = server.frames[static_cast<size_t>(index)];
+    server.pixels.resize(count * 3);
+    for (size_t i = 0; i < count * 3; ++i) {
+        server.pixels[i] = static_cast<float>(raw[i]) * (1.0f / 65535.0f);
+    }
+    mark("unpack");
+
+    if (graded) {
+        if (server.gpuColor &&
+            !server.gpuFilm.process(server.pixels.data(), count, server.pixels.data(), 1.0f,
+                                    error)) {
+            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                         error.c_str());
+            server.gpuColor = false;
+        }
+        if (!server.gpuColor) {
+            const bool spectral = server.spectral;
+            sr::parallelChunks(count, server.threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    float* px = &server.pixels[i * 3];
+                    const sr::Rgb src{px[0], px[1], px[2]};
+                    const sr::Rgb mapped = spectral
+                                               ? server.recipe.model.transformFrom(
+                                                     server.recipe.options, src)
+                                               : server.lut.apply(src, sr::Interp::Tetrahedral);
+                    const sr::Rgb result = sr::mix(src, mapped, 1.0f);
+                    px[0] = result.r;
+                    px[1] = result.g;
+                    px[2] = result.b;
+                }
+            });
+        }
+        sr::GpuTexture* gpu = wantTextureGpu(server) ? server.textureGpu : nullptr;
+        applyTextureFrame(server.pixels.data(), server.width, server.height, server.texture, index,
+                          &server.grainCache, &gpu);
+    } else {
+        // Already display-encoded sRGB when the source is sRGB; only Apple Log
+        // needs the decode/BT.2020->sRGB/encode round trip.
+        if (server.appleLog) {
+            sr::parallelChunks(count, server.threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    float* px = &server.pixels[i * 3];
+                    const double code[3] = {px[0], px[1], px[2]};
+                    double lin2020[3];
+                    for (int c = 0; c < 3; ++c) lin2020[c] = sr::appleLogDecode(code[c]);
+                    double linear[3];
+                    sr::bt2020ToSrgb(lin2020, linear);
+                    for (int c = 0; c < 3; ++c) {
+                        px[c] = static_cast<float>(sr::srgbEncode(
+                            std::min(1.0, std::max(0.0, linear[c]))));
+                    }
+                }
+            });
+        }
+    }
+
+    mark("grade");
+    server.rgba.resize(count * 4);
+    for (size_t i = 0; i < count; ++i) {
+        const float* px = &server.pixels[i * 3];
+        for (int c = 0; c < 3; ++c) {
+            const float value = std::min(1.0f, std::max(0.0f, px[c]));
+            server.rgba[i * 4 + c] = static_cast<unsigned char>(value * 255.0f + 0.5f);
+        }
+        server.rgba[i * 4 + 3] = 255;
+    }
+    mark("pack");
+    if (!writeRgba(outPath, server.rgba, error)) return false;
+    mark("write");
+
+    const auto elapsed =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+            .count();
+    std::fprintf(stderr, "rendered frame %d in %.1f ms\n", index, elapsed);
+    return true;
+}
+
+bool applyTextureCommand(Server& server, const std::vector<std::string>& tokens,
+                         std::string& error) {
+    // texture grain grainSize seed rate halAmount halRadius halThreshold
+    //         glareAmount glareRadius diffAmount diffRadius
+    if (tokens.size() < 12) {
+        error = "texture needs 11 numbers";
+        return false;
+    }
+    auto at = [&](size_t i) { return static_cast<float>(std::atof(tokens[i].c_str())); };
+    server.texture.grain.amount = at(1);
+    server.texture.grain.size = at(2);
+    server.texture.grain.seed = static_cast<unsigned>(std::atoi(tokens[3].c_str()));
+    server.texture.grain.rate = std::max(1, std::atoi(tokens[4].c_str()));
+    server.texture.halation.amount = at(5);
+    server.texture.halation.radius = at(6);
+    server.texture.halation.threshold = at(7);
+    server.texture.glare.amount = at(8);
+    server.texture.glare.radius = at(9);
+    server.texture.diffusion.amount = at(10);
+    server.texture.diffusion.radius = at(11);
+    return true;
+}
+
+int run(const Args& startup) {
+    Server server;
+    server.ffmpeg = ffmpegPath(startup);
+    server.ffprobe = siblingTool(server.ffmpeg);
+    server.inMatrix = startup.get("in-matrix", "bt2020");
+    server.textureMode = startup.get("texture-engine", "auto");
+    server.cacheMb = std::max(1, startup.getInt("cache-mb", 1024));
+    server.maxSide = std::max(0, startup.getInt("max-side", 1600));
+    server.threads = sr::resolveThreadCount(startup.getInt("threads", 0));
+    server.verbose = startup.has("verbose");
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (line.empty()) continue;
+        const std::vector<std::string> tokens = splitLine(line);
+        if (tokens.empty()) continue;
+        const std::string& command = tokens[0];
+        std::string error;
+
+        if (command == "quit") {
+            std::printf("ok bye\n");
+            std::fflush(stdout);
+            break;
+        }
+        if (command == "look") {
+            if (!configureLook(server, argsFromTokens(tokens), error)) {
+                std::printf("error %s\n", error.c_str());
+            } else {
+                // Compile the texture shaders now, not inside the first frame.
+                wantTextureGpu(server);
+                std::printf("ok look %s\n",
+                            server.gpuColor ? "spectral-gpu"
+                                            : (server.spectral ? "spectral" : "lut"));
+            }
+            std::fflush(stdout);
+            continue;
+        }
+        if (command == "open") {
+            if (tokens.size() < 2) {
+                std::printf("error open needs a clip path\n");
+            } else {
+                const auto started = std::chrono::steady_clock::now();
+                if (!openClip(server, tokens[1], error)) {
+                    std::printf("error %s\n", error.c_str());
+                } else {
+                    const auto ms = std::chrono::duration<double, std::milli>(
+                                        std::chrono::steady_clock::now() - started)
+                                        .count();
+                    std::printf("ok open %d %d %ld %ld %.6f %.0f\n", server.width,
+                                server.height, server.cached, server.total, server.fps, ms);
+                }
+            }
+            std::fflush(stdout);
+            continue;
+        }
+        if (command == "texture") {
+            if (!applyTextureCommand(server, tokens, error)) {
+                std::printf("error %s\n", error.c_str());
+            } else {
+                std::printf("ok texture\n");
+            }
+            std::fflush(stdout);
+            continue;
+        }
+        if (command == "backend") {
+            if (tokens.size() < 2) {
+                std::printf("error backend needs auto|cpu|gpu\n");
+            } else if (tokens[1] != "auto" && tokens[1] != "cpu" && tokens[1] != "gpu") {
+                std::printf("error backend needs auto|cpu|gpu\n");
+            } else {
+                server.textureMode = tokens[1];
+                wantTextureGpu(server);
+                std::printf("ok backend %s\n", server.textureMode.c_str());
+            }
+            std::fflush(stdout);
+            continue;
+        }
+        if (command == "frame" || command == "raw") {
+            if (tokens.size() < 3) {
+                std::printf("error %s needs a frame index and an output path\n",
+                            command.c_str());
+            } else if (server.clip.empty()) {
+                std::printf("error no clip is open\n");
+            } else if (!renderFrame(server, std::atoi(tokens[1].c_str()), tokens[2],
+                                    command == "frame", error)) {
+                std::printf("error %s\n", error.c_str());
+            } else {
+                std::printf("ok %s %d\n", command.c_str(), std::atoi(tokens[1].c_str()));
+            }
+            std::fflush(stdout);
+            continue;
+        }
+        std::printf("error unknown command %s\n", command.c_str());
+        std::fflush(stdout);
+    }
+    return 0;
+}
+
+}  // namespace preview
+
+int cmdPreview(const Args& args) { return preview::run(args); }
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1527,6 +2057,7 @@ int main(int argc, char** argv) {
     if (command == "gen") return cmdGen(args);
     if (command == "convert") return cmdConvert(args);
     if (command == "video") return cmdVideo(args);
+    if (command == "preview") return cmdPreview(args);
 
     if (command == "lut" && args.positional.size() >= 2) {
         const std::string& sub = args.positional[1];

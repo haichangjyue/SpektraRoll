@@ -114,6 +114,16 @@ including the separable box blur's summation order, so the two agree at
 **143–166 dB PSNR** (worst deviation 4.5e-7); `ctest` enforces that too, and a
 device failure falls back to the CPU chain instead of failing the render.
 
+Preview uses a long-lived process (`spektra-roll-cli preview`) instead of
+spawning ffmpeg and the CLI per frame. It decodes the clip once into a bounded
+frame cache (1 GB / 1600 px longest side by default), then a preview frame is
+just colour + texture: **47–64 ms** on this machine, down from the 1.7–2.2 s the
+old per-frame ffmpeg + 16-bit PNG round trip cost. Changing the look reloads the
+LUT or model without re-decoding, and the timeline coalesces scrub moves to
+about 11 previews per second. `spektra-roll-ui.exe --preview-selftest` runs two
+real previews and prints their timings, which is also what CI exercises through
+the server protocol.
+
 ![Post-dev inspector](docs/ui-postdev.png)
 
 ![Render queue](docs/ui-queue.png)

@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。颜色可以走 **光谱 GPU（物理链，50 ms/帧）**，空间质感也能放到 GPU 上（2.6 MP 全质感 **245 ms/帧**，约 1.6 倍）。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。现在也有 **Qt 6 桌面界面**：选素材、烘 LUT、调质感、预览一帧、渲染整段。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。颜色可以走 **光谱 GPU（物理链，50 ms/帧）**，空间质感也能放到 GPU 上（2.6 MP 全质感 **245 ms/帧**，约 1.6 倍）。界面预览现在是**常驻进程 + 整段帧缓存**：拖动时间线 **47–64 ms/帧**（以前 1.7–2.2 s）。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -54,6 +54,7 @@
 - [x] **GPU 探针**（D045）：Arc A750 D3D11，2.6 MP × 81 样本 **0.63 ms**
 - [x] **GPU 光谱引擎**（D046）：`--engine spectral-gpu` / UI“光谱 GPU”，2.6 MP 单帧 **50 ms**（CPU 1.1 s），视频 1427 → 379 ms/帧；与 CPU 参考 PSNR 82–119 dB，`test_gpu_film` 六组配置最差 3e-4；无 D3D11 时自动回退 CPU 光谱
 - [x] **GPU 质感**（D047）：`--texture-engine auto/cpu/gpu` / UI“GPU 质感”勾选框，颗粒 + 光晕 + 眩光 + 扩散全上 D3D11；视频 **382.7 → 245.6 ms/帧**，与 CPU 参考 143–166 dB，`test_gpu_texture` 九组配置最差 4.5e-7
+- [x] **预览实时化**（D048）：`preview` 常驻进程 + 整段帧缓存；LUT 预览 **1.7–2.2 s → 47–64 ms/帧**，光谱 GPU 43 ms；拖动时间线 90 ms 合并；`--preview-selftest` 可脚本验收
 - [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
@@ -108,6 +109,8 @@
 | GPU 光谱（2.6 MP） | 单帧 **47–50 ms**（CPU 1.1 s）；ProRes 视频 1427 → **379 ms/帧** |
 | GPU 质感（2.6 MP，全质感） | **245.6 ms/帧**（CPU 382.7）；`demo-gpu-texture` 233.6 vs 386.8（1.66×） |
 | GPU 质感本身 | 约 **38 ms/帧**（CPU 约 160）；单帧 `lut apply` 309.5 → 214.5 ms |
+| UI 预览（D048，1600×898） | **47–64 ms/帧**（旧链 1.7–2.2 s，约 30×）；光谱 GPU 43 ms；首次打开 2–4 s |
+| 预览帧缓存 | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | 分段 / 续渲 | 4 s 素材 5 段；删第 4 段后续渲只花约 5 s，输出仍是 99 帧 / 4.125 s / 原声 / timecode |
 | 颗粒时间稳定性 | 帧间差 0.0025（rate 1）→ **0.0014**（rate 3） |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，ΔE76 max 0.0065 |
@@ -125,7 +128,7 @@
 ## 下一步（M5）
 
 1. **颜色 + 质感合并成一次 GPU 提交**：现在两段各自上传/回读 42 MB，空管道仍约 207 ms/帧；合并后再省 15–30 ms/帧
-2. **预览实时化**：预览仍是 “ffmpeg 抽帧 → 写 PNG → CLI 进程 → 读回”；做常驻进程或低分辨率直出
+2. **预览代理 / 磁盘缓存**：内存缓存只覆盖约 99 帧（853 MB），长片超出的帧回退单帧；可生成半分辨率代理
 3. **真实点扩散核**：眩光 / 光晕 / 扩散现在是画幅比例 + 盒状模糊
 4. **浮点 / EXR**（D017 欠账）
 5. **多段并行渲染 / macOS Qt 打包**

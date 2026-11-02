@@ -17,6 +17,7 @@
 #include <QDoubleSpinBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -552,6 +553,16 @@ public:
         setWindowTitle(QStringLiteral("SpektraRoll — 胶片与印片模拟"));
     }
 
+    // Scripted end-to-end check (`--preview-selftest`): runs the same preview
+    // path as the button and returns the status line the UI would show.
+    QString previewSelfTest() {
+        previewFrame();
+        return status_ != nullptr ? status_->text() : QString();
+    }
+
+    // Graceful exit for the long-lived preview process (also used by quit()).
+    void shutdownPreview() { stopPreviewServer(); }
+
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override {
         if (!event->mimeData()->hasUrls()) return;
@@ -635,6 +646,7 @@ protected:
         }
         saveSettings();
         saveQueue();
+        stopPreviewServer();
         QWidget::closeEvent(event);
     }
 
@@ -1411,7 +1423,24 @@ private:
             }
             updateTimeLabel();
         });
-        connect(timeline_, &QSlider::sliderReleased, this, [this] { previewFrame(); });
+        // Scrubbing: coalesce moves into ~11 previews/s while the handle is
+        // held, then one final frame on release. Each preview is ~50 ms now, so
+        // the handle still tracks the pointer between renders.
+        scrubTimer_ = new QTimer(this);
+        scrubTimer_->setSingleShot(true);
+        scrubTimer_->setInterval(90);
+        connect(scrubTimer_, &QTimer::timeout, this, [this] {
+            if (scrubbing_) previewFrame();
+        });
+        connect(timeline_, &QSlider::sliderMoved, this, [this] {
+            scrubbing_ = true;
+            scrubTimer_->start();
+        });
+        connect(timeline_, &QSlider::sliderReleased, this, [this] {
+            scrubbing_ = false;
+            scrubTimer_->stop();
+            previewFrame();
+        });
         connect(previewTime_, &QDoubleSpinBox::editingFinished, this,
                 [this] { syncTimelineFromTime(); });
         connect(previewTime_, &QDoubleSpinBox::valueChanged, this,
@@ -1697,6 +1726,7 @@ private:
         if (path.isEmpty() || !QFileInfo::exists(path)) {
             clipInfo_ = ClipInfo{};
             lastProbePath_.clear();
+            stopPreviewServer();
             clipNameLabel_->setText(QStringLiteral("未选择素材"));
             clipNameLabel_->setToolTip(QString());
             clipInfoLabel_->setText(QStringLiteral("未选择素材（可以把视频拖进窗口）"));
@@ -1782,46 +1812,18 @@ private:
             return;
         }
 
-        QDir().mkpath(repoRoot_ + QStringLiteral("/out"));
-        const QString source = repoRoot_ + QStringLiteral("/out/ui-original-src.png");
-        const QString output = repoRoot_ + QStringLiteral("/out/ui-original.png");
-        const QString matrix = source_->currentData().toString() == QStringLiteral("apple-log")
-                                   ? QStringLiteral("bt2020")
-                                   : QStringLiteral("bt709");
-        QStringList ffmpegArgs{
-            QStringLiteral("-v"),          QStringLiteral("error"),
-            QStringLiteral("-y"),          QStringLiteral("-ss"),
-            number(time),                  QStringLiteral("-i"),
-            inputEdit_->text(),            QStringLiteral("-frames:v"),
-            QStringLiteral("1"),           QStringLiteral("-vf"),
-            QStringLiteral("scale=in_color_matrix=") + matrix +
-                QStringLiteral(":in_range=tv:out_range=full"),
-            QStringLiteral("-pix_fmt"),    QStringLiteral("rgb48le"),
-            source};
-
-        QString outputText;
         QApplication::setOverrideCursor(Qt::WaitCursor);
-        bool ok = runSync(ffmpegEdit_->text(), ffmpegArgs, &outputText);
-        if (ok) {
-            QStringList args{QStringLiteral("convert"), QStringLiteral("--in"), source,
-                             QStringLiteral("--out"), output};
-            if (source_->currentData().toString() == QStringLiteral("apple-log")) {
-                args << QStringLiteral("--from") << QStringLiteral("apple-log");
-            }
-            ok = runSync(cliPath_, args, &outputText);
-        }
-        QApplication::restoreOverrideCursor();
-
-        if (!ok) {
-            appendLog(outputText);
+        QString log;
+        QImage image;
+        if (!previewFromServer(previewFrameIndex(), false, &image, &log) &&
+            !previewLegacy(false, &image, &log)) {
+            QApplication::restoreOverrideCursor();
+            appendLog(log);
             status_->setText(QStringLiteral("原片预览失败，日志里有原因"));
             return;
         }
-        const QImage image(output);
-        if (image.isNull()) {
-            status_->setText(QStringLiteral("原片读取失败"));
-            return;
-        }
+        QApplication::restoreOverrideCursor();
+
         originalImage_ = image;
         originalTime_ = time;
         preview_->setImage(image);
@@ -1837,16 +1839,260 @@ private:
         status_->setText(QStringLiteral("成片预览"));
     }
 
-    void previewFrame() {
-        if (!requireInput() || !ensureLut()) return;
+    // ---- preview server (D048) -------------------------------------------
+    //
+    // Spawning ffmpeg plus the CLI per preview frame cost 1.7-2.2 s (PNG round
+    // trip, LUT parse, D3D setup). One long-lived process decodes the clip into
+    // a bounded cache once, then a frame costs colour + texture only.
 
+    static QString quoted(const QString& value) {
+        if (!value.contains(QLatin1Char(' '))) return value;
+        return QLatin1Char('"') + value + QLatin1Char('"');
+    }
+
+    QString previewLookKey() const {
+        QString key = engineName() + QLatin1Char('|') + lutEdit_->text();
+        const QFileInfo lut(lutEdit_->text());
+        if (lut.exists()) {
+            key += QLatin1Char('|') + QString::number(lut.lastModified().toMSecsSinceEpoch());
+        }
+        if (spectralEngine()) key += QLatin1Char('|') + lookArgs(true).join(QLatin1Char(' '));
+        return key;
+    }
+
+    // Keep in step with the CLI defaults: the server takes all eleven values.
+    QString previewTextureLine() const {
+        return QStringLiteral("texture %1 1.4 1 %2 %3 0.006 0.72 %4 0.02 %5 0.004")
+            .arg(number(grain_->value()))
+            .arg(grainRate_->value())
+            .arg(number(halation_->value()))
+            .arg(number(glare_->value()))
+            .arg(number(diffusion_->value()));
+    }
+
+    int previewFrameIndex() const {
+        if (clipInfo_.fps <= 0.0) return 0;
+        const int frame = static_cast<int>(std::llround(previewTime_->value() * clipInfo_.fps));
+        const int last = clipInfo_.frames > 0 ? static_cast<int>(clipInfo_.frames) - 1 : 0;
+        return qBound(0, frame, last);
+    }
+
+    void stopPreviewServer() {
+        if (previewServer_ == nullptr) return;
+        previewServer_->disconnect(this);
+        if (previewServer_->state() != QProcess::NotRunning) {
+            previewServer_->write("quit\n");
+            previewServer_->waitForBytesWritten(200);
+            if (!previewServer_->waitForFinished(1000)) {
+                previewServer_->kill();
+                previewServer_->waitForFinished(1000);
+            }
+        }
+        previewServer_->deleteLater();
+        previewServer_ = nullptr;
+        previewLook_.clear();
+        previewClip_.clear();
+        previewTexture_.clear();
+        previewBackend_.clear();
+        previewWidth_ = 0;
+        previewHeight_ = 0;
+        previewFrames_ = 0;
+    }
+
+    bool sendPreview(const QString& line, QString* reply, int timeoutMs) {
+        if (previewServer_ == nullptr || previewServer_->state() != QProcess::Running) {
+            return false;
+        }
+        previewServer_->write(line.toUtf8() + '\n');
+        if (!previewServer_->waitForBytesWritten(2000)) return false;
+        QByteArray buffer;
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < timeoutMs) {
+            if (previewServer_->waitForReadyRead(100)) {
+                buffer += previewServer_->readAllStandardOutput();
+                const int newline = buffer.indexOf('\n');
+                if (newline >= 0) {
+                    if (reply != nullptr) {
+                        *reply = QString::fromUtf8(buffer.left(newline)).trimmed();
+                    }
+                    return true;
+                }
+            }
+            if (previewServer_->state() != QProcess::Running) return false;
+        }
+        return false;
+    }
+
+    bool ensurePreviewServer(QString* log) {
+        const QString clip = inputEdit_->text().trimmed();
+        if (clip.isEmpty() || !QFileInfo::exists(clip)) return false;
+        const bool debug = !qEnvironmentVariableIsEmpty("SPEKTRA_PREVIEW_DEBUG");
+        QElapsedTimer debugTimer;
+        debugTimer.start();
+        const auto mark = [&](const char* what) {
+            if (!debug) return;
+            std::fprintf(stderr, "preview %-10s %5lld ms\n", what,
+                         static_cast<long long>(debugTimer.elapsed()));
+            std::fflush(stderr);
+        };
+
+        if (previewServer_ == nullptr) {
+            previewServer_ = new QProcess(this);
+            previewServer_->setProcessChannelMode(QProcess::SeparateChannels);
+            previewServer_->setProgram(cliPath_);
+            previewServer_->setWorkingDirectory(repoRoot_);
+            const QString matrix =
+                source_->currentData().toString() == QStringLiteral("apple-log")
+                    ? QStringLiteral("bt2020")
+                    : QStringLiteral("bt709");
+            previewServer_->setArguments(
+                QStringList{QStringLiteral("preview"), QStringLiteral("--ffmpeg"),
+                            ffmpegEdit_->text(), QStringLiteral("--in-matrix"), matrix});
+            previewServer_->start();
+            if (!previewServer_->waitForStarted(4000)) {
+                if (log != nullptr) *log += QString::fromUtf8(previewServer_->readAllStandardError());
+                stopPreviewServer();
+                return false;
+            }
+        }
+        if (previewServer_->state() != QProcess::Running) {
+            stopPreviewServer();
+            return false;
+        }
+
+        const QString lookKey = previewLookKey();
+        if (lookKey != previewLook_) {
+            QStringList args{QStringLiteral("look")};
+            if (spectralEngine()) {
+                args << QStringLiteral("--engine") << engineName() << lookArgs(true);
+            } else {
+                args << QStringLiteral("--lut") << lutEdit_->text();
+            }
+            QStringList safe;
+            for (const QString& arg : args) safe << quoted(arg);
+            QString reply;
+            if (!sendPreview(safe.join(QLatin1Char(' ')), &reply, 20000) ||
+                !reply.startsWith(QStringLiteral("ok"))) {
+                if (log != nullptr) *log += QString::fromUtf8(previewServer_->readAllStandardError());
+                stopPreviewServer();
+                return false;
+            }
+            previewLook_ = lookKey;
+            previewTexture_.clear();
+            mark("look");
+        }
+
+        if (previewClip_ != clip) {
+            QString reply;
+            if (!sendPreview(QStringLiteral("open ") + quoted(clip), &reply, 120000) ||
+                !reply.startsWith(QStringLiteral("ok open"))) {
+                if (log != nullptr) *log += QString::fromUtf8(previewServer_->readAllStandardError());
+                stopPreviewServer();
+                return false;
+            }
+            const QStringList parts = reply.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            if (parts.size() >= 6) {
+                previewWidth_ = parts[2].toInt();
+                previewHeight_ = parts[3].toInt();
+                previewFrames_ = parts[4].toInt();
+            }
+            previewClip_ = clip;
+            mark("open");
+            if (debug) {
+                const QByteArray serverLog = previewServer_->readAllStandardError();
+                if (!serverLog.isEmpty()) std::fprintf(stderr, "%s", serverLog.constData());
+            }
+        }
+        return previewFrames_ > 0;
+    }
+
+    bool loadPreviewRgba(const QString& path, QImage* image, QString* log) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) return false;
+        const QByteArray data = file.readAll();
+        file.close();
+        const qsizetype expected = static_cast<qsizetype>(previewWidth_) * previewHeight_ * 4;
+        if (data.size() != expected) {
+            if (log != nullptr) {
+                *log += QStringLiteral("preview frame is %1 bytes, expected %2\n")
+                            .arg(data.size())
+                            .arg(expected);
+            }
+            return false;
+        }
+        const QImage view(reinterpret_cast<const uchar*>(data.constData()), previewWidth_,
+                          previewHeight_, previewWidth_ * 4, QImage::Format_RGBA8888);
+        *image = view.copy();
+        return !image->isNull();
+    }
+
+    bool previewFromServer(int frame, bool graded, QImage* image, QString* log) {
+        if (!ensurePreviewServer(log)) return false;
+        if (frame < 0 || frame >= previewFrames_) return false;
+
+        if (graded) {
+            const QString backend = textureGpu_ != nullptr && textureGpu_->isChecked()
+                                        ? QStringLiteral("gpu")
+                                        : QStringLiteral("cpu");
+            if (backend != previewBackend_) {
+                QString reply;
+                if (!sendPreview(QStringLiteral("backend ") + backend, &reply, 5000) ||
+                    !reply.startsWith(QStringLiteral("ok"))) {
+                    return false;
+                }
+                previewBackend_ = backend;
+            }
+            const QString textureLine = previewTextureLine();
+            if (textureLine != previewTexture_) {
+                QString reply;
+                if (!sendPreview(textureLine, &reply, 5000) ||
+                    !reply.startsWith(QStringLiteral("ok"))) {
+                    return false;
+                }
+                previewTexture_ = textureLine;
+            }
+        }
+
+        const QString raw = repoRoot_ + QStringLiteral("/out/ui-preview.rgba");
+        QFile::remove(raw);
+        const QString command =
+            QStringLiteral("%1 %2 %3")
+                .arg(graded ? QStringLiteral("frame") : QStringLiteral("raw"))
+                .arg(frame)
+                .arg(quoted(raw));
+        const bool debug = !qEnvironmentVariableIsEmpty("SPEKTRA_PREVIEW_DEBUG");
+        QElapsedTimer timer;
+        timer.start();
+        QString reply;
+        if (!sendPreview(command, &reply, 60000) || !reply.startsWith(QStringLiteral("ok"))) {
+            return false;
+        }
+        if (debug) {
+            std::fprintf(stderr, "preview frame    %5lld ms\n",
+                         static_cast<long long>(timer.elapsed()));
+        }
+        const bool loaded = loadPreviewRgba(raw, image, log);
+        if (debug) {
+            std::fprintf(stderr, "preview load     %5lld ms\n",
+                         static_cast<long long>(timer.elapsed()));
+        }
+        return loaded;
+    }
+
+    // The pre-D048 path: one ffmpeg extraction plus one CLI run. Still used when
+    // the server cannot start or the frame is outside the decode cache.
+    bool previewLegacy(bool graded, QImage* image, QString* log) {
         QDir().mkpath(repoRoot_ + QStringLiteral("/out"));
-        const QString source = repoRoot_ + QStringLiteral("/out/ui-preview-src.png");
-        const QString output = repoRoot_ + QStringLiteral("/out/ui-preview.png");
+        const QString suffix = graded ? QStringLiteral("preview") : QStringLiteral("original");
+        const QString source =
+            repoRoot_ + QStringLiteral("/out/ui-") + suffix + QStringLiteral("-src.png");
+        const QString output =
+            repoRoot_ + QStringLiteral("/out/ui-") + suffix + QStringLiteral(".png");
         const QString matrix =
-            source_->currentData().toString() == QStringLiteral("apple-log") ? QStringLiteral("bt2020")
-                                                                             : QStringLiteral("bt709");
-
+            source_->currentData().toString() == QStringLiteral("apple-log")
+                ? QStringLiteral("bt2020")
+                : QStringLiteral("bt709");
         QStringList ffmpegArgs{
             QStringLiteral("-v"),           QStringLiteral("error"),
             QStringLiteral("-y"),           QStringLiteral("-ss"),
@@ -1859,15 +2105,13 @@ private:
             source};
 
         QString outputText;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        status_->setText(spectralEngine()
-                             ? (engineName() == QStringLiteral("spectral-gpu")
-                                    ? QStringLiteral("光谱 GPU 预览中（D3D11 逐像素物理链）…")
-                                    : QStringLiteral("光谱预览中（逐像素物理链）…"))
-                             : QStringLiteral("LUT 预览中…"));
-        bool ok = runSync(ffmpegEdit_->text(), ffmpegArgs, &outputText);
-        if (ok) {
-            QStringList args{QStringLiteral("lut"), QStringLiteral("apply")};
+        if (!runSync(ffmpegEdit_->text(), ffmpegArgs, &outputText)) {
+            *log += outputText;
+            return false;
+        }
+        QStringList args;
+        if (graded) {
+            args << QStringLiteral("lut") << QStringLiteral("apply");
             if (spectralEngine()) {
                 args << QStringLiteral("--engine") << engineName();
                 args << lookArgs(true);
@@ -1876,28 +2120,67 @@ private:
             }
             args << QStringLiteral("--in") << source << QStringLiteral("--out") << output;
             args << textureArgs();
-            ok = runSync(cliPath_, args, &outputText);
+        } else {
+            args << QStringLiteral("convert") << QStringLiteral("--in") << source
+                 << QStringLiteral("--out") << output;
+            if (source_->currentData().toString() == QStringLiteral("apple-log")) {
+                args << QStringLiteral("--from") << QStringLiteral("apple-log");
+            }
         }
-        QApplication::restoreOverrideCursor();
+        if (!runSync(cliPath_, args, &outputText)) {
+            *log += outputText;
+            return false;
+        }
+        const QImage loaded(output);
+        if (loaded.isNull()) return false;
+        *image = loaded;
+        return true;
+    }
 
-        if (!ok) {
-            appendLog(outputText);
-            status_->setText(QStringLiteral("预览失败，日志里有原因"));
-            return;
+    void previewFrame() {
+        if (!requireInput() || !ensureLut()) return;
+        const int frame = previewFrameIndex();
+        // While scrubbing, never fall back to the slow single-frame path.
+        if (scrubbing_ && previewFrames_ > 0 && frame >= previewFrames_) return;
+
+        if (!scrubbing_) {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            status_->setText(spectralEngine()
+                                 ? (engineName() == QStringLiteral("spectral-gpu")
+                                        ? QStringLiteral("光谱 GPU 预览中（D3D11 逐像素物理链）…")
+                                        : QStringLiteral("光谱预览中（逐像素物理链）…"))
+                                 : QStringLiteral("LUT 预览中…"));
         }
-        const QImage image(output);
-        if (image.isNull()) {
-            status_->setText(QStringLiteral("预览图读取失败"));
-            return;
+        QString log;
+        QImage image;
+        QElapsedTimer timer;
+        timer.start();
+        bool fromServer = previewFromServer(frame, true, &image, &log);
+        if (!fromServer) {
+            fromServer = false;
+            if (!previewLegacy(true, &image, &log)) {
+                if (!scrubbing_) QApplication::restoreOverrideCursor();
+                appendLog(log);
+                status_->setText(QStringLiteral("预览失败，日志里有原因"));
+                return;
+            }
         }
+        if (!scrubbing_) QApplication::restoreOverrideCursor();
+
         preview_->setImage(image);
         gradedImage_ = image;
         originalImage_ = QImage();
         originalTime_ = -1.0;
-        status_->setText(QStringLiteral("预览：%1 × %2 @ %3 s")
+        const bool behindCache =
+            previewFrames_ > 0 && previewFrameIndex() >= previewFrames_;
+        status_->setText(QStringLiteral("预览：%1 × %2 @ %3 s · %4 ms%5")
                              .arg(image.width())
                              .arg(image.height())
-                             .arg(number(previewTime_->value(), 2)));
+                             .arg(number(previewTime_->value(), 2))
+                             .arg(timer.elapsed())
+                             .arg(fromServer ? QStringLiteral(" · 整段缓存")
+                                             : (behindCache ? QStringLiteral(" · 超出缓存，单帧")
+                                                            : QStringLiteral(" · 单帧"))));
     }
 
     bool spectralEngine() const {
@@ -2683,6 +2966,18 @@ private:
     double originalTime_ = -1.0;
     QString lastProbePath_;
 
+    // Preview server state (D048).
+    QProcess* previewServer_ = nullptr;
+    QTimer* scrubTimer_ = nullptr;
+    bool scrubbing_ = false;
+    QString previewLook_;
+    QString previewClip_;
+    QString previewTexture_;
+    QString previewBackend_;
+    int previewWidth_ = 0;
+    int previewHeight_ = 0;
+    int previewFrames_ = 0;
+
     QVector<RenderJob> jobs_;
     bool queueRunning_ = false;
     bool queueCanceled_ = false;
@@ -2730,5 +3025,21 @@ int main(int argc, char** argv) {
 
     MainWindow window;
     window.show();
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &window,
+                     [&window] { window.shutdownPreview(); });
+
+    // Diagnostic hook for scripts and CI: run one real preview through the same
+    // code the button uses, print the status line, then exit.
+    const QStringList arguments = QCoreApplication::arguments();
+    if (arguments.contains(QStringLiteral("--preview-selftest"))) {
+        QTimer::singleShot(400, &window, [&window] {
+            const QString first = window.previewSelfTest();
+            const QString second = window.previewSelfTest();
+            std::printf("selftest first:  %s\n", first.toUtf8().constData());
+            std::printf("selftest second: %s\n", second.toUtf8().constData());
+            std::fflush(stdout);
+            QCoreApplication::quit();
+        });
+    }
     return app.exec();
 }
