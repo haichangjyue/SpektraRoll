@@ -621,6 +621,26 @@
 
 ---
 
+## D045 · GPU 光谱后端可行性（Arc A750）
+
+- **日期**：2026-11-02
+- **背景**：CPU 光谱引擎 2.6 MP 约 1081 ms/帧，距实时还很远；本机有 Intel Arc A750。
+- **探针**（`tools/gpu-probe/`，D3D11 compute）：
+  - 2160×1214 = 2.6 MP，每线程 81 次 density/exp2/CMF 累加
+  - **0.63 ms/次**（5 次热身后，提交到 GPU 完成）
+  - 设备确认：Intel Arc A750，D3D_FEATURE_LEVEL_11_0
+- **决定**：
+  - 下一步把完整 `FilmModel::transformFrom` 移到 D3D11 compute（HLSL）
+  - 用 CPU 光谱输出做参考，要求 ≥60 dB；不通过就不接入
+  - 接口 `--engine spectral-gpu`，失败/非 Windows 自动回退 CPU `/ spectral`
+  - 颜色走 GPU 后，空间质感仍在 CPU/后续 GPU pass
+- **后果 / 预期**：
+  - 扫描阶段 GPU 比 CPU 快约三个数量级；完整链预计 5–20 ms/帧，足以实时预览
+  - 仍需上传曲线/密度表、处理 float32 精度、回读纹理；工作量大，分阶段做
+  - macOS 无 D3D11，继续用 CPU 光谱或 LUT
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
