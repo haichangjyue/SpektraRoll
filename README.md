@@ -83,7 +83,8 @@ launch; dropping several clips at once (or **批量加入**) enqueues one job pe
 The three-column layout and theme follow a study of
 [SpektraLab](https://github.com/JamesQiu2005/SpektraLab) (GPL-3.0); only layout
 structure and colour tokens were adopted, no source or assets copied. Notes:
-`docs/ui-analysis-spektralab.md`.
+`docs/ui-analysis-spektralab.md`. The canvas has an RGB histogram overlay and
+fit/100% zoom (wheel, drag, double-click, Ctrl+0/1).
 
 ![Render queue](docs/ui-queue.png)
 

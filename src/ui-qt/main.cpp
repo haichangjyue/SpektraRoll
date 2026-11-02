@@ -35,7 +35,9 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPalette>
 #include <QPlainTextEdit>
 #include <QProcess>
@@ -59,9 +61,11 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QVector>
+#include <QWheelEvent>
 #include <QWidget>
 
 #include <cmath>
+#include <functional>
 #include <utility>
 
 #ifdef _WIN32
@@ -112,6 +116,7 @@ QPushButton:pressed { background: #686762; }
 QPushButton:disabled { color: #777773; background: #3c3c3a; }
 QPushButton[accent="true"] { background: #645039; border: 1px solid #e1a95f; }
 QPushButton[accent="true"]:hover { background: #745c42; }
+QPushButton:checked { background: #645039; border: 1px solid #e1a95f; }
 QSlider::groove:horizontal { height: 2px; background: #5a5a57; border-radius: 1px; }
 QSlider::sub-page:horizontal { background: #e1a95f; border-radius: 1px; }
 QSlider::handle:horizontal { background: #faf8f4; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }
@@ -199,35 +204,234 @@ public:
     explicit PreviewView(QWidget* parent = nullptr) : QWidget(parent) {
         setMinimumSize(480, 300);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        setMouseTracking(true);
+        setCursor(Qt::ArrowCursor);
     }
 
     void setImage(const QImage& image) {
         image_ = image;
+        computeHistogram();
         update();
+        notifyZoom();
+    }
+
+    void fitToWindow() {
+        fit_ = true;
+        offset_ = QPointF();
+        setCursor(Qt::ArrowCursor);
+        update();
+        notifyZoom();
+    }
+
+    void setZoom(double zoom) {
+        if (image_.isNull()) return;
+        fit_ = false;
+        zoom_ = qBound(0.05, zoom, 8.0);
+        offset_ = QPointF();
+        clampOffset();
+        setCursor(Qt::OpenHandCursor);
+        update();
+        notifyZoom();
+    }
+
+    void setZoomCallback(std::function<void(double, bool)> callback) {
+        callback_ = std::move(callback);
+        notifyZoom();
     }
 
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
         painter.fillRect(rect(), QColor(0x5f, 0x5f, 0x5f));
-        const QRect area = rect().adjusted(18, 18, -18, -18);
+        const QRectF area = imageArea();
         if (image_.isNull()) {
             painter.setPen(QColor(0xd0, 0xcd, 0xc6));
-            painter.drawText(area, Qt::AlignCenter,
-                             QStringLiteral("导入视频，选择胶片与质感"));
+            painter.drawText(area, Qt::AlignCenter, QStringLiteral("导入视频，选择胶片与质感"));
             return;
         }
-        const QSize scaled = image_.size().scaled(area.size(), Qt::KeepAspectRatio);
-        const QRect target(
-            QPoint(area.x() + (area.width() - scaled.width()) / 2,
-                   area.y() + (area.height() - scaled.height()) / 2),
-            scaled);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+
+        const QRectF target = imageRect();
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, currentScale() < 1.0);
         painter.drawImage(target, image_);
+        painter.setPen(QColor(0, 0, 0, 70));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(target);
+        drawHistogram(painter);
+    }
+
+    void wheelEvent(QWheelEvent* event) override {
+        if (image_.isNull()) return;
+        const QRectF old = imageRect();
+        if (old.width() <= 0.0 || old.height() <= 0.0) return;
+        const QPointF cursor = event->position();
+        const double relX = qBound(0.0, (cursor.x() - old.left()) / old.width(), 1.0);
+        const double relY = qBound(0.0, (cursor.y() - old.top()) / old.height(), 1.0);
+        const double factor = event->angleDelta().y() >= 0 ? 1.15 : 1.0 / 1.15;
+        const double next = qBound(0.05, currentScale() * factor, 8.0);
+
+        fit_ = false;
+        zoom_ = next;
+        const QSizeF size(image_.width() * zoom_, image_.height() * zoom_);
+        const QPointF topLeft(cursor.x() - relX * size.width(),
+                              cursor.y() - relY * size.height());
+        offset_ = topLeft + QPointF(size.width() / 2.0, size.height() / 2.0) -
+                  imageArea().center();
+        clampOffset();
+        update();
+        setCursor(Qt::OpenHandCursor);
+        notifyZoom();
+        event->accept();
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton && !image_.isNull() && !fit_) {
+            panning_ = true;
+            lastPos_ = event->position();
+            setCursor(Qt::ClosedHandCursor);
+        }
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (!panning_) return;
+        offset_ += event->position() - lastPos_;
+        lastPos_ = event->position();
+        clampOffset();
+        update();
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if (event->button() != Qt::LeftButton) return;
+        panning_ = false;
+        setCursor(fit_ ? Qt::ArrowCursor : Qt::OpenHandCursor);
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override {
+        if (event->button() != Qt::LeftButton || image_.isNull()) return;
+        if (fit_) {
+            setZoom(1.0);
+        } else {
+            fitToWindow();
+        }
     }
 
 private:
+    QRectF imageArea() const { return QRectF(rect()).adjusted(18, 18, -18, -18); }
+
+    double fitScale() const {
+        if (image_.isNull()) return 1.0;
+        const QRectF area = imageArea();
+        return qMin(area.width() / image_.width(), area.height() / image_.height());
+    }
+
+    double currentScale() const { return fit_ ? fitScale() : zoom_; }
+
+    QRectF imageRect() const {
+        if (image_.isNull()) return QRectF();
+        const QSizeF size(image_.width() * currentScale(), image_.height() * currentScale());
+        const QPointF center = imageArea().center() + (fit_ ? QPointF() : offset_);
+        return QRectF(center.x() - size.width() / 2.0, center.y() - size.height() / 2.0,
+                      size.width(), size.height());
+    }
+
+    void clampOffset() {
+        if (image_.isNull()) {
+            offset_ = QPointF();
+            return;
+        }
+        const QRectF area = imageArea();
+        const QSizeF size(image_.width() * zoom_, image_.height() * zoom_);
+        const double maxX = qMax(0.0, (size.width() - area.width()) / 2.0);
+        const double maxY = qMax(0.0, (size.height() - area.height()) / 2.0);
+        offset_.setX(qBound(-maxX, offset_.x(), maxX));
+        offset_.setY(qBound(-maxY, offset_.y(), maxY));
+    }
+
+    void notifyZoom() {
+        if (!callback_) return;
+        if (image_.isNull()) {
+            callback_(0.0, true);
+            return;
+        }
+        callback_(fit_ ? fitScale() * 100.0 : zoom_ * 100.0, fit_);
+    }
+
+    void computeHistogram() {
+        histR_ = QVector<int>(256, 0);
+        histG_ = QVector<int>(256, 0);
+        histB_ = QVector<int>(256, 0);
+        histMax_ = 1;
+        if (image_.isNull()) return;
+        const QImage sample = image_.convertToFormat(QImage::Format_RGB32);
+        const int step = qMax(1, sample.width() / 700);
+        for (int y = 0; y < sample.height(); y += step) {
+            const QRgb* line = reinterpret_cast<const QRgb*>(sample.constScanLine(y));
+            for (int x = 0; x < sample.width(); x += step) {
+                const QRgb pixel = line[x];
+                ++histR_[qRed(pixel)];
+                ++histG_[qGreen(pixel)];
+                ++histB_[qBlue(pixel)];
+            }
+        }
+        for (int i = 0; i < 256; ++i) {
+            histMax_ = std::max(histMax_, histR_[i]);
+            histMax_ = std::max(histMax_, histG_[i]);
+            histMax_ = std::max(histMax_, histB_[i]);
+        }
+    }
+
+    void drawHistogram(QPainter& painter) const {
+        const QRectF box(width() - 18 - 190, 18, 190, 72);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(24, 24, 22, 195));
+        painter.drawRect(box);
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QColor(90, 90, 86));
+        painter.drawRect(box);
+
+        painter.setPen(QColor(255, 255, 255, 22));
+        for (int i = 1; i < 4; ++i) {
+            const double x = box.left() + box.width() * i / 4.0;
+            painter.drawLine(QPointF(x, box.top()), QPointF(x, box.bottom()));
+        }
+        painter.drawLine(QPointF(box.left(), box.center().y()),
+                         QPointF(box.right(), box.center().y()));
+
+        const auto channel = [&](const QVector<int>& histogram, const QColor& colour) {
+            QPainterPath path;
+            path.moveTo(box.left(), box.bottom());
+            for (int i = 0; i < 256; ++i) {
+                const double x = box.left() + box.width() * i / 255.0;
+                const double y = box.bottom() - box.height() * histogram[i] /
+                                                     static_cast<double>(histMax_);
+                path.lineTo(x, y);
+            }
+            path.lineTo(box.right(), box.bottom());
+            path.closeSubpath();
+            painter.setPen(QPen(colour, 1.0));
+            painter.setBrush(QColor(colour.red(), colour.green(), colour.blue(), 80));
+            painter.drawPath(path);
+        };
+        channel(histR_, QColor(230, 95, 85));
+        channel(histG_, QColor(110, 190, 115));
+        channel(histB_, QColor(95, 145, 215));
+
+        painter.setPen(QColor(205, 202, 195));
+        painter.setFont(QFont(QStringLiteral("Segoe UI"), 7));
+        painter.drawText(box.adjusted(6, 4, -6, -4), Qt::AlignTop | Qt::AlignLeft,
+                         QStringLiteral("RGB"));
+    }
+
     QImage image_;
+    bool fit_ = true;
+    double zoom_ = 1.0;
+    QPointF offset_;
+    bool panning_ = false;
+    QPointF lastPos_;
+    QVector<int> histR_;
+    QVector<int> histG_;
+    QVector<int> histB_;
+    int histMax_ = 1;
+    std::function<void(double, bool)> callback_;
 };
 
 // Collapsible rail section, ported from SpektraLab's Section.qml (thin rule,
@@ -668,9 +872,22 @@ private:
         clipNameLabel_->setObjectName(QStringLiteral("muted"));
         clipNameLabel_->setMaximumWidth(280);
         toolbarLayout->addWidget(clipNameLabel_);
-        auto* fitBadge = new QLabel(QStringLiteral("FIT"));
-        fitBadge->setObjectName(QStringLiteral("badge"));
-        toolbarLayout->addWidget(fitBadge);
+        zoomLabel_ = new QLabel(QStringLiteral("FIT"));
+        zoomLabel_->setObjectName(QStringLiteral("muted"));
+        zoomLabel_->setMinimumWidth(42);
+        zoomLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        fitButton_ = new QPushButton(QStringLiteral("适合"));
+        fitButton_->setCheckable(true);
+        fitButton_->setAutoExclusive(true);
+        fitButton_->setChecked(true);
+        fitButton_->setToolTip(QStringLiteral("适合窗口 · Ctrl+0 / 双击画布"));
+        zoom100Button_ = new QPushButton(QStringLiteral("100%"));
+        zoom100Button_->setCheckable(true);
+        zoom100Button_->setAutoExclusive(true);
+        zoom100Button_->setToolTip(QStringLiteral("物理像素 100% · Ctrl+1 / 双击画布"));
+        toolbarLayout->addWidget(zoomLabel_);
+        toolbarLayout->addWidget(fitButton_);
+        toolbarLayout->addWidget(zoom100Button_);
 
         // ---- left rail: materials, film, output ----------------------------
         auto* left = new QWidget;
@@ -790,9 +1007,6 @@ private:
         auto* infoLayout = new QHBoxLayout(infoBar);
         infoLayout->setContentsMargins(12, 0, 12, 0);
         infoLayout->addWidget(clipInfoLabel_, 1);
-        auto* infoBadge = new QLabel(QStringLiteral("适合窗口 · FIT"));
-        infoBadge->setObjectName(QStringLiteral("muted"));
-        infoLayout->addWidget(infoBadge);
 
         auto* timelineBar = new QWidget;
         timelineBar->setObjectName(QStringLiteral("infoBar"));
@@ -964,6 +1178,19 @@ private:
         connect(renderShortcut, &QShortcut::activated, this, [this] { startRender(); });
         auto* bakeShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+B")), this);
         connect(bakeShortcut, &QShortcut::activated, this, [this] { bakeLut(); });
+        auto* fitShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+0")), this);
+        connect(fitShortcut, &QShortcut::activated, this, [this] { preview_->fitToWindow(); });
+        auto* zoomShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+1")), this);
+        connect(zoomShortcut, &QShortcut::activated, this, [this] { preview_->setZoom(1.0); });
+
+        preview_->setZoomCallback([this](double percent, bool fit) {
+            zoomLabel_->setText(percent > 0.0 ? QString::number(percent, 'f', 0) + QLatin1Char('%')
+                                              : QStringLiteral("—"));
+            fitButton_->setChecked(fit);
+            zoom100Button_->setChecked(!fit && std::abs(percent - 100.0) < 0.5);
+        });
+        connect(fitButton_, &QPushButton::clicked, this, [this] { preview_->fitToWindow(); });
+        connect(zoom100Button_, &QPushButton::clicked, this, [this] { preview_->setZoom(1.0); });
 
         // Changing a bake parameter makes an auto-baked LUT stale; preview and
         // render rebake it once before running. A user-chosen LUT is left alone.
@@ -2131,11 +2358,14 @@ private:
     QPushButton* queueRemoveButton_ = nullptr;
     QPushButton* queueClearButton_ = nullptr;
     QPushButton* queueOpenButton_ = nullptr;
+    QPushButton* fitButton_ = nullptr;
+    QPushButton* zoom100Button_ = nullptr;
 
     QProgressBar* progress_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* clipNameLabel_ = nullptr;
     QLabel* clipInfoLabel_ = nullptr;
+    QLabel* zoomLabel_ = nullptr;
     QLabel* timeLabel_ = nullptr;
     QPlainTextEdit* log_ = nullptr;
     QSlider* timeline_ = nullptr;
