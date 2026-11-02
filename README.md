@@ -87,7 +87,8 @@ structure and colour tokens were adopted, no source or assets copied. Notes:
 fit/100% zoom (wheel, drag, double-click, Ctrl+0/1). The inspector is split the
 way a lab works: **显影前** holds exposure, film, DIR couplers and emulsion
 effects; **显影后** holds paper, scan mode, contrast, gamut compression and
-lens/scan diffusion.
+lens/scan diffusion. The film and paper pickers list 11 colour negative stocks
+and 6 papers; choosing a film auto-selects its recommended paper.
 
 ![Post-dev inspector](docs/ui-postdev.png)
 

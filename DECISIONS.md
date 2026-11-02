@@ -579,6 +579,25 @@
 
 ---
 
+## D043 · 胶片 / 相纸 profile 选择
+
+- **日期**：2026-11-02
+- **背景**：界面一直只能用 Portra 400 + Endura；上游 spektrafilm 实际带 28 个 film/paper profile。
+- **决定**：
+  - 把上游全部 profile JSON 原样导入 `data/profiles/`（CC BY-SA 4.0，NOTICE 更新）
+  - 界面动态扫描 profile 的 `info`：**只列出模型已验证的组合**
+    - 11 支彩色负片（D55）：Fujifilm C200 / Pro 400H / X-Tra 400；Kodak Ektar 100、Gold 200、Portra 160/400/800/Push1/Push2、Ultramax 400
+    - 6 种相纸：Fujifilm Crystal Archive II；Kodak Ektacolor Edge、Endura Premier、Portra Endura、Supra Endura、Ultra Endura
+  - 选胶片后自动切到它的 `target_print`（在可用相纸里）；`--film` / `--paper` 传给 `lut bake`
+  - 胶片/相纸文件名写进 LUT 配方签名，换材料会触发重新烘焙
+  - 暂不列出：4 支反转片（缺直扫路径）、Vision3 200T/500T（T 光源，M1 只支持 D55）、Vision3 250D/50D、Verita 200D 和 2383/2393（target 是电影印片，引擎还不能当相纸用）
+- **后果**：
+  - 界面从 1 对材料变成 **11 × 6** 的可用组合；C200 + Crystal Archive、Portra 800 + Endura 已实测能烘
+  - `data/profiles/` 增加约 5.5 MB 数据；NOTICE 明确标注可用/暂不可用
+  - 反转片和电影印片是后续单独的引擎工作，不在本轮混进来
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

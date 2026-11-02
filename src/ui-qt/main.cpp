@@ -675,6 +675,79 @@ private:
         return QFileInfo::exists(known) ? known : QString();
     }
 
+    // Colour negative stocks (D55) and papers the M1 engine supports. Slide
+    // films (positive) and T-illuminant Vision3 need the direct-scan path that
+    // is not wired yet, so they stay out of the catalogue for now.
+    void populateStocks() {
+        struct Stock {
+            QString path;
+            QString name;
+            QString target;
+        };
+        QVector<Stock> films;
+        QVector<Stock> papers;
+        const QDir dir(repoRoot_ + QStringLiteral("/data/profiles"));
+        const QFileInfoList files =
+            dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+        for (const QFileInfo& entry : files) {
+            if (entry.fileName() == QStringLiteral("neutral_print_filters.json")) continue;
+            QFile file(entry.absoluteFilePath());
+            if (!file.open(QIODevice::ReadOnly)) continue;
+            const QJsonObject info =
+                QJsonDocument::fromJson(file.readAll())
+                    .object()
+                    .value(QStringLiteral("info"))
+                    .toObject();
+            const QString support = info.value(QStringLiteral("support")).toString();
+            const QString stage = info.value(QStringLiteral("stage")).toString();
+            const QString type = info.value(QStringLiteral("type")).toString();
+            const QString illuminant =
+                info.value(QStringLiteral("reference_illuminant")).toString();
+            Stock stock{entry.absoluteFilePath(),
+                        info.value(QStringLiteral("name")).toString(entry.completeBaseName()),
+                        info.value(QStringLiteral("target_print")).toString()};
+            if (support == QStringLiteral("film") && stage == QStringLiteral("filming") &&
+                type == QStringLiteral("negative") && illuminant == QStringLiteral("D55")) {
+                films.append(stock);
+            } else if (support == QStringLiteral("paper")) {
+                papers.append(stock);
+            }
+        }
+
+        filmCombo_->blockSignals(true);
+        paperCombo_->blockSignals(true);
+        filmCombo_->clear();
+        paperCombo_->clear();
+        for (const Stock& stock : films) {
+            bool targetAvailable = stock.target.isEmpty();
+            for (const Stock& paper : papers) {
+                if (QFileInfo(paper.path).completeBaseName() == stock.target) {
+                    targetAvailable = true;
+                    break;
+                }
+            }
+            if (!targetAvailable) continue;  // e.g. Vision3 -> 2383 print film, not wired yet
+            filmCombo_->addItem(stock.name, stock.path);
+            filmCombo_->setItemData(filmCombo_->count() - 1, stock.target, Qt::UserRole + 1);
+        }
+        for (const Stock& stock : papers) {
+            paperCombo_->addItem(stock.name, stock.path);
+        }
+        filmCombo_->blockSignals(false);
+        paperCombo_->blockSignals(false);
+
+        const auto selectFile = [](QComboBox* combo, const QString& fileName) {
+            for (int i = 0; i < combo->count(); ++i) {
+                if (QFileInfo(combo->itemData(i).toString()).fileName() == fileName) {
+                    combo->setCurrentIndex(i);
+                    return;
+                }
+            }
+        };
+        selectFile(filmCombo_, QStringLiteral("kodak_portra_400.json"));
+        selectFile(paperCombo_, QStringLiteral("kodak_portra_endura.json"));
+    }
+
     QString ffprobePath() const {
         const QString ffmpeg = ffmpegEdit_ != nullptr ? ffmpegEdit_->text().trimmed() : QString();
         if (ffmpeg.isEmpty()) return QStringLiteral("ffprobe");
@@ -1083,9 +1156,9 @@ private:
             QStringLiteral("曝光发生在进入底片之前，决定场景落在特性曲线的哪一段。")));
 
         auto* negativeSection = new CollapsibleSection(QStringLiteral("底片"));
-        auto* filmValue = new QLabel(QStringLiteral("Kodak Portra 400"));
-        filmValue->setObjectName(QStringLiteral("materialValue"));
-        negativeSection->addWidget(labeledRow(QStringLiteral("胶片"), filmValue));
+        filmCombo_ = new QComboBox;
+        filmCombo_->setToolTip(QStringLiteral("彩色负片（D55）；反转片和 T 型灯光片尚未接通"));
+        negativeSection->addWidget(labeledRow(QStringLiteral("胶片"), filmCombo_));
         negativeSection->addWidget(couplers_);
         negativeSection->addWidget(noteLabel(
             QStringLiteral("DIR 耦合剂属于显影阶段；它不会改变颗粒，只影响层间抑制。")));
@@ -1115,9 +1188,9 @@ private:
         preScroll->setWidget(pre);
 
         auto* printSection = new CollapsibleSection(QStringLiteral("印片与扫描"));
-        auto* paperValue = new QLabel(QStringLiteral("Kodak Professional Portra Endura"));
-        paperValue->setObjectName(QStringLiteral("materialValue"));
-        printSection->addWidget(labeledRow(QStringLiteral("相纸"), paperValue));
+        paperCombo_ = new QComboBox;
+        paperCombo_->setToolTip(QStringLiteral("印片相纸；负片扫描也用它做密度参考"));
+        printSection->addWidget(labeledRow(QStringLiteral("相纸"), paperCombo_));
         printSection->addWidget(labeledRow(QStringLiteral("扫描方式"), scan_));
         printSection->addWidget(contrastRow);
         printSection->addWidget(gamut_);
@@ -1151,6 +1224,7 @@ private:
         postLayout->addWidget(viewSection);
         postLayout->addStretch(1);
         postScroll->setWidget(post);
+        populateStocks();
 
         log_ = new QPlainTextEdit;
         log_->setReadOnly(true);
@@ -1270,6 +1344,22 @@ private:
         });
         connect(scan_, &QComboBox::currentIndexChanged, this,
                 [this](int) { markLookChanged(); });
+        connect(filmCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+            const QString target = filmCombo_->currentData(Qt::UserRole + 1).toString();
+            if (!target.isEmpty()) {
+                for (int i = 0; i < paperCombo_->count(); ++i) {
+                    if (QFileInfo(paperCombo_->itemData(i).toString()).completeBaseName() ==
+                        target) {
+                        const QSignalBlocker blocker(paperCombo_);
+                        paperCombo_->setCurrentIndex(i);
+                        break;
+                    }
+                }
+            }
+            markLookChanged();
+        });
+        connect(paperCombo_, &QComboBox::currentIndexChanged, this,
+                [this](int) { markLookChanged(); });
         connect(trc_, &QComboBox::currentIndexChanged, this,
                 [this](int) { markLookChanged(); });
 
@@ -1359,6 +1449,20 @@ private:
                                  .toString());
 
         selectData(source_, settings.value(QStringLiteral("look/source"), QStringLiteral("apple-log")).toString());
+        const auto selectStock = [](QComboBox* combo, const QString& fileName) {
+            for (int i = 0; i < combo->count(); ++i) {
+                if (QFileInfo(combo->itemData(i).toString()).fileName() == fileName) {
+                    combo->setCurrentIndex(i);
+                    return;
+                }
+            }
+        };
+        selectStock(filmCombo_,
+                    settings.value(QStringLiteral("look/film"),
+                                   QStringLiteral("kodak_portra_400.json")).toString());
+        selectStock(paperCombo_,
+                    settings.value(QStringLiteral("look/paper"),
+                                   QStringLiteral("kodak_portra_endura.json")).toString());
         exposure_->setValue(settings.value(QStringLiteral("look/exposure"), 0.7).toDouble());
         selectData(scan_, settings.value(QStringLiteral("look/scan"), QStringLiteral("negative")).toString());
         contrast_->setValue(settings.value(QStringLiteral("look/contrast"), 1.15).toDouble());
@@ -1411,6 +1515,10 @@ private:
         settings.setValue(QStringLiteral("paths/lut"), lutEdit_->text());
         settings.setValue(QStringLiteral("paths/output"), outputEdit_->text());
         settings.setValue(QStringLiteral("look/source"), source_->currentData().toString());
+        settings.setValue(QStringLiteral("look/film"),
+                          QFileInfo(filmCombo_->currentData().toString()).fileName());
+        settings.setValue(QStringLiteral("look/paper"),
+                          QFileInfo(paperCombo_->currentData().toString()).fileName());
         settings.setValue(QStringLiteral("look/exposure"), exposure_->value());
         settings.setValue(QStringLiteral("look/scan"), scan_->currentData().toString());
         settings.setValue(QStringLiteral("look/contrast"), contrast_->value());
@@ -1459,7 +1567,9 @@ private:
         QDir().mkpath(QFileInfo(path).absolutePath());
 
         QStringList args{QStringLiteral("lut"), QStringLiteral("bake"), QStringLiteral("--input"),
-                         source_->currentData().toString(), QStringLiteral("--exposure"),
+                         source_->currentData().toString(), QStringLiteral("--film"),
+                         filmCombo_->currentData().toString(), QStringLiteral("--paper"),
+                         paperCombo_->currentData().toString(), QStringLiteral("--exposure"),
                          number(exposure_->value(), 2), QStringLiteral("--scan"),
                          scan_->currentData().toString(), QStringLiteral("--contrast"),
                          number(contrast_->value(), 2), QStringLiteral("--couplers"),
@@ -1517,14 +1627,16 @@ private:
     }
 
     QString lookSignature() const {
-        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7")
+        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9")
             .arg(source_->currentData().toString())
             .arg(number(exposure_->value(), 4))
             .arg(scan_->currentData().toString())
             .arg(number(contrast_->value(), 4))
             .arg(trc_->currentData().toString())
             .arg(couplers_->isChecked() ? QStringLiteral("dir") : QStringLiteral("-"))
-            .arg(gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("-"));
+            .arg(gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("-"))
+            .arg(QFileInfo(filmCombo_->currentData().toString()).fileName())
+            .arg(QFileInfo(paperCombo_->currentData().toString()).fileName());
     }
 
     QStringList textureArgs() const {
@@ -2400,6 +2512,8 @@ private:
     QLineEdit* outputEdit_ = nullptr;
 
     QComboBox* source_ = nullptr;
+    QComboBox* filmCombo_ = nullptr;
+    QComboBox* paperCombo_ = nullptr;
     QDoubleSpinBox* exposure_ = nullptr;
     QComboBox* scan_ = nullptr;
     QDoubleSpinBox* contrast_ = nullptr;
