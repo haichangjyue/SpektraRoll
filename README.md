@@ -84,7 +84,12 @@ The three-column layout and theme follow a study of
 [SpektraLab](https://github.com/JamesQiu2005/SpektraLab) (GPL-3.0); only layout
 structure and colour tokens were adopted, no source or assets copied. Notes:
 `docs/ui-analysis-spektralab.md`. The canvas has an RGB histogram overlay and
-fit/100% zoom (wheel, drag, double-click, Ctrl+0/1).
+fit/100% zoom (wheel, drag, double-click, Ctrl+0/1). The inspector is split the
+way a lab works: **显影前** holds exposure, film, DIR couplers and emulsion
+effects; **显影后** holds paper, scan mode, contrast, gamut compression and
+lens/scan diffusion.
+
+![Post-dev inspector](docs/ui-postdev.png)
 
 ![Render queue](docs/ui-queue.png)
 

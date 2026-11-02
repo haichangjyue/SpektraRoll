@@ -48,12 +48,15 @@
 - [x] **界面 v2**（D041）：三栏 + 顶栏、SpektraLab 灰/琥珀令牌、可折叠 Section、参数滑块；分析见 `docs/ui-analysis-spektralab.md`
 - [x] 队列页自动加宽，参数页保持窄栏；截图更新
 - [x] **直方图叠加** + **适合/100% 缩放**（滚轮缩放、拖拽平移、Ctrl+0/1、双击切换）
+- [x] **冲印流程分组**（D042）：右栏“显影前 / 显影后 / 队列 / 日志”；DIR 耦合剂与 OkLCh 色域压缩可在界面开关
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
 - [x] 截图：`docs/ui-preview.png`、`docs/ui-queue.png`
 - [ ] 直方图叠加、适合/100% 缩放、裁切、macOS 打包
 
 ![Qt UI](docs/ui-preview.png)
+
+![Post-dev inspector](docs/ui-postdev.png)
 
 ![Render queue](docs/ui-queue.png)
 

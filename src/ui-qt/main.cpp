@@ -102,6 +102,7 @@ QLabel#railTitle { font-size: 14px; font-weight: 700; }
 QLabel#muted { color: #b7b6b3; font-size: 10px; }
 QLabel#fieldLabel { color: #d6d4cf; font-size: 11px; }
 QLabel#note { color: #b7b6b3; font-size: 10px; }
+QLabel#materialValue { background: #484846; border-radius: 3px; padding: 4px 6px; color: #faf8f4; }
 QLabel#badge { color: #e1a95f; border: 1px solid #e1a95f; border-radius: 2px; padding: 1px 6px; font-size: 9px; letter-spacing: 1px; }
 QFrame#sectionLine { color: #4a4a48; background: #4a4a48; max-height: 1px; }
 QToolButton#sectionHeader { text-align: left; border: none; background: transparent; padding: 6px 10px; font-weight: 600; font-size: 12px; color: #faf8f4; }
@@ -950,6 +951,11 @@ private:
         codec_->addItem(QStringLiteral("HEVC（HDR 推荐）"), QStringLiteral("hevc"));
         codec_->addItem(QStringLiteral("ProRes 422 HQ"), QStringLiteral("prores"));
         outputSection->addWidget(labeledRow(QStringLiteral("编码"), codec_));
+        trc_ = new QComboBox;
+        trc_->addItem(QStringLiteral("SDR"), QStringLiteral("srgb"));
+        trc_->addItem(QStringLiteral("HDR · PQ"), QStringLiteral("pq"));
+        trc_->addItem(QStringLiteral("HDR · HLG"), QStringLiteral("hlg"));
+        outputSection->addWidget(labeledRow(QStringLiteral("色彩"), trc_));
         start_ = new QDoubleSpinBox;
         start_->setRange(0.0, 86400.0);
         start_->setDecimals(3);
@@ -1035,20 +1041,14 @@ private:
         centreLayout->addWidget(statusBar);
         centre->setMinimumWidth(480);
 
-        // ---- right rail: Parameters / Queue / Log --------------------------
+        // ---- right rail: pre-dev / post-dev / queue / log ------------------
         auto* exposureRow = new SliderRow(QStringLiteral("曝光"), -6.0, 6.0, 0.1, 2, 0.7,
                                           QStringLiteral(" EV"));
         exposure_ = exposureRow->spin();
-        scan_ = new QComboBox;
-        scan_->addItem(QStringLiteral("扫描负片（推荐）"), QStringLiteral("negative"));
-        scan_->addItem(QStringLiteral("印片"), QStringLiteral("print"));
-        auto* contrastRow = new SliderRow(QStringLiteral("反差"), 0.5, 2.0, 0.05, 2, 1.15);
-        contrast_ = contrastRow->spin();
-        trc_ = new QComboBox;
-        trc_->addItem(QStringLiteral("SDR"), QStringLiteral("srgb"));
-        trc_->addItem(QStringLiteral("HDR · PQ"), QStringLiteral("pq"));
-        trc_->addItem(QStringLiteral("HDR · HLG"), QStringLiteral("hlg"));
-
+        couplers_ = new QCheckBox(QStringLiteral("DIR 耦合剂（显影抑制）"));
+        couplers_->setChecked(true);
+        couplers_->setToolTip(
+            QStringLiteral("层间抑制：让饱和色更容易分开。Apple Log 默认开，sRGB 参考默认关。"));
         auto* grainRow = new SliderRow(QStringLiteral("颗粒"), 0.0, 1.0, 0.05, 2, 0.4);
         grain_ = grainRow->spin();
         grainRate_ = new QSpinBox;
@@ -1057,6 +1057,16 @@ private:
         grainRate_->setToolTip(QStringLiteral("一个颗粒场持续几帧；3 最接近真胶片，1 会闪。"));
         auto* halationRow = new SliderRow(QStringLiteral("光晕"), 0.0, 1.0, 0.05, 2, 0.45);
         halation_ = halationRow->spin();
+
+        scan_ = new QComboBox;
+        scan_->addItem(QStringLiteral("扫描负片（推荐）"), QStringLiteral("negative"));
+        scan_->addItem(QStringLiteral("印片"), QStringLiteral("print"));
+        auto* contrastRow = new SliderRow(QStringLiteral("反差"), 0.5, 2.0, 0.05, 2, 1.15);
+        contrast_ = contrastRow->spin();
+        gamut_ = new QCheckBox(QStringLiteral("输出色域压缩（OkLCh）"));
+        gamut_->setChecked(true);
+        gamut_->setToolTip(
+            QStringLiteral("把超出 sRGB 的颜色按 OkLCh 降饱和度收回来；Apple Log 默认开。"));
         auto* glareRow = new SliderRow(QStringLiteral("眩光"), 0.0, 1.0, 0.05, 2, 0.2);
         glare_ = glareRow->spin();
         auto* diffusionRow = new SliderRow(QStringLiteral("扩散"), 0.0, 1.0, 0.05, 2, 0.1);
@@ -1067,37 +1077,80 @@ private:
         previewTime_->setSuffix(QStringLiteral(" s"));
         previewTime_->setValue(1.5);
 
-        auto* lookSection = new CollapsibleSection(QStringLiteral("曝光与印片"));
-        lookSection->addWidget(exposureRow);
-        lookSection->addWidget(labeledRow(QStringLiteral("扫描方式"), scan_));
-        lookSection->addWidget(contrastRow);
-        lookSection->addWidget(labeledRow(QStringLiteral("输出"), trc_));
-        lookSection->addWidget(noteLabel(
-            QStringLiteral("扫描负片保留更多高光；反差默认 1.15，1.0 取回全部余量。")));
+        auto* exposureSection = new CollapsibleSection(QStringLiteral("曝光"));
+        exposureSection->addWidget(exposureRow);
+        exposureSection->addWidget(noteLabel(
+            QStringLiteral("曝光发生在进入底片之前，决定场景落在特性曲线的哪一段。")));
 
-        auto* textureSection = new CollapsibleSection(QStringLiteral("胶片质感"));
-        textureSection->addWidget(grainRow);
-        textureSection->addWidget(labeledRow(QStringLiteral("颗粒稳定度"), grainRate_));
-        textureSection->addWidget(halationRow);
-        textureSection->addWidget(glareRow);
-        textureSection->addWidget(diffusionRow);
+        auto* negativeSection = new CollapsibleSection(QStringLiteral("底片"));
+        auto* filmValue = new QLabel(QStringLiteral("Kodak Portra 400"));
+        filmValue->setObjectName(QStringLiteral("materialValue"));
+        negativeSection->addWidget(labeledRow(QStringLiteral("胶片"), filmValue));
+        negativeSection->addWidget(couplers_);
+        negativeSection->addWidget(noteLabel(
+            QStringLiteral("DIR 耦合剂属于显影阶段；它不会改变颗粒，只影响层间抑制。")));
 
-        auto* previewSection = new CollapsibleSection(QStringLiteral("预览"));
-        previewSection->addWidget(labeledRow(QStringLiteral("预览时间"), previewTime_));
-        previewSection->addWidget(noteLabel(
-            QStringLiteral("拖动画布下方时间线换帧；按住工具栏“看原片”可对比。")));
+        auto* emulsionSection = new CollapsibleSection(QStringLiteral("乳剂与背层"));
+        emulsionSection->addWidget(grainRow);
+        emulsionSection->addWidget(labeledRow(QStringLiteral("颗粒稳定度"), grainRate_));
+        emulsionSection->addWidget(halationRow);
+        emulsionSection->addWidget(noteLabel(
+            QStringLiteral("颗粒和光晕属于底片本身：颗粒在乳剂里，光晕来自背面层。")));
 
-        auto* paramsScroll = new QScrollArea;
-        paramsScroll->setWidgetResizable(true);
-        auto* params = new QWidget;
-        auto* paramsLayout = new QVBoxLayout(params);
-        paramsLayout->setContentsMargins(0, 0, 0, 0);
-        paramsLayout->setSpacing(0);
-        paramsLayout->addWidget(lookSection);
-        paramsLayout->addWidget(textureSection);
-        paramsLayout->addWidget(previewSection);
-        paramsLayout->addStretch(1);
-        paramsScroll->setWidget(params);
+        auto* preScroll = new QScrollArea;
+        preScroll->setWidgetResizable(true);
+        auto* pre = new QWidget;
+        auto* preLayout = new QVBoxLayout(pre);
+        preLayout->setContentsMargins(0, 0, 0, 0);
+        preLayout->setSpacing(0);
+        auto* preTitle = new QLabel(QStringLiteral("显影前 · 底片"));
+        preTitle->setObjectName(QStringLiteral("railTitle"));
+        preTitle->setFixedHeight(42);
+        preTitle->setContentsMargins(14, 0, 14, 0);
+        preLayout->addWidget(preTitle);
+        preLayout->addWidget(exposureSection);
+        preLayout->addWidget(negativeSection);
+        preLayout->addWidget(emulsionSection);
+        preLayout->addStretch(1);
+        preScroll->setWidget(pre);
+
+        auto* printSection = new CollapsibleSection(QStringLiteral("印片与扫描"));
+        auto* paperValue = new QLabel(QStringLiteral("Kodak Professional Portra Endura"));
+        paperValue->setObjectName(QStringLiteral("materialValue"));
+        printSection->addWidget(labeledRow(QStringLiteral("相纸"), paperValue));
+        printSection->addWidget(labeledRow(QStringLiteral("扫描方式"), scan_));
+        printSection->addWidget(contrastRow);
+        printSection->addWidget(gamut_);
+        printSection->addWidget(noteLabel(
+            QStringLiteral("显影后：密度被印到相纸或直接扫描。扫描负片保留更多高光；反差在扫描后应用。")));
+
+        auto* lensSection = new CollapsibleSection(QStringLiteral("镜头与扫描扩散"));
+        lensSection->addWidget(glareRow);
+        lensSection->addWidget(diffusionRow);
+        lensSection->addWidget(noteLabel(
+            QStringLiteral("眩光和扩散属于镜头/扫描环节，不改变底片和相纸的颜色。")));
+
+        auto* viewSection = new CollapsibleSection(QStringLiteral("视图"));
+        viewSection->addWidget(labeledRow(QStringLiteral("预览时间"), previewTime_));
+        viewSection->addWidget(noteLabel(
+            QStringLiteral("拖动画布下方时间线换帧；滚轮缩放，双击切换适合/100%。")));
+
+        auto* postScroll = new QScrollArea;
+        postScroll->setWidgetResizable(true);
+        auto* post = new QWidget;
+        auto* postLayout = new QVBoxLayout(post);
+        postLayout->setContentsMargins(0, 0, 0, 0);
+        postLayout->setSpacing(0);
+        auto* postTitle = new QLabel(QStringLiteral("显影后 · 印片与扫描"));
+        postTitle->setObjectName(QStringLiteral("railTitle"));
+        postTitle->setFixedHeight(42);
+        postTitle->setContentsMargins(14, 0, 14, 0);
+        postLayout->addWidget(postTitle);
+        postLayout->addWidget(printSection);
+        postLayout->addWidget(lensSection);
+        postLayout->addWidget(viewSection);
+        postLayout->addStretch(1);
+        postScroll->setWidget(post);
 
         log_ = new QPlainTextEdit;
         log_->setReadOnly(true);
@@ -1148,11 +1201,13 @@ private:
         queueLayout->addLayout(queueButtons);
 
         tabs_ = new QTabWidget;
-        tabs_->addTab(paramsScroll, QStringLiteral("参数"));
+        tabs_->addTab(preScroll, QStringLiteral("显影前"));
+        tabs_->addTab(postScroll, QStringLiteral("显影后"));
         tabs_->addTab(queueTab, QStringLiteral("队列"));
         tabs_->addTab(logTab, QStringLiteral("日志"));
         tabs_->setMinimumWidth(300);
         tabs_->setMaximumWidth(410);
+        queueTabIndex_ = 2;
 
         connect(previewButton_, &QPushButton::clicked, this, [this] { previewFrame(); });
         connect(renderButton_, &QPushButton::clicked, this, [this] { startRender(); });
@@ -1202,9 +1257,15 @@ private:
                 [this](double) { markLookChanged(); });
         connect(contrast_, &QDoubleSpinBox::valueChanged, this,
                 [this](double) { markLookChanged(); });
+        connect(couplers_, &QCheckBox::toggled, this, [this](bool) { markLookChanged(); });
+        connect(gamut_, &QCheckBox::toggled, this, [this](bool) { markLookChanged(); });
         connect(source_, &QComboBox::currentIndexChanged, this, [this](int) {
             originalImage_ = QImage();
             originalTime_ = -1.0;
+            const bool appleLog =
+                source_->currentData().toString() == QStringLiteral("apple-log");
+            couplers_->setChecked(appleLog);
+            gamut_->setChecked(appleLog);
             markLookChanged();
         });
         connect(scan_, &QComboBox::currentIndexChanged, this,
@@ -1260,11 +1321,12 @@ private:
 
         // The queue needs a wider rail than the parameter inspector.
         connect(tabs_, &QTabWidget::currentChanged, this, [this, splitter](int index) {
-            const bool queueTab = index == 1;
-            tabs_->setMinimumWidth(queueTab ? 480 : 300);
+            const bool queueTab = index == queueTabIndex_;
+            const bool logTab = index == queueTabIndex_ + 1;
+            tabs_->setMinimumWidth(queueTab ? 480 : (logTab ? 380 : 300));
             tabs_->setMaximumWidth(queueTab ? 700 : 410);
             QList<int> sizes = splitter->sizes();
-            const int target = queueTab ? 500 : 330;
+            const int target = queueTab ? 500 : (logTab ? 380 : 330);
             sizes[1] += sizes[2] - target;
             sizes[2] = target;
             if (sizes[1] < 420) {
@@ -1300,6 +1362,8 @@ private:
         exposure_->setValue(settings.value(QStringLiteral("look/exposure"), 0.7).toDouble());
         selectData(scan_, settings.value(QStringLiteral("look/scan"), QStringLiteral("negative")).toString());
         contrast_->setValue(settings.value(QStringLiteral("look/contrast"), 1.15).toDouble());
+        couplers_->setChecked(settings.value(QStringLiteral("look/couplers"), true).toBool());
+        gamut_->setChecked(settings.value(QStringLiteral("look/gamut"), true).toBool());
         selectData(trc_, settings.value(QStringLiteral("look/trc"), QStringLiteral("srgb")).toString());
 
         grain_->setValue(settings.value(QStringLiteral("texture/grain"), 0.4).toDouble());
@@ -1350,6 +1414,8 @@ private:
         settings.setValue(QStringLiteral("look/exposure"), exposure_->value());
         settings.setValue(QStringLiteral("look/scan"), scan_->currentData().toString());
         settings.setValue(QStringLiteral("look/contrast"), contrast_->value());
+        settings.setValue(QStringLiteral("look/couplers"), couplers_->isChecked());
+        settings.setValue(QStringLiteral("look/gamut"), gamut_->isChecked());
         settings.setValue(QStringLiteral("look/trc"), trc_->currentData().toString());
         settings.setValue(QStringLiteral("texture/grain"), grain_->value());
         settings.setValue(QStringLiteral("texture/grainRate"), grainRate_->value());
@@ -1396,7 +1462,11 @@ private:
                          source_->currentData().toString(), QStringLiteral("--exposure"),
                          number(exposure_->value(), 2), QStringLiteral("--scan"),
                          scan_->currentData().toString(), QStringLiteral("--contrast"),
-                         number(contrast_->value(), 2), QStringLiteral("--out"), path};
+                         number(contrast_->value(), 2), QStringLiteral("--couplers"),
+                         couplers_->isChecked() ? QStringLiteral("on") : QStringLiteral("off"),
+                         QStringLiteral("--gamut"),
+                         gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("off"),
+                         QStringLiteral("--out"), path};
         const QString trc = trc_->currentData().toString();
         if (trc == QStringLiteral("pq") || trc == QStringLiteral("hlg")) {
             args << QStringLiteral("--hdr") << trc << QStringLiteral("--peak")
@@ -1447,12 +1517,14 @@ private:
     }
 
     QString lookSignature() const {
-        return QStringLiteral("%1|%2|%3|%4|%5")
+        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7")
             .arg(source_->currentData().toString())
             .arg(number(exposure_->value(), 4))
             .arg(scan_->currentData().toString())
             .arg(number(contrast_->value(), 4))
-            .arg(trc_->currentData().toString());
+            .arg(trc_->currentData().toString())
+            .arg(couplers_->isChecked() ? QStringLiteral("dir") : QStringLiteral("-"))
+            .arg(gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("-"));
     }
 
     QStringList textureArgs() const {
@@ -1951,7 +2023,7 @@ private:
         }
         refreshQueueTable();
         saveQueue();
-        tabs_->setCurrentIndex(1);
+        tabs_->setCurrentIndex(queueTabIndex_);
         status_->setText(QStringLiteral("批量加入 %1 条任务，点“开始队列”").arg(videos.size()));
     }
 
@@ -1977,7 +2049,7 @@ private:
 
         refreshQueueTable();
         saveQueue();
-        tabs_->setCurrentIndex(1);
+        tabs_->setCurrentIndex(queueTabIndex_);
         queueTable_->selectRow(jobs_.size() - 1);
         status_->setText(QStringLiteral("已加入队列：") + QFileInfo(output).fileName());
     }
@@ -2089,7 +2161,7 @@ private:
         setBusy(true);
         cancelButton_->setEnabled(false);
         progress_->setRange(0, 0);
-        tabs_->setCurrentIndex(1);
+        tabs_->setCurrentIndex(queueTabIndex_);
         updateQueueButtons();
         etaTimer_->start();
         startNextJob();
@@ -2332,6 +2404,8 @@ private:
     QComboBox* scan_ = nullptr;
     QDoubleSpinBox* contrast_ = nullptr;
     QComboBox* trc_ = nullptr;
+    QCheckBox* couplers_ = nullptr;
+    QCheckBox* gamut_ = nullptr;
 
     QDoubleSpinBox* grain_ = nullptr;
     QSpinBox* grainRate_ = nullptr;
@@ -2384,6 +2458,7 @@ private:
     bool queueCanceled_ = false;
     int activeJob_ = -1;
     int lutCounter_ = 0;
+    int queueTabIndex_ = 0;
     QProcess* queueProcess_ = nullptr;
     QTimer* etaTimer_ = nullptr;
 
