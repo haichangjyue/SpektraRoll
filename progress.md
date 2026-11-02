@@ -833,6 +833,7 @@ X:\agent\SpektraRoll\
 - ❌ **不要用 `ffprobe -show_entries side_data=rotation` 做几何探测**：这支素材要 3.8 s；一次 `-show_streams` 42 ms 就够（D048）
 - ❌ **不要在拖动时间线时走单帧慢路径**：超出缓存的帧在拖动中直接跳过，松手才允许回退（D048）
 - ❌ **不要把预览缓存设成无上限**：默认 1024 MB / 最长边 1600，长片会吃掉内存（D048）
+- ❌ **不要在只包含 `<string>` 的地方用 `std::hash` / `std::function`**：libstdc++ 会间接带入 `<functional>`，libc++（macOS）不会，只有 macOS CI 会编译失败（D053）
 
 ---
 

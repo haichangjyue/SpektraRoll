@@ -2105,8 +2105,14 @@ std::string proxyCachePath(const std::string& clip, const Geometry& info, int wi
     const std::string key = clip + "|" + std::to_string(stamp) + "|" +
                             std::to_string(info.width) + "x" + std::to_string(info.height) + "|" +
                             std::to_string(width) + "x" + std::to_string(height);
-    const std::string hash = std::to_string(std::hash<std::string>{}(key));
-    return "out/ui-proxy/" + hash + ".mov";
+    // FNV-1a rather than std::hash: <functional> is not pulled in by <string>
+    // on libc++, and the macOS build caught it (D053).
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char ch : key) {
+        hash ^= ch;
+        hash *= 1099511628211ULL;
+    }
+    return "out/ui-proxy/" + std::to_string(hash) + ".mov";
 }
 
 bool buildProxy(const Server& server, const std::string& clip, int width, int height,
