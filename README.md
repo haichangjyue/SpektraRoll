@@ -80,6 +80,11 @@ jobs one after another with per-job progress bars, elapsed/remaining time, and
 status. The queue is saved to `out/ui-queue/queue.json` and restored on the next
 launch; dropping several clips at once (or **批量加入**) enqueues one job per clip.
 
+The three-column layout and theme follow a study of
+[SpektraLab](https://github.com/JamesQiu2005/SpektraLab) (GPL-3.0); only layout
+structure and colour tokens were adopted, no source or assets copied. Notes:
+`docs/ui-analysis-spektralab.md`.
+
 ![Render queue](docs/ui-queue.png)
 
 ## Use

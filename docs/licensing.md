@@ -73,7 +73,17 @@ disclaimer of non-affiliation, and never in the product name, logo or domain.
 (VideoToolbox, Media Foundation) and royalty-free codecs (ProRes, DNxHR) over
 shipping our own H.264/HEVC.
 
+## UI reference
+
+The Qt desktop shell's three-column layout and colour tokens were studied from
+**SpektraLab** (`JamesQiu2005/SpektraLab`, GPL-3.0-or-later, commit `3915092`).
+Only layout structure, dimensions and colour values were reimplemented in Qt
+Widgets; no QML source, icons or screenshots were copied. The analysis and the
+exact sources are in `docs/ui-analysis-spektralab.md`. The SpektraLab name and
+icon remain their trademark and must not be used for this product.
+
 ## Attribution we must keep
 
 - Andrea Volpato — spektrafilm, the film process model and the measured profiles.
 - Any contributor whose profile or measured data we ship.
+- SpektraLab — UI layout / visual language reference (GPL-3.0, no code copied).

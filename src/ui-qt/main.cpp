@@ -20,7 +20,9 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGroupBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -34,6 +36,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPainter>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProgressBar>
@@ -52,6 +55,7 @@
 #include <QTableWidgetItem>
 #include <QTextCursor>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QVector>
@@ -80,6 +84,61 @@ QString exeSuffix() {
     return QString();
 #endif
 }
+
+// Palette ported from SpektraLab (windows_UI/qml/Theme.qml, GPL-3.0): grey
+// ground around the canvas, dark card rails, warm amber accent, compact type.
+const char* kStyleSheet = R"QSS(
+QWidget { background-color: #2d2d2c; color: #faf8f4; font-family: "Segoe UI"; font-size: 12px; }
+QWidget#toolbar { background: #2d2d2c; border-bottom: 1px solid #4a4a48; }
+QWidget#centre { background: #5f5f5f; }
+QWidget#infoBar { background: #2d2d2c; border-top: 1px solid #3f3f3d; }
+QLabel { background: transparent; }
+QLabel#appTitle { font-size: 14px; font-weight: 700; }
+QLabel#railTitle { font-size: 14px; font-weight: 700; }
+QLabel#muted { color: #b7b6b3; font-size: 10px; }
+QLabel#fieldLabel { color: #d6d4cf; font-size: 11px; }
+QLabel#note { color: #b7b6b3; font-size: 10px; }
+QLabel#badge { color: #e1a95f; border: 1px solid #e1a95f; border-radius: 2px; padding: 1px 6px; font-size: 9px; letter-spacing: 1px; }
+QFrame#sectionLine { color: #4a4a48; background: #4a4a48; max-height: 1px; }
+QToolButton#sectionHeader { text-align: left; border: none; background: transparent; padding: 6px 10px; font-weight: 600; font-size: 12px; color: #faf8f4; }
+QToolButton#sectionHeader:hover { background: #343432; }
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #484846; border: 1px solid #565653; border-radius: 3px; padding: 2px 5px; min-height: 20px; selection-background-color: #e1a95f; selection-color: #252523; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #e1a95f; }
+QDoubleSpinBox#valueSpin { background: transparent; border: none; padding: 0; min-height: 16px; color: #b7b6b3; }
+QComboBox QAbstractItemView { background: #2d2d2c; border: 1px solid #565653; selection-background-color: #e1a95f; selection-color: #252523; outline: 0; }
+QPushButton { background: #484846; border: none; border-radius: 3px; padding: 4px 10px; min-height: 22px; }
+QPushButton:hover { background: #585752; }
+QPushButton:pressed { background: #686762; }
+QPushButton:disabled { color: #777773; background: #3c3c3a; }
+QPushButton[accent="true"] { background: #645039; border: 1px solid #e1a95f; }
+QPushButton[accent="true"]:hover { background: #745c42; }
+QSlider::groove:horizontal { height: 2px; background: #5a5a57; border-radius: 1px; }
+QSlider::sub-page:horizontal { background: #e1a95f; border-radius: 1px; }
+QSlider::handle:horizontal { background: #faf8f4; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }
+QTabWidget::pane { border: none; border-top: 1px solid #4a4a48; }
+QTabBar::tab { background: transparent; color: #b7b6b3; padding: 8px 12px; border: none; }
+QTabBar::tab:selected { color: #faf8f4; border-bottom: 2px solid #e1a95f; }
+QTabBar::tab:hover { color: #faf8f4; }
+QHeaderView::section { background: #2d2d2c; color: #b7b6b3; border: none; border-bottom: 1px solid #4a4a48; padding: 5px; }
+QTableWidget { background: #252523; alternate-background-color: #2b2b29; gridline-color: #3a3a38; border: none; }
+QTableWidget::item { padding: 3px; }
+QTableWidget::item:selected { background: #4a4a46; color: #faf8f4; }
+QProgressBar { background: #1e1e1c; border: none; border-radius: 2px; text-align: center; color: #faf8f4; font-size: 10px; }
+QProgressBar::chunk { background: #e1a95f; border-radius: 2px; }
+QPlainTextEdit { background: #1e1e1c; border: 1px solid #3a3a38; color: #d8d6d1; selection-background-color: #e1a95f; }
+QScrollArea { border: none; }
+QScrollBar:vertical { background: #2d2d2c; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: #5a5a57; min-height: 24px; border-radius: 5px; }
+QScrollBar::handle:vertical:hover { background: #6a6a66; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QScrollBar:horizontal { background: #2d2d2c; height: 10px; margin: 0; }
+QScrollBar::handle:horizontal { background: #5a5a57; min-width: 24px; border-radius: 5px; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QSplitter::handle { background: #4a4a48; width: 1px; }
+QCheckBox { spacing: 6px; }
+QToolTip { background: #1e1e1c; color: #faf8f4; border: 1px solid #565653; padding: 3px; }
+)QSS";
 
 QString number(double value, int decimals = 3) {
     return QString::number(value, 'f', decimals);
@@ -150,21 +209,128 @@ public:
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
-        painter.fillRect(rect(), QColor(18, 18, 20));
+        painter.fillRect(rect(), QColor(0x5f, 0x5f, 0x5f));
+        const QRect area = rect().adjusted(18, 18, -18, -18);
         if (image_.isNull()) {
-            painter.setPen(QColor(150, 150, 150));
-            painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("预览会显示在这里"));
+            painter.setPen(QColor(0xd0, 0xcd, 0xc6));
+            painter.drawText(area, Qt::AlignCenter,
+                             QStringLiteral("导入视频，选择胶片与质感"));
             return;
         }
-        const QSize scaled = image_.size().scaled(size(), Qt::KeepAspectRatio);
-        const QRect target(QPoint((width() - scaled.width()) / 2, (height() - scaled.height()) / 2),
-                           scaled);
+        const QSize scaled = image_.size().scaled(area.size(), Qt::KeepAspectRatio);
+        const QRect target(
+            QPoint(area.x() + (area.width() - scaled.width()) / 2,
+                   area.y() + (area.height() - scaled.height()) / 2),
+            scaled);
         painter.setRenderHint(QPainter::SmoothPixmapTransform);
         painter.drawImage(target, image_);
     }
 
 private:
     QImage image_;
+};
+
+// Collapsible rail section, ported from SpektraLab's Section.qml (thin rule,
+// bold title, disclosure triangle, compact 10-12 px labels).
+class CollapsibleSection : public QWidget {
+public:
+    explicit CollapsibleSection(const QString& title, bool expanded = true,
+                                QWidget* parent = nullptr)
+        : QWidget(parent) {
+        auto* outer = new QVBoxLayout(this);
+        outer->setContentsMargins(0, 0, 0, 0);
+        outer->setSpacing(0);
+
+        auto* line = new QFrame;
+        line->setObjectName(QStringLiteral("sectionLine"));
+        line->setFrameShape(QFrame::HLine);
+        outer->addWidget(line);
+
+        header_ = new QToolButton;
+        header_->setObjectName(QStringLiteral("sectionHeader"));
+        header_->setText(title);
+        header_->setCheckable(true);
+        header_->setChecked(expanded);
+        header_->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+        header_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        header_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        outer->addWidget(header_);
+
+        content_ = new QWidget;
+        contentLayout_ = new QVBoxLayout(content_);
+        contentLayout_->setContentsMargins(14, 4, 14, 12);
+        contentLayout_->setSpacing(8);
+        content_->setVisible(expanded);
+        outer->addWidget(content_);
+
+        connect(header_, &QToolButton::toggled, this, [this](bool on) {
+            content_->setVisible(on);
+            header_->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
+        });
+    }
+
+    void addWidget(QWidget* widget) { contentLayout_->addWidget(widget); }
+    void addLayout(QLayout* layout) { contentLayout_->addLayout(layout); }
+
+private:
+    QToolButton* header_ = nullptr;
+    QWidget* content_ = nullptr;
+    QVBoxLayout* contentLayout_ = nullptr;
+};
+
+// Label + numeric readout on one line, thin slider underneath: the adjustment
+// row SpektraLab uses for every parameter.
+class SliderRow : public QWidget {
+public:
+    SliderRow(const QString& label, double minimum, double maximum, double step, int decimals,
+              double value, const QString& suffix = QString(), QWidget* parent = nullptr)
+        : QWidget(parent) {
+        auto* outer = new QVBoxLayout(this);
+        outer->setContentsMargins(0, 0, 0, 0);
+        outer->setSpacing(1);
+
+        auto* header = new QHBoxLayout;
+        header->setContentsMargins(0, 0, 0, 0);
+        auto* name = new QLabel(label);
+        spin_ = new QDoubleSpinBox;
+        spin_->setObjectName(QStringLiteral("valueSpin"));
+        spin_->setRange(minimum, maximum);
+        spin_->setSingleStep(step);
+        spin_->setDecimals(decimals);
+        spin_->setSuffix(suffix);
+        spin_->setValue(value);
+        spin_->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        spin_->setAlignment(Qt::AlignRight);
+        spin_->setFixedWidth(66);
+        header->addWidget(name);
+        header->addStretch(1);
+        header->addWidget(spin_);
+
+        slider_ = new QSlider(Qt::Horizontal);
+        slider_->setRange(0, static_cast<int>(std::lround((maximum - minimum) * 1000.0)));
+        slider_->setSingleStep(std::max(1, static_cast<int>(std::lround(step * 1000.0))));
+        slider_->setValue(
+            static_cast<int>(std::lround((value - minimum) * 1000.0)));
+        slider_->setFixedHeight(16);
+
+        connect(slider_, &QSlider::valueChanged, this, [this, minimum](int position) {
+            spin_->setValue(minimum + position / 1000.0);
+        });
+        connect(spin_, &QDoubleSpinBox::valueChanged, this, [this, minimum](double v) {
+            const QSignalBlocker blocker(slider_);
+            slider_->setValue(static_cast<int>(std::lround((v - minimum) * 1000.0)));
+        });
+
+        outer->addLayout(header);
+        outer->addWidget(slider_);
+    }
+
+    QDoubleSpinBox* spin() const { return spin_; }
+    QSlider* slider() const { return slider_; }
+
+private:
+    QDoubleSpinBox* spin_ = nullptr;
+    QSlider* slider_ = nullptr;
 };
 
 class MainWindow : public QWidget {
@@ -433,34 +599,113 @@ private:
     }
 
     void buildUi() {
-        auto* left = new QWidget;
-        auto* leftLayout = new QVBoxLayout(left);
-        leftLayout->setContentsMargins(12, 12, 12, 12);
-
         inputEdit_ = new QLineEdit;
         ffmpegEdit_ = new QLineEdit;
         lutEdit_ = new QLineEdit;
         outputEdit_ = new QLineEdit;
 
-        auto* sourceGroup = new QGroupBox(QStringLiteral("素材与胶片"));
-        auto* sourceForm = new QFormLayout(sourceGroup);
-        sourceForm->addRow(QStringLiteral("视频素材"), pathRow(inputEdit_, QStringLiteral("选择视频"),
-                                                            QStringLiteral("视频 (*.mov *.mp4 *.mxf)")));
+        const auto labeledRow = [](const QString& text, QWidget* field) {
+            auto* holder = new QWidget;
+            auto* layout = new QVBoxLayout(holder);
+            layout->setContentsMargins(0, 0, 0, 0);
+            layout->setSpacing(3);
+            auto* label = new QLabel(text);
+            label->setObjectName(QStringLiteral("fieldLabel"));
+            layout->addWidget(label);
+            layout->addWidget(field);
+            return holder;
+        };
+        const auto noteLabel = [](const QString& text) {
+            auto* label = new QLabel(text);
+            label->setObjectName(QStringLiteral("note"));
+            label->setWordWrap(true);
+            return label;
+        };
+
+        // ---- top toolbar ---------------------------------------------------
+        auto* toolbar = new QWidget;
+        toolbar->setObjectName(QStringLiteral("toolbar"));
+        toolbar->setFixedHeight(42);
+        auto* toolbarLayout = new QHBoxLayout(toolbar);
+        toolbarLayout->setContentsMargins(12, 0, 12, 0);
+        toolbarLayout->setSpacing(6);
+
+        auto* titleBlock = new QWidget;
+        auto* titleLayout = new QVBoxLayout(titleBlock);
+        titleLayout->setContentsMargins(0, 0, 0, 0);
+        titleLayout->setSpacing(0);
+        auto* appTitle = new QLabel(QStringLiteral("SpektraRoll"));
+        appTitle->setObjectName(QStringLiteral("appTitle"));
+        auto* appSub = new QLabel(QStringLiteral("胶片与印片"));
+        appSub->setObjectName(QStringLiteral("muted"));
+        titleLayout->addWidget(appTitle);
+        titleLayout->addWidget(appSub);
+        toolbarLayout->addWidget(titleBlock);
+        toolbarLayout->addSpacing(14);
+
+        previewButton_ = new QPushButton(QStringLiteral("预览一帧"));
+        previewButton_->setToolTip(QStringLiteral("Ctrl+P"));
+        compareButton_ = new QPushButton(QStringLiteral("按住看原片"));
+        compareButton_->setToolTip(QStringLiteral("按住显示未套胶片的原片，松开回到成片"));
+        renderButton_ = new QPushButton(QStringLiteral("渲染整段"));
+        renderButton_->setProperty("accent", true);
+        renderButton_->setToolTip(QStringLiteral("Ctrl+R"));
+        addQueueButton_ = new QPushButton(QStringLiteral("加入队列"));
+        addQueueButton_->setToolTip(QStringLiteral("把当前参数冻结成一个队列任务"));
+        cancelButton_ = new QPushButton(QStringLiteral("取消"));
+        cancelButton_->setEnabled(false);
+        auto* folderButton = new QPushButton(QStringLiteral("输出文件夹"));
+        folderButton->setToolTip(QStringLiteral("在资源管理器里打开输出文件所在目录"));
+        toolbarLayout->addWidget(previewButton_);
+        toolbarLayout->addWidget(compareButton_);
+        toolbarLayout->addWidget(renderButton_);
+        toolbarLayout->addWidget(addQueueButton_);
+        toolbarLayout->addWidget(cancelButton_);
+        toolbarLayout->addWidget(folderButton);
+        toolbarLayout->addStretch(1);
+
+        clipNameLabel_ = new QLabel(QStringLiteral("未选择素材"));
+        clipNameLabel_->setObjectName(QStringLiteral("muted"));
+        clipNameLabel_->setMaximumWidth(280);
+        toolbarLayout->addWidget(clipNameLabel_);
+        auto* fitBadge = new QLabel(QStringLiteral("FIT"));
+        fitBadge->setObjectName(QStringLiteral("badge"));
+        toolbarLayout->addWidget(fitBadge);
+
+        // ---- left rail: materials, film, output ----------------------------
+        auto* left = new QWidget;
+        auto* leftLayout = new QVBoxLayout(left);
+        leftLayout->setContentsMargins(0, 0, 0, 0);
+        leftLayout->setSpacing(0);
+        auto* leftTitle = new QLabel(QStringLiteral("胶片与印相"));
+        leftTitle->setObjectName(QStringLiteral("railTitle"));
+        leftTitle->setFixedHeight(42);
+        leftTitle->setContentsMargins(14, 0, 14, 0);
+        leftLayout->addWidget(leftTitle);
+
+        auto* materialSection = new CollapsibleSection(QStringLiteral("素材"));
+        materialSection->addWidget(labeledRow(
+            QStringLiteral("视频素材"),
+            pathRow(inputEdit_, QStringLiteral("选择视频"),
+                    QStringLiteral("视频 (*.mov *.mp4 *.mxf)"))));
         source_ = new QComboBox;
         source_->addItem(QStringLiteral("Apple Log（iPhone）"), QStringLiteral("apple-log"));
         source_->addItem(QStringLiteral("普通 SDR 素材"), QStringLiteral("srgb"));
-        sourceForm->addRow(QStringLiteral("画面类型"), source_);
-        sourceForm->addRow(QStringLiteral("ffmpeg"),
-                           pathRow(ffmpegEdit_, QStringLiteral("选择 ffmpeg"),
-                                   QStringLiteral("ffmpeg (ffmpeg.exe)")));
+        materialSection->addWidget(labeledRow(QStringLiteral("画面类型"), source_));
+        materialSection->addWidget(labeledRow(
+            QStringLiteral("ffmpeg"),
+            pathRow(ffmpegEdit_, QStringLiteral("选择 ffmpeg"),
+                    QStringLiteral("ffmpeg (ffmpeg.exe)"))));
+        leftLayout->addWidget(materialSection);
 
+        auto* filmSection = new CollapsibleSection(QStringLiteral("胶片与相纸"));
         auto* lutRow = new QWidget;
         auto* lutLayout = new QHBoxLayout(lutRow);
         lutLayout->setContentsMargins(0, 0, 0, 0);
-        lutEdit_ = new QLineEdit;
+        lutLayout->setSpacing(4);
         lutLayout->addWidget(lutEdit_, 1);
         auto* lutBrowse = new QPushButton(QStringLiteral("…"));
-        lutBrowse->setFixedWidth(34);
+        lutBrowse->setFixedWidth(28);
         connect(lutBrowse, &QPushButton::clicked, this, [this] {
             const QString file = QFileDialog::getOpenFileName(
                 this, QStringLiteral("选择 LUT"), lutEdit_->text(), QStringLiteral("LUT (*.cube)"));
@@ -474,126 +719,226 @@ private:
         bakeButton_ = new QPushButton(QStringLiteral("烘焙"));
         connect(bakeButton_, &QPushButton::clicked, this, [this] { bakeLut(); });
         lutLayout->addWidget(bakeButton_);
-        sourceForm->addRow(QStringLiteral("LUT"), lutRow);
+        filmSection->addWidget(labeledRow(QStringLiteral("LUT"), lutRow));
+        filmSection->addWidget(noteLabel(
+            QStringLiteral("曝光、扫描方式和反差在右侧“参数”栏；改完点烘焙，或直接预览时会自动更新。")));
+        leftLayout->addWidget(filmSection);
 
-        exposure_ = new QDoubleSpinBox;
-        exposure_->setRange(-6.0, 6.0);
-        exposure_->setSingleStep(0.1);
-        exposure_->setDecimals(2);
-        sourceForm->addRow(QStringLiteral("曝光 (EV)"), exposure_);
-
-        scan_ = new QComboBox;
-        scan_->addItem(QStringLiteral("扫描负片（推荐）"), QStringLiteral("negative"));
-        scan_->addItem(QStringLiteral("印片"), QStringLiteral("print"));
-        sourceForm->addRow(QStringLiteral("扫描方式"), scan_);
-
-        contrast_ = new QDoubleSpinBox;
-        contrast_->setRange(0.5, 2.0);
-        contrast_->setSingleStep(0.05);
-        contrast_->setDecimals(2);
-        sourceForm->addRow(QStringLiteral("反差"), contrast_);
-
-        trc_ = new QComboBox;
-        trc_->addItem(QStringLiteral("SDR"), QStringLiteral("srgb"));
-        trc_->addItem(QStringLiteral("HDR · PQ"), QStringLiteral("pq"));
-        trc_->addItem(QStringLiteral("HDR · HLG"), QStringLiteral("hlg"));
-        sourceForm->addRow(QStringLiteral("输出"), trc_);
-
-        auto* textureGroup = new QGroupBox(QStringLiteral("胶片质感"));
-        auto* textureForm = new QFormLayout(textureGroup);
-        grain_ = amountSpin(0.4);
-        textureForm->addRow(QStringLiteral("颗粒"), grain_);
-        grainRate_ = new QSpinBox;
-        grainRate_->setRange(1, 12);
-        grainRate_->setValue(3);
-        grainRate_->setToolTip(QStringLiteral("一个颗粒场持续几帧；3 最接近真胶片，1 会闪。"));
-        textureForm->addRow(QStringLiteral("颗粒稳定度"), grainRate_);
-        halation_ = amountSpin(0.45);
-        textureForm->addRow(QStringLiteral("光晕"), halation_);
-        glare_ = amountSpin(0.2);
-        textureForm->addRow(QStringLiteral("眩光"), glare_);
-        diffusion_ = amountSpin(0.1);
-        textureForm->addRow(QStringLiteral("扩散"), diffusion_);
-
-        auto* renderGroup = new QGroupBox(QStringLiteral("渲染"));
-        auto* renderForm = new QFormLayout(renderGroup);
-        renderForm->addRow(QStringLiteral("输出文件"),
-                           saveRow(outputEdit_, QStringLiteral("保存视频"),
-                                   QStringLiteral("视频 (*.mov *.mp4)")));
+        auto* outputSection = new CollapsibleSection(QStringLiteral("输出"));
+        outputSection->addWidget(labeledRow(
+            QStringLiteral("输出文件"),
+            saveRow(outputEdit_, QStringLiteral("保存视频"), QStringLiteral("视频 (*.mov *.mp4)"))));
         codec_ = new QComboBox;
         codec_->addItem(QStringLiteral("H.264"), QStringLiteral("h264"));
-        codec_->addItem(QStringLiteral("HEVC (HDR 推荐)"), QStringLiteral("hevc"));
+        codec_->addItem(QStringLiteral("HEVC（HDR 推荐）"), QStringLiteral("hevc"));
         codec_->addItem(QStringLiteral("ProRes 422 HQ"), QStringLiteral("prores"));
-        renderForm->addRow(QStringLiteral("编码"), codec_);
-
+        outputSection->addWidget(labeledRow(QStringLiteral("编码"), codec_));
         start_ = new QDoubleSpinBox;
         start_->setRange(0.0, 86400.0);
         start_->setDecimals(3);
         start_->setSuffix(QStringLiteral(" s"));
-        renderForm->addRow(QStringLiteral("起始"), start_);
-
+        outputSection->addWidget(labeledRow(QStringLiteral("起始"), start_));
         frames_ = new QSpinBox;
         frames_->setRange(0, 10000000);
         frames_->setSpecialValueText(QStringLiteral("整段"));
-        renderForm->addRow(QStringLiteral("帧数"), frames_);
-
+        outputSection->addWidget(labeledRow(QStringLiteral("帧数"), frames_));
         segment_ = new QSpinBox;
         segment_->setRange(0, 3600);
         segment_->setSuffix(QStringLiteral(" s"));
         segment_->setSpecialValueText(QStringLiteral("不分段"));
         segment_->setValue(10);
-        renderForm->addRow(QStringLiteral("分段长度"), segment_);
-
+        outputSection->addWidget(labeledRow(QStringLiteral("分段长度"), segment_));
         resume_ = new QCheckBox(QStringLiteral("中断后续渲（跳过已完成的段）"));
         resume_->setChecked(true);
-        renderForm->addRow(QString(), resume_);
+        outputSection->addWidget(resume_);
+        leftLayout->addWidget(outputSection);
+        leftLayout->addStretch(1);
 
+        auto* leftScroll = new QScrollArea;
+        leftScroll->setWidgetResizable(true);
+        leftScroll->setWidget(left);
+        leftScroll->setMinimumWidth(238);
+        leftScroll->setMaximumWidth(310);
+
+        // ---- centre: canvas, metadata, timeline, status --------------------
+        preview_ = new PreviewView;
+        clipInfoLabel_ = new QLabel(QStringLiteral("未选择素材"));
+        clipInfoLabel_->setObjectName(QStringLiteral("muted"));
+        clipInfoLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+        timeline_ = new QSlider(Qt::Horizontal);
+        timeline_->setRange(0, 0);
+        timeline_->setToolTip(QStringLiteral("拖动到某一帧，松开后刷新预览"));
+        timeLabel_ = new QLabel(QStringLiteral("--"));
+        timeLabel_->setObjectName(QStringLiteral("muted"));
+        timeLabel_->setMinimumWidth(180);
+        timeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+        status_ = new QLabel(QStringLiteral("就绪"));
+        status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        progress_ = new QProgressBar;
+        progress_->setRange(0, 100);
+        progress_->setValue(0);
+        progress_->setTextVisible(true);
+        progress_->setFixedWidth(180);
+        progress_->setFixedHeight(14);
+
+        auto* infoBar = new QWidget;
+        infoBar->setObjectName(QStringLiteral("infoBar"));
+        infoBar->setFixedHeight(28);
+        auto* infoLayout = new QHBoxLayout(infoBar);
+        infoLayout->setContentsMargins(12, 0, 12, 0);
+        infoLayout->addWidget(clipInfoLabel_, 1);
+        auto* infoBadge = new QLabel(QStringLiteral("适合窗口 · FIT"));
+        infoBadge->setObjectName(QStringLiteral("muted"));
+        infoLayout->addWidget(infoBadge);
+
+        auto* timelineBar = new QWidget;
+        timelineBar->setObjectName(QStringLiteral("infoBar"));
+        timelineBar->setFixedHeight(34);
+        auto* timelineLayout = new QHBoxLayout(timelineBar);
+        timelineLayout->setContentsMargins(12, 4, 12, 4);
+        timelineLayout->addWidget(timeline_, 1);
+        timelineLayout->addWidget(timeLabel_);
+
+        auto* statusBar = new QWidget;
+        statusBar->setObjectName(QStringLiteral("infoBar"));
+        statusBar->setFixedHeight(30);
+        auto* statusLayout = new QHBoxLayout(statusBar);
+        statusLayout->setContentsMargins(12, 0, 12, 0);
+        statusLayout->addWidget(status_, 1);
+        statusLayout->addWidget(progress_);
+
+        auto* centre = new QWidget;
+        centre->setObjectName(QStringLiteral("centre"));
+        auto* centreLayout = new QVBoxLayout(centre);
+        centreLayout->setContentsMargins(0, 0, 0, 0);
+        centreLayout->setSpacing(0);
+        centreLayout->addWidget(preview_, 1);
+        centreLayout->addWidget(infoBar);
+        centreLayout->addWidget(timelineBar);
+        centreLayout->addWidget(statusBar);
+        centre->setMinimumWidth(480);
+
+        // ---- right rail: Parameters / Queue / Log --------------------------
+        auto* exposureRow = new SliderRow(QStringLiteral("曝光"), -6.0, 6.0, 0.1, 2, 0.7,
+                                          QStringLiteral(" EV"));
+        exposure_ = exposureRow->spin();
+        scan_ = new QComboBox;
+        scan_->addItem(QStringLiteral("扫描负片（推荐）"), QStringLiteral("negative"));
+        scan_->addItem(QStringLiteral("印片"), QStringLiteral("print"));
+        auto* contrastRow = new SliderRow(QStringLiteral("反差"), 0.5, 2.0, 0.05, 2, 1.15);
+        contrast_ = contrastRow->spin();
+        trc_ = new QComboBox;
+        trc_->addItem(QStringLiteral("SDR"), QStringLiteral("srgb"));
+        trc_->addItem(QStringLiteral("HDR · PQ"), QStringLiteral("pq"));
+        trc_->addItem(QStringLiteral("HDR · HLG"), QStringLiteral("hlg"));
+
+        auto* grainRow = new SliderRow(QStringLiteral("颗粒"), 0.0, 1.0, 0.05, 2, 0.4);
+        grain_ = grainRow->spin();
+        grainRate_ = new QSpinBox;
+        grainRate_->setRange(1, 12);
+        grainRate_->setValue(3);
+        grainRate_->setToolTip(QStringLiteral("一个颗粒场持续几帧；3 最接近真胶片，1 会闪。"));
+        auto* halationRow = new SliderRow(QStringLiteral("光晕"), 0.0, 1.0, 0.05, 2, 0.45);
+        halation_ = halationRow->spin();
+        auto* glareRow = new SliderRow(QStringLiteral("眩光"), 0.0, 1.0, 0.05, 2, 0.2);
+        glare_ = glareRow->spin();
+        auto* diffusionRow = new SliderRow(QStringLiteral("扩散"), 0.0, 1.0, 0.05, 2, 0.1);
+        diffusion_ = diffusionRow->spin();
         previewTime_ = new QDoubleSpinBox;
         previewTime_->setRange(0.0, 86400.0);
         previewTime_->setDecimals(2);
         previewTime_->setSuffix(QStringLiteral(" s"));
         previewTime_->setValue(1.5);
-        renderForm->addRow(QStringLiteral("预览时间"), previewTime_);
 
-        auto* buttons = new QHBoxLayout;
-        previewButton_ = new QPushButton(QStringLiteral("预览一帧"));
-        compareButton_ = new QPushButton(QStringLiteral("按住看原片"));
-        compareButton_->setToolTip(QStringLiteral("按住显示未套胶片的原片，松开回到成片"));
-        previewButton_->setToolTip(QStringLiteral("Ctrl+P"));
-        renderButton_ = new QPushButton(QStringLiteral("渲染整段"));
-        renderButton_->setDefault(true);
-        renderButton_->setToolTip(QStringLiteral("Ctrl+R"));
-        cancelButton_ = new QPushButton(QStringLiteral("取消"));
-        cancelButton_->setEnabled(false);
-        buttons->addWidget(previewButton_);
-        buttons->addWidget(compareButton_);
+        auto* lookSection = new CollapsibleSection(QStringLiteral("曝光与印片"));
+        lookSection->addWidget(exposureRow);
+        lookSection->addWidget(labeledRow(QStringLiteral("扫描方式"), scan_));
+        lookSection->addWidget(contrastRow);
+        lookSection->addWidget(labeledRow(QStringLiteral("输出"), trc_));
+        lookSection->addWidget(noteLabel(
+            QStringLiteral("扫描负片保留更多高光；反差默认 1.15，1.0 取回全部余量。")));
 
-        auto* buttons2 = new QHBoxLayout;
-        addQueueButton_ = new QPushButton(QStringLiteral("加入队列"));
-        addQueueButton_->setToolTip(QStringLiteral("把当前参数冻结成一个队列任务"));
-        buttons2->addWidget(renderButton_);
-        buttons2->addWidget(addQueueButton_);
+        auto* textureSection = new CollapsibleSection(QStringLiteral("胶片质感"));
+        textureSection->addWidget(grainRow);
+        textureSection->addWidget(labeledRow(QStringLiteral("颗粒稳定度"), grainRate_));
+        textureSection->addWidget(halationRow);
+        textureSection->addWidget(glareRow);
+        textureSection->addWidget(diffusionRow);
 
-        auto* buttons3 = new QHBoxLayout;
-        auto* folderButton = new QPushButton(QStringLiteral("输出文件夹"));
-        folderButton->setToolTip(QStringLiteral("在资源管理器里打开输出文件所在目录"));
-        buttons3->addWidget(cancelButton_);
-        buttons3->addWidget(folderButton);
+        auto* previewSection = new CollapsibleSection(QStringLiteral("预览"));
+        previewSection->addWidget(labeledRow(QStringLiteral("预览时间"), previewTime_));
+        previewSection->addWidget(noteLabel(
+            QStringLiteral("拖动画布下方时间线换帧；按住工具栏“看原片”可对比。")));
 
-        progress_ = new QProgressBar;
-        progress_->setRange(0, 100);
-        progress_->setValue(0);
-        progress_->setTextVisible(true);
-        status_ = new QLabel(QStringLiteral("就绪"));
-        status_->setWordWrap(true);
+        auto* paramsScroll = new QScrollArea;
+        paramsScroll->setWidgetResizable(true);
+        auto* params = new QWidget;
+        auto* paramsLayout = new QVBoxLayout(params);
+        paramsLayout->setContentsMargins(0, 0, 0, 0);
+        paramsLayout->setSpacing(0);
+        paramsLayout->addWidget(lookSection);
+        paramsLayout->addWidget(textureSection);
+        paramsLayout->addWidget(previewSection);
+        paramsLayout->addStretch(1);
+        paramsScroll->setWidget(params);
 
-        leftLayout->addWidget(sourceGroup);
-        leftLayout->addWidget(textureGroup);
-        leftLayout->addWidget(renderGroup);
-        leftLayout->addLayout(buttons);
-        leftLayout->addLayout(buttons2);
-        leftLayout->addLayout(buttons3);
-        leftLayout->addStretch(1);
+        log_ = new QPlainTextEdit;
+        log_->setReadOnly(true);
+        log_->setMaximumBlockCount(4000);
+        log_->setPlaceholderText(QStringLiteral("渲染日志会显示在这里"));
+        auto* logTab = new QWidget;
+        auto* logLayout = new QVBoxLayout(logTab);
+        logLayout->setContentsMargins(8, 8, 8, 8);
+        logLayout->addWidget(log_);
+
+        queueTable_ = new QTableWidget(0, 5);
+        queueTable_->setHorizontalHeaderLabels({QStringLiteral("素材"), QStringLiteral("输出"),
+                                                QStringLiteral("状态"), QStringLiteral("进度"),
+                                                QStringLiteral("用时 / 剩余")});
+        queueTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+        queueTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+        queueTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        queueTable_->verticalHeader()->setVisible(false);
+        queueTable_->verticalHeader()->setDefaultSectionSize(34);
+        queueTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+        queueTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        queueTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+        queueTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Fixed);
+        queueTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+        queueTable_->setColumnWidth(3, 120);
+
+        auto* queueButtons = new QHBoxLayout;
+        queueStartButton_ = new QPushButton(QStringLiteral("开始队列"));
+        queueStartButton_->setProperty("accent", true);
+        queueStopButton_ = new QPushButton(QStringLiteral("停止"));
+        batchAddButton_ = new QPushButton(QStringLiteral("批量加入"));
+        batchAddButton_->setToolTip(QStringLiteral("一次选择多个视频，按当前参数和 LUT 排成多条任务"));
+        queueRemoveButton_ = new QPushButton(QStringLiteral("移除"));
+        queueClearButton_ = new QPushButton(QStringLiteral("清空完成"));
+        queueOpenButton_ = new QPushButton(QStringLiteral("打开输出"));
+        queueButtons->addWidget(queueStartButton_);
+        queueButtons->addWidget(queueStopButton_);
+        queueButtons->addWidget(batchAddButton_);
+        queueButtons->addStretch(1);
+        queueButtons->addWidget(queueRemoveButton_);
+        queueButtons->addWidget(queueClearButton_);
+        queueButtons->addWidget(queueOpenButton_);
+
+        auto* queueTab = new QWidget;
+        auto* queueLayout = new QVBoxLayout(queueTab);
+        queueLayout->setContentsMargins(8, 8, 8, 8);
+        queueLayout->addWidget(queueTable_, 1);
+        queueLayout->addLayout(queueButtons);
+
+        tabs_ = new QTabWidget;
+        tabs_->addTab(paramsScroll, QStringLiteral("参数"));
+        tabs_->addTab(queueTab, QStringLiteral("队列"));
+        tabs_->addTab(logTab, QStringLiteral("日志"));
+        tabs_->setMinimumWidth(300);
+        tabs_->setMaximumWidth(410);
 
         connect(previewButton_, &QPushButton::clicked, this, [this] { previewFrame(); });
         connect(renderButton_, &QPushButton::clicked, this, [this] { startRender(); });
@@ -640,99 +985,6 @@ private:
         connect(trc_, &QComboBox::currentIndexChanged, this,
                 [this](int) { markLookChanged(); });
 
-        auto* scroll = new QScrollArea;
-        scroll->setWidgetResizable(true);
-        scroll->setWidget(left);
-
-        auto* leftColumn = new QWidget;
-        auto* leftColumnLayout = new QVBoxLayout(leftColumn);
-        leftColumnLayout->setContentsMargins(0, 0, 0, 0);
-        leftColumnLayout->addWidget(scroll, 1);
-        auto* footer = new QWidget;
-        auto* footerLayout = new QVBoxLayout(footer);
-        footerLayout->setContentsMargins(8, 0, 8, 8);
-        footerLayout->addWidget(progress_);
-        footerLayout->addWidget(status_);
-        leftColumnLayout->addWidget(footer);
-        leftColumn->setMinimumWidth(430);
-
-        preview_ = new PreviewView;
-        clipInfoLabel_ = new QLabel(QStringLiteral("未选择素材"));
-        clipInfoLabel_->setStyleSheet(QStringLiteral("color: #b8b8b8;"));
-        clipInfoLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-
-        timeline_ = new QSlider(Qt::Horizontal);
-        timeline_->setRange(0, 0);
-        timeline_->setToolTip(QStringLiteral("拖动到某一帧，松开后刷新预览"));
-        timeLabel_ = new QLabel(QStringLiteral("--"));
-        timeLabel_->setMinimumWidth(150);
-        timeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-        auto* timelineRow = new QWidget;
-        auto* timelineLayout = new QHBoxLayout(timelineRow);
-        timelineLayout->setContentsMargins(0, 0, 0, 0);
-        timelineLayout->addWidget(timeline_, 1);
-        timelineLayout->addWidget(timeLabel_);
-
-        log_ = new QPlainTextEdit;
-        log_->setReadOnly(true);
-        log_->setMaximumBlockCount(4000);
-        log_->setPlaceholderText(QStringLiteral("渲染日志会显示在这里"));
-
-        auto* previewTab = new QWidget;
-        auto* previewLayout = new QVBoxLayout(previewTab);
-        previewLayout->setContentsMargins(0, 0, 0, 0);
-        previewLayout->addWidget(preview_, 1);
-        previewLayout->addWidget(clipInfoLabel_);
-        previewLayout->addWidget(timelineRow);
-
-        queueTable_ = new QTableWidget(0, 5);
-        queueTable_->setHorizontalHeaderLabels({QStringLiteral("素材"), QStringLiteral("输出"),
-                                                QStringLiteral("状态"), QStringLiteral("进度"),
-                                                QStringLiteral("用时 / 剩余")});
-        queueTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-        queueTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-        queueTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        queueTable_->verticalHeader()->setVisible(false);
-        queueTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-        queueTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-        queueTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-        queueTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Fixed);
-        queueTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-        queueTable_->setColumnWidth(3, 150);
-
-        auto* queueButtons = new QHBoxLayout;
-        queueStartButton_ = new QPushButton(QStringLiteral("开始队列"));
-        queueStopButton_ = new QPushButton(QStringLiteral("停止"));
-        batchAddButton_ = new QPushButton(QStringLiteral("批量加入"));
-        batchAddButton_->setToolTip(QStringLiteral("一次选择多个视频，按当前参数和 LUT 排成多条任务"));
-        queueRemoveButton_ = new QPushButton(QStringLiteral("移除选中"));
-        queueClearButton_ = new QPushButton(QStringLiteral("清空已完成"));
-        queueOpenButton_ = new QPushButton(QStringLiteral("打开输出"));
-        queueButtons->addWidget(queueStartButton_);
-        queueButtons->addWidget(queueStopButton_);
-        queueButtons->addWidget(batchAddButton_);
-        queueButtons->addStretch(1);
-        queueButtons->addWidget(queueRemoveButton_);
-        queueButtons->addWidget(queueClearButton_);
-        queueButtons->addWidget(queueOpenButton_);
-
-        auto* queueTab = new QWidget;
-        auto* queueLayout = new QVBoxLayout(queueTab);
-        queueLayout->setContentsMargins(0, 0, 0, 0);
-        queueLayout->addWidget(queueTable_, 1);
-        queueLayout->addLayout(queueButtons);
-
-        tabs_ = new QTabWidget;
-        tabs_->addTab(previewTab, QStringLiteral("预览"));
-        tabs_->addTab(queueTab, QStringLiteral("渲染队列"));
-
-        auto* right = new QWidget;
-        auto* rightLayout = new QVBoxLayout(right);
-        rightLayout->addWidget(tabs_, 4);
-        rightLayout->addWidget(log_, 1);
-        rightLayout->setContentsMargins(0, 0, 8, 8);
-
         connect(queueStartButton_, &QPushButton::clicked, this, [this] { startQueue(); });
         connect(queueStopButton_, &QPushButton::clicked, this, [this] { stopQueue(); });
         connect(queueRemoveButton_, &QPushButton::clicked, this, [this] { removeSelectedJob(); });
@@ -770,15 +1022,36 @@ private:
                 [this](double) { syncTimelineFromTime(); });
 
         auto* splitter = new QSplitter(Qt::Horizontal);
-        splitter->addWidget(leftColumn);
-        splitter->addWidget(right);
+        splitter->addWidget(leftScroll);
+        splitter->addWidget(centre);
+        splitter->addWidget(tabs_);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        splitter->setSizes({460, 860});
+        splitter->setStretchFactor(2, 0);
+        splitter->setSizes({250, 820, 330});
+        splitter->setChildrenCollapsible(false);
 
-        auto* layout = new QHBoxLayout(this);
+        // The queue needs a wider rail than the parameter inspector.
+        connect(tabs_, &QTabWidget::currentChanged, this, [this, splitter](int index) {
+            const bool queueTab = index == 1;
+            tabs_->setMinimumWidth(queueTab ? 480 : 300);
+            tabs_->setMaximumWidth(queueTab ? 700 : 410);
+            QList<int> sizes = splitter->sizes();
+            const int target = queueTab ? 500 : 330;
+            sizes[1] += sizes[2] - target;
+            sizes[2] = target;
+            if (sizes[1] < 420) {
+                sizes[0] = qMax(200, sizes[0] - (420 - sizes[1]));
+                sizes[1] = 420;
+            }
+            splitter->setSizes(sizes);
+        });
+
+        auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
-        layout->addWidget(splitter);
+        layout->setSpacing(0);
+        layout->addWidget(toolbar);
+        layout->addWidget(splitter, 1);
     }
 
     // ---- settings --------------------------------------------------------
@@ -978,6 +1251,8 @@ private:
         if (path.isEmpty() || !QFileInfo::exists(path)) {
             clipInfo_ = ClipInfo{};
             lastProbePath_.clear();
+            clipNameLabel_->setText(QStringLiteral("未选择素材"));
+            clipNameLabel_->setToolTip(QString());
             clipInfoLabel_->setText(QStringLiteral("未选择素材（可以把视频拖进窗口）"));
             timeline_->setRange(0, 0);
             timeLabel_->setText(QStringLiteral("--"));
@@ -992,6 +1267,8 @@ private:
             return;
         }
         clipInfo_ = info;
+        clipNameLabel_->setText(QFileInfo(path).fileName());
+        clipNameLabel_->setToolTip(path);
         if (path != lastProbePath_) {
             lastProbePath_ = path;
             preview_->setImage(QImage());
@@ -1857,6 +2134,7 @@ private:
 
     QProgressBar* progress_ = nullptr;
     QLabel* status_ = nullptr;
+    QLabel* clipNameLabel_ = nullptr;
     QLabel* clipInfoLabel_ = nullptr;
     QLabel* timeLabel_ = nullptr;
     QPlainTextEdit* log_ = nullptr;
@@ -1895,6 +2173,26 @@ int main(int argc, char** argv) {
     QCoreApplication::setOrganizationName(QStringLiteral("SpektraRoll"));
     QCoreApplication::setApplicationName(QStringLiteral("SpektraRoll UI"));
     QApplication::setStyle(QStringLiteral("Fusion"));
+
+    QPalette palette = app.palette();
+    palette.setColor(QPalette::Window, QColor(0x2d, 0x2d, 0x2c));
+    palette.setColor(QPalette::WindowText, QColor(0xfa, 0xf8, 0xf4));
+    palette.setColor(QPalette::Base, QColor(0x48, 0x48, 0x46));
+    palette.setColor(QPalette::AlternateBase, QColor(0x25, 0x25, 0x23));
+    palette.setColor(QPalette::Text, QColor(0xfa, 0xf8, 0xf4));
+    palette.setColor(QPalette::Button, QColor(0x48, 0x48, 0x46));
+    palette.setColor(QPalette::ButtonText, QColor(0xfa, 0xf8, 0xf4));
+    palette.setColor(QPalette::Highlight, QColor(0xe1, 0xa9, 0x5f));
+    palette.setColor(QPalette::HighlightedText, QColor(0x25, 0x25, 0x23));
+    palette.setColor(QPalette::ToolTipBase, QColor(0x1e, 0x1e, 0x1c));
+    palette.setColor(QPalette::ToolTipText, QColor(0xfa, 0xf8, 0xf4));
+    palette.setColor(QPalette::PlaceholderText, QColor(0x8c, 0x8a, 0x86));
+    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(0x77, 0x77, 0x73));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(0x77, 0x77, 0x73));
+    app.setPalette(palette);
+    app.setFont(QFont(QStringLiteral("Segoe UI"), 9));
+    app.setStyleSheet(QString::fromUtf8(kStyleSheet));
+
     MainWindow window;
     window.show();
     return app.exec();

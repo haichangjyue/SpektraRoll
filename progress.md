@@ -3,7 +3,7 @@
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
 > **最后更新**：2026-11-02
-> **当前里程碑**：**M5 启动**（D009 已定 Qt 6）；M4 的颗粒缓存、分段/续渲/时间码已完成
+> **当前里程碑**：**M5 进行中 · 界面 v2**（Qt 6 三栏界面、渲染队列、时间线；参照 SpektraLab 布局，D041）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -219,6 +219,9 @@
 | 队列中每条任务使用 **LUT 快照**，之后改参数不会影响已入队任务 | ✅ `out/ui-queue/lut-*.cube` |
 | **队列持久化**：`out/ui-queue/queue.json`，重启恢复；中断任务回到“等待” | ✅ 实测重启后 2 条任务恢复 |
 | **多文件拖入 / 批量加入**：一次多个视频，按素材名自动生成任务 | ✅ |
+| **界面 v2**（D041）：三栏 + 顶栏、SpektraLab 灰/琥珀令牌、Section + SliderRow | ✅ 截图更新 |
+| 参数栏改成“标签 + 数值 + 细滑块”，队列切换时右栏自动加宽 | ✅ |
+| 参考分析文档 `docs/ui-analysis-spektralab.md` | ✅ 含布局、令牌、组件与映射表 |
 | 渲染完成询问是否打开文件夹 | ✅ |
 | 关闭时保存路径/参数/窗口位置，下次恢复 | ✅ |
 | `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动 | ✅ |
@@ -269,6 +272,7 @@
 | **D038** | 硬件编码 | **`--encoder qsv`**（hevc_qsv / h264_qsv） | 2.6 MP 下 200 vs 214 ms，收益有限；瓶颈在管道 |
 | **D039** | 颗粒场缓存 | **LRU 保留最近两个场，按 seed/尺寸/半径/序号复用** | 全质感 476.5→358.7 ms/帧；输出与无缓存逐位一致 |
 | **D040** | 分段渲染 / 续渲 / 时间码 | **`--segment` 写视频-only 分段，`--resume` 复用带标记的段，音频最后复制一次，timecode 按帧偏移** | 中断只重渲缺失段；99 帧输出保留 15:38:35:00，分段边界无跳变 |
+| **D041** | 界面 v2 结构 | **参照 SpektraLab：三栏 + 顶栏、SpektraLab 灰/琥珀令牌、Section + SliderRow** | 画布成为最大区域；不复制其源码/图标；分析见 `docs/ui-analysis-spektralab.md` |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -446,11 +450,12 @@ X:\agent\SpektraRoll\
 ├── scripts/                 .ps1 + .cmd 双份，.cmd 给用户双击
 ├── .github/workflows/       build.yml：Windows + macOS 矩阵
 ├── docs/architecture.md     目标架构、M1 链路、确定性规则、M0–M5 路线图
+├── docs/ui-analysis-spektralab.md  SpektraLab 界面组成分析与映射
 ├── docs/licensing.md        GPL / CC BY-SA / LUT / 商标 / 编解码专利约束
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D040
+├── DECISIONS.md             决策台账 D001–D041
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -459,7 +464,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D040**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D041**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
@@ -474,6 +479,8 @@ X:\agent\SpektraRoll\
 - ❌ **不要在 Qt UI 里重新实现颜色/质感管线**：预览和渲染都调 `spektra-roll-cli`，否则 UI 和 CI 会漂移（D009）
 - ❌ **不要把 Qt 静态链接或只发一个 exe**：Qt 必须动态链接并用 `windeployqt` 带 DLL（LGPL 合规）
 - ❌ **不要把 `X:\agent\tools\qt` 提交进仓库**：它只在本机工具链里
+- ❌ **不要直接把 SpektraLab 的 QML 源码/图标搬进来**：只借鉴布局和令牌，来源与许可见 `docs/ui-analysis-spektralab.md`（D041）
+- ❌ **不要把参数再堆回左栏**：左栏是材料，参数在右栏；画布必须保持最大
 - ❌ **不要偷懒改品牌**，SpektraRoll 已定案，改一次要动二进制名/CI/文档
 
 ---

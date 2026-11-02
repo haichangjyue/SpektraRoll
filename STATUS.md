@@ -33,7 +33,7 @@
 - [x] `scripts\demo-m4.cmd`：渲染 → 模拟崩溃 → 续渲
 - [ ] 多段并行渲染
 
-## M5 已开始：Qt 6 桌面界面（首版）
+## M5 进行中：Qt 6 桌面界面（v2）
 
 - [x] **D009 拍板 Qt 6**（Qt Widgets），不再走 WinUI 3 / MSVC
 - [x] Qt 6.8.3 + MinGW 13.1 安装在 `X:\agent\tools\qt`（不进仓库）
@@ -45,10 +45,12 @@
 - [x] **渲染整段**：编码、起始、帧数、分段、续渲；日志、进度条、取消
 - [x] **渲染队列**：参数冻结入队、自动避重名、顺序渲染、停止/移除/清空；LUT 快照保证已入队任务不被后续改参影响
 - [x] 队列**持久化**（`out/ui-queue/queue.json`），重启后恢复；每行有进度条和用时/剩余时间；支持多文件拖入批量入队
+- [x] **界面 v2**（D041）：三栏 + 顶栏、SpektraLab 灰/琥珀令牌、可折叠 Section、参数滑块；分析见 `docs/ui-analysis-spektralab.md`
+- [x] 队列页自动加宽，参数页保持窄栏；截图更新
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
-- [x] 截图：`docs/ui-preview.png`
-- [ ] 时间线拖动预览、批量队列、macOS 打包
+- [x] 截图：`docs/ui-preview.png`、`docs/ui-queue.png`
+- [ ] 直方图叠加、适合/100% 缩放、裁切、macOS 打包
 
 ![Qt UI](docs/ui-preview.png)
 
