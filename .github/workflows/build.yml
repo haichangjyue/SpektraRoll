@@ -121,9 +121,12 @@ jobs:
           printf 'look --lut m1.cube\nopen ci_src.mov\ntexture 0.4 1.4 1 3 0.45 0.006 0.72 0.2 0.02 0.1 0.004\nframe 1 preview.rgba\nraw 0 original.rgba\nquit\n' \
             | "$exe" preview --ffmpeg ffmpeg --in-matrix bt709 > preview.log 2> preview.err
           cat preview.log
+          cat preview.err
+          ls -l preview.rgba original.rgba
           grep -q '^ok look lut' preview.log
           grep -q '^ok open 160 90' preview.log
           grep -q '^ok frame 1' preview.log
           grep -q '^ok raw 0' preview.log
-          test "$(wc -c < preview.rgba)" = "57600"
-          test "$(wc -c < original.rgba)" = "57600"
+          # BSD wc pads its output when reading stdin, so compare numerically.
+          test "$(wc -c < preview.rgba)" -eq 57600
+          test "$(wc -c < original.rgba)" -eq 57600
