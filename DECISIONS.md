@@ -664,6 +664,32 @@
 
 ---
 
+## D047 · 空间质感上 GPU（`--texture-engine`）
+
+- **日期**：2026-11-02
+- **背景**：D046 之后颜色只占约 50 ms/帧，2.6 MP 视频仍是约 380 ms/帧；其中约 160 ms 是颗粒 / 光晕 / 眩光 / 扩散，剩下是解码、16-bit 转换与编码管道。
+- **实现**：
+  - `src/cli/gpu_texture.{hpp,cpp}`：D3D11 compute，逐 pass 翻译 `texture.cpp` 的 halation / glare / diffusion / grain。
+  - 可分离盒状模糊按“一行 / 一列一个线程”实现，保持与 CPU 相同的浮点累加顺序，结果几乎逐位一致。
+  - 宽模糊沿用 CPU 的降采样 → 2 段盒状模糊 → 双线性升采样（眩光 4×，光晕 / 扩散 2×）；小画幅仍走全分辨率 3 段。
+  - 颗粒场用同一套 hash 在 GPU 上重建（含两次盒状模糊），`--grain-rate` 的交叉淡化与归一化保持不变。
+  - 新增 `--texture-engine auto|cpu|gpu`：`auto` 在 `--engine spectral-gpu` 时启用；`gpu` 也可配合 LUT；无 D3D11 / 编译失败 / 运行时错误时自动回退 CPU，并在 stderr 打一次 warning。
+  - `sr::applyTexture()` 成为 CPU 参考链的唯一入口；CLI、`tests/test_gpu_texture.cpp` 都调用它。
+  - UI 输出栏新增“GPU 质感”勾选框（默认开，随设置保存），预览、渲染、队列带同一条参数。
+- **实测（本机 Arc A750，2.6 MP，ProRes 422 HQ，全质感）**：
+  - 视频 **382.7 → 245.6 ms/帧**（1.56×）；`demo-gpu-texture` 两段 2 秒 **386.8 → 233.6 ms/帧**（1.66×）
+  - 质感部分本身 **约 160 → 约 38 ms/帧**
+  - 单帧 `lut apply`（含进程启动与着色器编译）309.5 → 214.5 ms
+  - 与 CPU 参考 PSNR：真实负片帧 **123.1 dB**；`test_gpu_texture` 九组配置 **143–166 dB**，最差偏差 4.5e-7
+  - 编码后两段视频 PSNR 83.6 dB（差异来自编码器，不是质感链）
+- **后果**：
+  - 颜色与质感都在 GPU 后，视频下一瓶颈是 ffmpeg 解码 / 编码与 16-bit 往返（空管道约 207 ms/帧）
+  - GPU 质感首次调用要编译 11 个着色器，单张图片会多约 0.2 s；批量/视频可忽略
+  - 分段渲染签名新增 `texture-engine`，旧分段会重渲而不是和不同后端混用
+  - macOS 没有 D3D11，继续用 CPU 质感（自动回退）
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

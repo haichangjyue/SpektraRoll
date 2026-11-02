@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-02（GPU 光谱引擎落地，D046）
-> **当前里程碑**：**M5 进行中 · 颜色改成物理计算**（Qt 6 三栏界面 + 渲染队列 + 可选光谱/GPU 引擎，D041–D046）
+> **最后更新**：2026-11-02（空间质感上 GPU，D047）
+> **当前里程碑**：**M5 进行中 · 颜色改成物理计算**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感，D041–D047）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,79 @@
 
 ---
 
-## 零之一、最近一次会话：颜色改成物理计算并上 GPU（D044–D046）
+## 零之一、最近一次会话：空间质感上 GPU（D047）
+
+会话目标：D046 之后颜色只剩约 50 ms/帧，视频却仍要约 380 ms/帧。先把时间花在哪量清楚，再决定要不要移植。
+
+### 先量了一下（2.6 MP 单帧，`lut apply`，质感逐项开启）
+
+| 配置 | 耗时 | 增量 |
+|---|---|---|
+| 只套 LUT | 14.7 ms | — |
+| + 光晕 | 64.1 ms | +49 |
+| + 眩光 | 57.3 ms | +43 |
+| + 扩散 | 65.9 ms | +51 |
+| + 颗粒（无缓存，两张场） | 138.6 ms | +124 |
+| 全部 | 295.5 ms | +281 |
+
+视频里颗粒有 `GrainFieldCache`，每帧约 1/3 个场，所以质感约 **160 ms/帧**；实测 GPU 颜色视频（无质感）207 ms/帧、全质感 366 ms/帧，与上表吻合。
+
+### 已完成
+
+1. **`sr::applyTexture()` 收敛成唯一 CPU 参考链**（`texture.hpp/texture.cpp`）：halation → glare → diffusion → grain，CLI 和 GPU parity 测试都调它，避免两处顺序漂移。
+2. **`GpuTexture`（D047，`--texture-engine`）**：11 个 D3D11 compute pass，逐行翻译 CPU 实现。
+   - 盒状模糊一行/一列一个线程，**浮点累加顺序与 CPU 完全一致**；
+   - 宽模糊复用 CPU 的降采样 → 2 段模糊 → 双线性升采样（眩光 4×，光晕/扩散 2×），小画幅仍走全分辨率 3 段；
+   - 颗粒用同一套 uint hash 在 GPU 上重建场，`--grain-rate` 的两场交叉淡化与归一化不变；
+   - 无设备/编译失败/运行时错误 → stderr 一次 warning，整条序列退回 CPU。
+3. **一致性**：`tests/test_gpu_texture.cpp` 九组配置（单项、raw noise、rate 1/3、demo-m3 全开、小画幅全分辨率分支）与 CPU 逐像素对比 **143–166 dB，最差 4.5e-7**；真实负片帧 **123.1 dB**。无显卡时 exit 77，ctest 记 skipped。
+4. **实测**：
+   - 视频全质感 **382.7 → 245.6 ms/帧（1.56×）**；两段 2 秒 demo **386.8 → 233.6 ms/帧（1.66×）**；
+   - 质感本身 **约 160 → 约 38 ms/帧**；
+   - 单帧 `lut apply`（含着色器编译）309.5 → 214.5 ms；
+   - 两段编码后视频 PSNR 83.6 dB（差异来自编码器）。
+5. **UI**：输出栏新增“GPU 质感（颗粒 / 光晕 / 眩光 / 扩散）”勾选框，默认开、随设置保存；预览、渲染、队列走同一条 `--texture-engine gpu`。
+6. **双击验收**：`scripts\demo-gpu-texture.cmd` 用同一条命令渲两遍（CPU / GPU），打印两条 ms/帧、加速比和编码后 PSNR。
+7. 文档同步：`DECISIONS.md` D047、本文件、`STATUS.md`、CLI `--help`。
+
+### 关键决策（详见 D047）
+
+- `--texture-engine auto|cpu|gpu`：`auto` 只在 `--engine spectral-gpu` 时用 GPU 质感；`gpu` 也可配 LUT；**永不硬失败**。
+- 空间质感仍然**不是** LUT 的一部分，顺序仍是 halation → glare → diffusion → grain。
+- 盒状模糊的线程划分为了 **逐位对齐 CPU**，刻意不改成并行前缀和（换了顺序就过不了 parity）。
+- GPU 质感不改变 `--grain-rate` 默认 3，也不改任何观感参数。
+
+### 未完成 / 下一步
+
+- [ ] **颜色 + 质感合并成一次 GPU 提交**：现在两段各自上传/回读 42 MB，空管道仍约 207 ms/帧；合并后预计再省 15–30 ms/帧，并消掉一次 16-bit 往返。
+- [ ] **预览实时化**：GPU 颜色已够快，但 UI 预览仍是 “ffmpeg 抽帧 → 写 PNG → CLI 进程 → 读回”，整链 0.3–0.5 s；可做常驻进程或低分辨率直出。
+- [ ] **真实点扩散核**：眩光 / 光晕 / 扩散仍是画幅比例 + 盒状模糊（GPU 只是照搬）。
+- [ ] **CI 上的真实 GPU 覆盖**：`gpu_film` 和 `gpu_texture` 在公有 runner 上会 skip。
+- [ ] **macOS 的 GPU 路线**：Metal 或继续 CPU（当前选择）。
+- [ ] **队列多任务/多段并行**：GPU 已释放 CPU。
+- [ ] 浮点 / EXR（D017 欠账）。
+
+### 复现命令
+
+```powershell
+# 质感在 GPU 上（配合光谱 GPU 时 auto 自动开启）
+.\build\spektra-roll-cli.exe video --engine spectral-gpu --input apple-log --exposure 0.7 `
+  --scan negative --contrast 1.15 --couplers on --gamut oklch `
+  --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1 `
+  --in X:\agent\footage\A001_11011538_C001.mov --out out\gpu.mov --frames 24 --codec prores
+
+# 强制 CPU 参考链做对比
+.\build\spektra-roll-cli.exe video ... --texture-engine cpu
+
+# parity 测试（无显卡时自动 skip）
+& "C:\Program Files\CMake\bin\ctest.exe" --test-dir build -R gpu_texture --output-on-failure
+```
+
+界面验证：`scripts\build-ui.cmd` → 勾上/取消“GPU 质感” → 预览一帧 / 渲染整段，比较速度。
+
+---
+
+## 零之二、上一次会话：颜色改成物理计算并上 GPU（D044–D046）
 
 会话目标：按你的要求，**能物理算的地方不要再靠 LUT 采样**，并且用满本机（i5-10600KF / 32 GB / Arc A750）。
 
@@ -88,7 +160,7 @@
 
 ---
 
-## 零之二、更早的一次会话（M3 阶段）做了什么
+## 零之三、更早的一次会话（M3 阶段）做了什么
 
 一次会话把项目从"M2 尾声"推到"M3 完成"，按时间顺序：
 
@@ -229,7 +301,7 @@
 | 编译器 | MinGW-w64 GCC 16.2.0（便携版，无管理员权限） |
 | CMake | 4.4.4（`C:\Program Files\CMake\bin\cmake.exe`） |
 | Ninja | 1.13.2（`X:\agent\tools\ninja\ninja.exe`） |
-| 单元测试 | **7/7** 程序通过（LUT、胶片模型、图像 I/O、Apple Log/传输、色域、质感、GPU parity） |
+| 单元测试 | **8/8** 程序通过（LUT、胶片模型、图像 I/O、Apple Log/传输、色域、质感、GPU 颜色 parity、GPU 质感 parity） |
 | 33³ LUT 烘焙 | **约 108 ms**（多线程，含写文件）；单线程 198 ms |
 | 2.6 MP 套 33³ LUT（16-bit） | **约 17 ms**（多线程）；单线程 96 ms |
 | 视频渲染（2.6 MP，HEVC） | 无质感 **187 ms/帧**；全质感 **358.7 ms/帧**（场缓存前 476.5）；4.1 s 素材约 35.5 秒 |
@@ -238,6 +310,9 @@
 | GPU 扫描探针（Arc A750，D3D11） | 2.6 MP × 81 样本 **0.63 ms**（CPU 光谱整帧 1081 ms） |
 | **GPU 光谱引擎（2.6 MP 单帧）** | **47–50 ms**（含 42 MB 上传 + 42 MB 回读）；CPU 光谱 1038–1158 ms |
 | **GPU 光谱引擎（2.6 MP 视频）** | **379 ms/帧**（ProRes 422 HQ，含编码与管道）；CPU 光谱 1427 ms/帧 |
+| **GPU 质感（2.6 MP 视频，全质感）** | **245.6 ms/帧**（CPU 质感 382.7）；`demo-gpu-texture` 233.6 vs 386.8（1.66×） |
+| **GPU 质感本身** | 约 **38 ms/帧**（CPU 约 160）；单帧 `lut apply` 309.5 → 214.5 ms |
+| **GPU 质感 vs CPU 参考** | 九组配置 **143–166 dB**（最差 4.5e-7）；真实负片帧 **123.1 dB** |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
 | 分段渲染 | 4 s 素材 / 1 s 段 = 5 段；合并后 99 帧 / 4.125 s / 原声 / timecode 15:38:35:00 |
@@ -291,6 +366,7 @@
 | UI 输出栏“引擎：LUT / 光谱”，队列/分段两种都支持 | ✅ |
 | **GPU 光谱探针**（D045）：D3D11 compute，2.6 MP × 81 样本 | ✅ **0.63 ms**（Arc A750，feature level 11_0） |
 | **GPU 光谱引擎**（D046）：`--engine spectral-gpu` / UI“光谱 GPU（物理，快）” | ✅ 2.6 MP 单帧 **47–50 ms**、视频 **379 ms/帧**；与 CPU 参考 82–119 dB；无设备自动回退 |
+| **GPU 质感**（D047）：`--texture-engine auto/cpu/gpu` / UI“GPU 质感”勾选框 | ✅ 视频 **382.7 → 245.6 ms/帧**；与 CPU 参考 143–166 dB；无设备自动回退 |
 | 参考分析文档 `docs/ui-analysis-spektralab.md` | ✅ 含布局、令牌、组件与映射表 |
 | 渲染完成询问是否打开文件夹 | ✅ |
 | 关闭时保存路径/参数/窗口位置，下次恢复 | ✅ |
@@ -348,6 +424,7 @@
 | **D044** | 可选物理光谱引擎 | **`--engine spectral`：逐像素跑 FilmModel，不走 LUT；UI 引擎可选** | 2.6 MP 单帧 1081 ms，视频 1259 ms/帧；短片可全物理，长片仍用 LUT |
 | **D045** | GPU 光谱可行性 | **D3D11 探针：2.6 MP 的 81 样本扫描 0.63 ms；下一步移植完整链** | Arc A750 潜力足够；GPU 路径 Windows-only，CPU 回退保留 |
 | **D046** | GPU 光谱引擎 | **`--engine spectral-gpu`：HLSL 逐行翻译 CPU 参考链（D3D11 compute），常量缓冲一次上传，失败/无设备自动回退 CPU 光谱** | 2.6 MP 单帧 47–50 ms、视频 379 ms/帧；与 CPU 参考 82–119 dB，CI 有 `gpu_film` parity 测试；UI 列出“光谱 GPU” |
+| **D047** | 空间质感上 GPU | **`--texture-engine auto/cpu/gpu`：halation / glare / diffusion / grain 逐 pass 翻译成 D3D11 compute；模糊保持 CPU 的累加顺序，自动回退** | 视频 382.7 → 245.6 ms/帧（1.56×）；质感本身约 160 → 38 ms；与 CPU 参考 143–166 dB；`test_gpu_texture` 九组配置 |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -365,9 +442,9 @@
 
 ### 🔴 下一步（按建议顺序）
 
-1. **把空间质感搬上 GPU**（D046 之后最大收益）：2.6 MP 视频现在 379 ms/帧，颜色只占约 50 ms，剩下是颗粒 + 光晕/眩光/扩散的模糊；同一张 D3D11 设备、同一套 buffer 就能接。
-2. **预览实时化**：颜色已够快，但 UI 预览是 “ffmpeg 抽帧 → 写 PNG → CLI 进程 → 读回” 一整条链（约 0.3–0.5 s）；可做常驻进程或低分辨率直出，让拖时间线接近实时。
-3. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应该换成微米级、随分辨率缩放的核。
+1. ~~把空间质感搬上 GPU~~ ✅ **已完成（D047）**：视频 382.7 → 245.6 ms/帧。下一个收益是**把颜色与质感合并成一次 GPU 提交**（省掉中间一次 42 MB 回读与 16-bit 往返，预计再省 15–30 ms/帧）。
+2. **预览实时化**：颜色和质感都已够快，但 UI 预览是 “ffmpeg 抽帧 → 写 PNG → CLI 进程 → 读回” 一整条链（约 0.3–0.5 s）；可做常驻进程或低分辨率直出，让拖时间线接近实时。
+3. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应该换成微米级、随分辨率缩放的核（GPU 只是照搬了形状）。
 4. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。
 5. **并行渲染多段 / 多任务**：现在分段和队列都是顺序跑的；GPU 已把 CPU 让出来，可以并行（需先解决内存与编码争用）。
 
@@ -375,7 +452,7 @@
 
 | 阶段 | 内容 |
 |---|---|
-| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色（D046）；待做：GPU 质感、真实扩散核、浮点/EXR、多段并行 |
+| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色（D046）、✅ GPU 质感（D047）；待做：颜色+质感合并提交、真实扩散核、浮点/EXR、多段并行 |
 | **M5** | Qt 6 桌面界面（**D009 已定**）、预览实时化、macOS 同套 Qt、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
@@ -386,7 +463,8 @@
 - [x] ~~长片中断要重头~~ → `--segment` + `--resume`，只补缺失段
 - [x] ~~输出丢时间码~~ → 自动复制源 timecode，`--timecode` / `--no-timecode` 可覆盖
 - [x] ~~颜色只能在 CPU 上物理算~~ → `--engine spectral-gpu`（D046），2.6 MP 单帧 50 ms；无显卡自动回退
-- [ ] **空间质感还没上 GPU** → 颗粒/光晕/眩光/扩散仍在 CPU，是视频 379 ms/帧的主要成本
+- [x] ~~空间质感还没上 GPU~~ → `--texture-engine gpu`（D047），视频 382.7 → 245.6 ms/帧；与 CPU 参考 143–166 dB
+- [ ] **颜色与质感仍是两次 GPU 提交** → 各上传/回读 42 MB，下一瓶颈；合并后预计再省 15–30 ms/帧
 - [ ] **CI 上没有真实 GPU** → `gpu_film` 在公有 runner 上会被 skip，着色器退化只能在本机或真机 CI 发现
 - [ ] **macOS 没有 GPU 物理路径** → 只能 CPU 光谱 / LUT（Metal 未做）
 - [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；Apple Log 是手写解码，不是 OCIO 配置
@@ -450,6 +528,7 @@ scripts\demo-m1.cmd             M1 胶片样张（前后对比）
 scripts\demo-m2.cmd             Apple Log → 印片 / 负片 / HDR 片段
 scripts\demo-m3.cmd             胶片质感（干净帧 / 质感帧 / 整段视频）
 scripts\demo-m4.cmd             分段渲染 + 模拟崩溃 + 断点续渲 + timecode
+scripts\demo-gpu-texture.cmd     GPU 质感对比（CPU vs GPU 的 ms/帧与 PSNR）
 scripts\build-ui.cmd            编译 Qt 6 界面、部署 DLL 并启动（首次约 1–2 分钟）
 scripts\verify-m1.cmd           一键验收：编译 + 测试 + 烘 LUT + 和参考对比
 scripts\demo.cmd                M0 的合成 LUT 冒烟测试（不是胶片）
@@ -463,7 +542,7 @@ macOS 上双击 `scripts\verify-macos.command`（需要 `xcode-select --install`
 ```powershell
 cd X:\agent\SpektraRoll
 .\build\spektra-roll-cli.exe version        # 应输出 spektra-roll-cli 0.1.0
-ctest --test-dir build --output-on-failure # 应 7/7 通过（gpu_film 无显卡时 skip）
+ctest --test-dir build --output-on-failure # 应 8/8 通过（gpu_film / gpu_texture 无显卡时 skip）
 .\build\spektra-roll-cli.exe lut bake --out out\check.cube
 .\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\check.cube
 # 应输出 PSNR ≈ 88 dB, PASS
@@ -522,8 +601,9 @@ X:\agent\SpektraRoll\
 ├── src/core/src/            实现 + 生成的 spectral_tables.cpp
 ├── src/cli/main.cpp         命令行入口（gen / convert / video / lut bake|apply|compare|info / version）
 ├── src/cli/gpu_film.{hpp,cpp}  D3D11 光谱后端（D046），非 Windows 编译成回退占位实现
+├── src/cli/gpu_texture.{hpp,cpp} D3D11 质感后端（D047），非 Windows 编译成回退占位实现
 ├── src/ui-qt/main.cpp       Qt 6 桌面界面（D009），调用 CLI，不复制管线
-├── tests/                   7 个测试程序 + reference/ 冻结参考 LUT（test_gpu_film 无显卡时 skip）
+├── tests/                   8 个测试程序 + reference/ 冻结参考 LUT（两个 GPU 测试无显卡时 skip）
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
 ├── third_party/stb/         stb_image / stb_image_write（单头文件）
@@ -564,6 +644,11 @@ X:\agent\SpektraRoll\
 - ❌ **不要偷懒改品牌**，SpektraRoll 已定案，改一次要动二进制名/CI/文档
 - ❌ **不要删掉 GPU 着色器里的 `density != density` 判空**：有几条波长的 film density 是 NaN，CPU 参考同样跳过它们；少这个保护整条光谱和会变 NaN，输出直接全黑（D046）
 - ❌ **不要把 `--engine spectral-gpu` 改成硬失败**：没有 D3D11 设备时必须回退 CPU 光谱，macOS 才能继续用（D045/D046）
+- ❌ **不要在 CLI / UI 里另写一份质感顺序**：`sr::applyTexture()` 是唯一 CPU 参考链，GPU parity 测试也拿它当基准（D047）
+- ❌ **不要把盒状模糊改成并行前缀和或换累加顺序**：GPU 现在逐位对齐 CPU 靠的就是“一行一列顺序累加”，换了就过不了 143 dB 的 parity（D047）
+- ❌ **不要把 `--texture-engine gpu` 改成硬失败**：编译失败、无设备、运行时错误都要回退 CPU 并只 warning 一次（D047）
+- ❌ **不要在 GPU 质感里省略颗粒的两场交叉淡化或 `norm`**：那是 D036 防闪烁的根，改了颗粒会重新沸腾（D047）
+- ❌ **不要把 `--texture-engine` 漏出分段签名**：否则 CPU/GPU 质感的分段会被混着续渲（D047）
 
 ---
 
@@ -575,12 +660,13 @@ X:\agent\SpektraRoll\
 
 AI 就应该：
 
-1. 先跑 `ctest --test-dir build --output-on-failure`：7 个测试，其中 `gpu_film` 无显卡时会 skip（正常）
+1. 先跑 `ctest --test-dir build --output-on-failure`：8 个测试，其中 `gpu_film` / `gpu_texture` 无显卡时会 skip（正常）
 2. 再跑 `scripts\verify-m1.cmd -NoOpen` 确认 M1 parity 还是 88.07 dB
 3. 再跑 `scripts\demo-m3.cmd -NoOpen` 确认视频 + 质感链路没坏（约 40 秒）
 4. 再跑 `scripts\demo-m4.cmd -NoOpen` 确认分段 + 续渲 + timecode（约 20 秒）
 5. 跑 `scripts\build-ui.cmd -NoLaunch` 确认 Qt 界面还能编译部署
 6. 颜色路径改过就补一次 GPU 校验：`lut apply --engine spectral` 与 `--engine spectral-gpu` 出图做 PSNR（应 ≥60 dB，本机实测 ≥82 dB）
-7. 看 §三 的"下一步"（当前最大收益：把颗粒/光晕/眩光/扩散搬上 GPU）
+7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（本机约 1.6×、83 dB）
+8. 看 §三 的"下一步"（当前最大收益：把颜色 + 质感合并成一次 GPU 提交）
 
-约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 7 个测试程序。
+约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 8 个测试程序。

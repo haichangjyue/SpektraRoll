@@ -186,5 +186,5 @@ and CIE76 ΔE over all 33³ entries. Current numbers are in
 | M1 *(done)* | spektrafilm model ported, real Portra 400 + Endura LUT, parity harness, 16-bit PNG |
 | M2 | colour correctness: real-photo sample, gamut compression (done), couplers (done), Apple Log input (done), scanned negative (done), HDR PQ/HLG output (done) |
 | M3 | video I/O: FFmpeg / ProRes, time dimension, frame ranges; decide standalone vs OFX (D022) |
-| M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, SIMD / threads / GPU, float / EXR |
+| M4 | texture and speed: grain / halation / diffusion / glare, deterministic seeds, threads, GPU colour (done, D046), GPU texture (done, D047), float / EXR |
 | M5 | UI: Qt 6 Widgets (D009), macOS build, OFX plugin, render-farm CLI |

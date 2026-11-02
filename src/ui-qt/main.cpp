@@ -1028,6 +1028,11 @@ private:
             QStringLiteral("LUT：每帧查表，实时；光谱：逐像素物理链，约 1.2 秒 / 2.6 MP；"
                            "光谱 GPU：同一物理链在显卡上跑，约 50 毫秒 / 2.6 MP"));
         outputSection->addWidget(labeledRow(QStringLiteral("引擎"), engine_));
+        textureGpu_ = new QCheckBox(QStringLiteral("GPU 质感（颗粒 / 光晕 / 眩光 / 扩散）"));
+        textureGpu_->setChecked(true);
+        textureGpu_->setToolTip(QStringLiteral(
+            "把空间质感放到显卡上跑（D047）；取消勾选用 CPU 参考链。没有 D3D11 显卡时自动回退。"));
+        outputSection->addWidget(textureGpu_);
         codec_ = new QComboBox;
         codec_->addItem(QStringLiteral("H.264"), QStringLiteral("h264"));
         codec_->addItem(QStringLiteral("HEVC（HDR 推荐）"), QStringLiteral("hevc"));
@@ -1488,6 +1493,9 @@ private:
         halation_->setValue(settings.value(QStringLiteral("texture/halation"), 0.45).toDouble());
         glare_->setValue(settings.value(QStringLiteral("texture/glare"), 0.2).toDouble());
         diffusion_->setValue(settings.value(QStringLiteral("texture/diffusion"), 0.1).toDouble());
+        if (textureGpu_ != nullptr) {
+            textureGpu_->setChecked(settings.value(QStringLiteral("texture/gpu"), true).toBool());
+        }
 
         selectData(codec_, settings.value(QStringLiteral("render/codec"), QStringLiteral("h264")).toString());
         selectData(engine_, settings.value(QStringLiteral("render/engine"), QStringLiteral("lut")).toString());
@@ -1545,6 +1553,8 @@ private:
         settings.setValue(QStringLiteral("texture/halation"), halation_->value());
         settings.setValue(QStringLiteral("texture/glare"), glare_->value());
         settings.setValue(QStringLiteral("texture/diffusion"), diffusion_->value());
+        settings.setValue(QStringLiteral("texture/gpu"),
+                          textureGpu_ != nullptr && textureGpu_->isChecked());
         settings.setValue(QStringLiteral("render/codec"), codec_->currentData().toString());
         settings.setValue(QStringLiteral("render/engine"), engine_->currentData().toString());
         settings.setValue(QStringLiteral("render/start"), start_->value());
@@ -1663,6 +1673,9 @@ private:
 
     QStringList textureArgs() const {
         QStringList args;
+        if (textureGpu_ != nullptr && textureGpu_->isChecked()) {
+            args << QStringLiteral("--texture-engine") << QStringLiteral("gpu");
+        }
         if (grain_->value() > 0.0) {
             args << QStringLiteral("--grain") << number(grain_->value())
                  << QStringLiteral("--grain-rate") << QString::number(grainRate_->value());
@@ -2626,6 +2639,7 @@ private:
     QDoubleSpinBox* halation_ = nullptr;
     QDoubleSpinBox* glare_ = nullptr;
     QDoubleSpinBox* diffusion_ = nullptr;
+    QCheckBox* textureGpu_ = nullptr;
 
     QComboBox* codec_ = nullptr;
     QComboBox* engine_ = nullptr;

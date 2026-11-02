@@ -105,6 +105,15 @@ matches the CPU reference at **82–119 dB PSNR** (several configs bit-identical
 and `ctest` enforces that parity; without a D3D11 device the CLI falls back to
 the CPU engine with a warning.
 
+Spatial texture (grain, halation, glare, diffusion) can also run on the GPU:
+`--texture-engine auto|cpu|gpu` (auto turns it on with `--engine spectral-gpu`;
+the UI has a **GPU 质感** checkbox). On 2.6 MP video the full texture chain drops
+from about 160 to **38 ms/frame**, which took a full-frame render from 382 to
+**245 ms/frame (1.6×)**. The shaders mirror the CPU reference pass by pass,
+including the separable box blur's summation order, so the two agree at
+**143–166 dB PSNR** (worst deviation 4.5e-7); `ctest` enforces that too, and a
+device failure falls back to the CPU chain instead of failing the render.
+
 ![Post-dev inspector](docs/ui-postdev.png)
 
 ![Render queue](docs/ui-queue.png)

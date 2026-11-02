@@ -52,6 +52,16 @@ struct DiffusionParams {
     float radius = 0.004f;
 };
 
+// The four spatial passes in the order the render loop applies them (D033):
+// halation, veiling glare, diffusion, grain. The GPU backend mirrors this exact
+// order, so keep the chain in one place instead of repeating it per caller.
+struct TextureParams {
+    GrainParams grain;
+    HalationParams halation;
+    GlareParams glare;
+    DiffusionParams diffusion;
+};
+
 // Interleaved float RGB, `width * height * 3` values in 0..1.
 void applyHalation(float* pixels, int width, int height, const HalationParams& params);
 void applyGlare(float* pixels, int width, int height, const GlareParams& params);
@@ -97,5 +107,10 @@ private:
 // way, because the cache stores exactly the fields the uncached path builds.
 void applyGrain(float* pixels, int width, int height, const GrainParams& params,
                 GrainFieldCache* cache = nullptr);
+
+// Applies the whole chain in the reference order. This is the CPU reference the
+// D3D11 texture backend is checked against (D047).
+void applyTexture(float* pixels, int width, int height, const TextureParams& params, int frame,
+                  GrainFieldCache* cache = nullptr);
 
 }  // namespace sr

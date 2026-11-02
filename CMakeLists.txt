@@ -38,7 +38,7 @@ target_compile_options(sr_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>)
 
-add_executable(spektra-roll-cli src/cli/main.cpp src/cli/gpu_film.cpp)
+add_executable(spektra-roll-cli src/cli/main.cpp src/cli/gpu_film.cpp src/cli/gpu_texture.cpp)
 target_link_libraries(spektra-roll-cli PRIVATE sr_core)
 if(WIN32)
     target_link_libraries(spektra-roll-cli PRIVATE d3d11 dxgi d3dcompiler)
@@ -120,6 +120,18 @@ if(SR_BUILD_TESTS)
     endif()
     add_test(NAME gpu_film COMMAND test_gpu_film)
     set_tests_properties(gpu_film PROPERTIES SKIP_RETURN_CODE 77)
+
+    # Same skip contract for the spatial chain (D047).
+    add_executable(test_gpu_texture tests/test_gpu_texture.cpp src/cli/gpu_texture.cpp)
+    target_link_libraries(test_gpu_texture PRIVATE sr_core)
+    if(WIN32)
+        target_link_libraries(test_gpu_texture PRIVATE d3d11 dxgi d3dcompiler)
+    endif()
+    if(MINGW)
+        target_link_options(test_gpu_texture PRIVATE -static)
+    endif()
+    add_test(NAME gpu_texture COMMAND test_gpu_texture)
+    set_tests_properties(gpu_texture PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

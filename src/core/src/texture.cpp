@@ -328,4 +328,16 @@ void applyGrain(float* pixels, int width, int height, const GrainParams& params,
     });
 }
 
+void applyTexture(float* pixels, int width, int height, const TextureParams& params, int frame,
+                  GrainFieldCache* cache) {
+    if (params.halation.amount > 0.0f) applyHalation(pixels, width, height, params.halation);
+    if (params.glare.amount > 0.0f) applyGlare(pixels, width, height, params.glare);
+    if (params.diffusion.amount > 0.0f) applyDiffusion(pixels, width, height, params.diffusion);
+    if (params.grain.amount > 0.0f) {
+        GrainParams grain = params.grain;
+        grain.frame = frame;
+        applyGrain(pixels, width, height, grain, cache);
+    }
+}
+
 }  // namespace sr

@@ -31,6 +31,7 @@
 #include "sr/texture.hpp"
 
 #include "gpu_film.hpp"
+#include "gpu_texture.hpp"
 
 namespace {
 
@@ -65,7 +66,7 @@ void printUsage() {
         "                         [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
         "                         [--segment SEC] [--resume] [--keep-parts]\n"
         "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
-        "                         [--ffmpeg <path>]\n"
+        "                         [--texture-engine auto|cpu|gpu] [--ffmpeg <path>]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
         "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
@@ -77,7 +78,9 @@ void printUsage() {
         "      physical film/paper chain (slow but physical; --film/--paper and\n"
         "      --input choose the materials). --engine spectral-gpu runs the same\n"
         "      chain on the D3D11 GPU and falls back to the CPU engine when no\n"
-        "      device is available.\n"
+        "      device is available. --texture-engine gpu moves grain, halation,\n"
+        "      glare and diffusion onto the same GPU (D047); the default 'auto'\n"
+        "      does this whenever the colour engine is spectral-gpu.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -114,12 +117,14 @@ void printUsage() {
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
         "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
+        "                             [--texture-engine auto|cpu|gpu]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "      --engine spectral runs the per-pixel physical chain instead of a LUT\n"
         "      (no --lut needed; --film/--paper/--input choose the materials).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
+        "                             [--texture-engine auto|cpu|gpu]\n"
         "      Apply the LUT to every PNG in --in-dir (sorted by name). Used to grade\n"
         "      image sequences without starting the process once per frame.\n"
         "\n"
@@ -464,15 +469,8 @@ int cmdLutCompare(const Args& args) {
 }
 
 // Spatial effects (D033): parsed once, applied per frame after the LUT.
-struct TextureOptions {
-    sr::GrainParams grain;
-    sr::HalationParams halation;
-    sr::GlareParams glare;
-    sr::DiffusionParams diffusion;
-};
-
-TextureOptions parseTexture(const Args& args) {
-    TextureOptions texture;
+sr::TextureParams parseTexture(const Args& args) {
+    sr::TextureParams texture;
     texture.grain.amount = static_cast<float>(args.getDouble("grain", 0.0));
     texture.grain.size = static_cast<float>(args.getDouble("grain-size", 1.4));
     texture.grain.seed = static_cast<unsigned>(args.getInt("seed", 1));
@@ -487,22 +485,38 @@ TextureOptions parseTexture(const Args& args) {
     return texture;
 }
 
-void applyTexture(float* pixels, int width, int height, const TextureOptions& texture, int frame,
-                  sr::GrainFieldCache* grainCache) {
-    if (texture.halation.amount > 0.0f) {
-        sr::applyHalation(pixels, width, height, texture.halation);
+// `auto` uses the GPU whenever the colour engine is already on the GPU (D047);
+// `cpu` keeps the reference chain, `gpu` asks for it explicitly. A device
+// failure is never fatal: the caller falls back and says so once.
+sr::GpuTexture* prepareTextureGpu(const Args& args, const std::string& engine,
+                                  sr::GpuTexture& storage) {
+    std::string mode = args.get("texture-engine", "auto");
+    if (mode != "auto" && mode != "cpu" && mode != "gpu") {
+        std::fprintf(stderr, "warning: --texture-engine expects 'auto', 'cpu' or 'gpu'\n");
+        mode = "auto";
     }
-    if (texture.glare.amount > 0.0f) {
-        sr::applyGlare(pixels, width, height, texture.glare);
+    const bool wanted = mode == "gpu" || (mode == "auto" && engine == "spectral-gpu");
+    if (!wanted) return nullptr;
+    std::string error;
+    if (!storage.prepare(error)) {
+        std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
+        return nullptr;
     }
-    if (texture.diffusion.amount > 0.0f) {
-        sr::applyDiffusion(pixels, width, height, texture.diffusion);
+    return &storage;
+}
+
+// Applies the chain on the GPU when one is set up; on any device failure it
+// warns once, drops the backend and finishes the sequence on the CPU.
+void applyTextureFrame(float* pixels, int width, int height, const sr::TextureParams& texture,
+                       int frame, sr::GrainFieldCache* grainCache, sr::GpuTexture** gpu) {
+    if (*gpu != nullptr) {
+        std::string error;
+        if ((*gpu)->process(pixels, width, height, texture, frame, pixels, error)) return;
+        std::fprintf(stderr, "warning: %s; falling back to the CPU texture chain\n",
+                     error.c_str());
+        *gpu = nullptr;
     }
-    if (texture.grain.amount > 0.0f) {
-        sr::GrainParams grain = texture.grain;
-        grain.frame = frame;
-        sr::applyGrain(pixels, width, height, grain, grainCache);
-    }
+    sr::applyTexture(pixels, width, height, texture, frame, grainCache);
 }
 
 int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
@@ -526,8 +540,10 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
     std::string error;
     int bits = 16;
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
-    const TextureOptions texture = parseTexture(args);
+    const sr::TextureParams texture = parseTexture(args);
     sr::GrainFieldCache grainCache;
+    sr::GpuTexture textureGpuStorage;
+    sr::GpuTexture* textureGpu = prepareTextureGpu(args, "lut", textureGpuStorage);
     for (const auto& path : files) {
         sr::Image image;
         int sourceBits = 8;
@@ -544,8 +560,8 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
                 px[2] = result.b;
             }
         });
-        applyTexture(image.pixels.data(), image.width, image.height, texture,
-                     static_cast<int>(frames), &grainCache);
+        applyTextureFrame(image.pixels.data(), image.width, image.height, texture,
+                          static_cast<int>(frames), &grainCache, &textureGpu);
         bits = requestedBits(args, sourceBits);
         const auto outPath = std::filesystem::path(outDir) / path.filename();
         if (!sr::saveImage(outPath.string(), image, error, bits)) return fail(error);
@@ -636,7 +652,10 @@ int cmdLutApply(const Args& args) {
         gpu = false;
     }
     if (!gpu) applyCpu();
-    applyTexture(image.pixels.data(), image.width, image.height, parseTexture(args), 0, nullptr);
+    sr::GpuTexture textureGpuStorage;
+    sr::GpuTexture* textureGpu = prepareTextureGpu(args, engine, textureGpuStorage);
+    applyTextureFrame(image.pixels.data(), image.width, image.height, parseTexture(args), 0,
+                      nullptr, &textureGpu);
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
@@ -889,7 +908,9 @@ struct VideoRender {
     sr::Interp interp = sr::Interp::Tetrahedral;
     float strength = 1.0f;
     int threads = 1;
-    TextureOptions texture;
+    sr::TextureParams texture;
+    // D047: optional D3D11 texture chain. Set to nullptr to force the CPU path.
+    sr::GpuTexture* textureGpu = nullptr;
     std::string codecArgs;
     std::string outFormat;
     std::string inMatrix;
@@ -933,7 +954,8 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
               << job.texture.halation.amount << " " << job.texture.halation.radius << " "
               << job.texture.halation.threshold << " " << job.texture.glare.amount << " "
               << job.texture.glare.radius << " " << job.texture.diffusion.amount << " "
-              << job.texture.diffusion.radius << "\n";
+              << job.texture.diffusion.radius << "\n"
+              << "texture-engine " << (job.textureGpu != nullptr ? "gpu" : "cpu") << "\n";
     return signature.str();
 }
 
@@ -1007,8 +1029,9 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
                 }
             });
         }
-        applyTexture(frame.data(), job.width, job.height, job.texture,
-                     static_cast<int>(rangeFrameBase + static_cast<long>(frames)), grainCache);
+        applyTextureFrame(frame.data(), job.width, job.height, job.texture,
+                          static_cast<int>(rangeFrameBase + static_cast<long>(frames)), grainCache,
+                          &job.textureGpu);
         for (size_t i = 0; i < raw.size(); ++i) {
             const float value = std::min(1.0f, std::max(0.0f, frame[i]));
             raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
@@ -1223,7 +1246,9 @@ int cmdVideo(const Args& args) {
         interpName == "tri" ? sr::Interp::Trilinear : sr::Interp::Tetrahedral;
     const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
-    const TextureOptions texture = parseTexture(args);
+    const sr::TextureParams texture = parseTexture(args);
+    // Lives for the whole render, including every segment.
+    sr::GpuTexture textureGpuStorage;
 
     VideoRender job;
     job.ffmpeg = ffmpeg;
@@ -1240,6 +1265,7 @@ int cmdVideo(const Args& args) {
     job.strength = strength;
     job.threads = threads;
     job.texture = texture;
+    job.textureGpu = prepareTextureGpu(args, engine, textureGpuStorage);
     job.codecArgs = codecArgs;
     job.outFormat = outFormat;
     job.inMatrix = inMatrix;
@@ -1280,6 +1306,7 @@ int cmdVideo(const Args& args) {
     } else {
         std::printf("engine: lut %s\n", lutPath.c_str());
     }
+    if (job.textureGpu != nullptr) std::printf("texture: gpu (D3D11)\n");
 
     const std::filesystem::path outFile(outPath);
     std::string extension = outFile.extension().string();
@@ -1404,8 +1431,12 @@ int cmdVideo(const Args& args) {
     }
 
     if (texture.grain.amount > 0.0f && renderedFrames > 0) {
-        std::printf("grain fields: %zu generated for %zu frames (rate %d)\n",
-                    grainCache.builds(), renderedFrames, texture.grain.rate);
+        if (job.textureGpu != nullptr) {
+            std::printf("grain fields: generated on the GPU (D3D11)\n");
+        } else {
+            std::printf("grain fields: %zu generated for %zu frames (rate %d)\n",
+                        grainCache.builds(), renderedFrames, texture.grain.rate);
+        }
     }
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)

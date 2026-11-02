@@ -1,10 +1,10 @@
 # STATUS
 
-**最后更新**：2026-11-02 · 里程碑 **M5 启动（D009 = Qt 6）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-02 · 里程碑 **M5 进行中（D009 = Qt 6）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。4 秒 99 帧素材约 35.5 秒跑完；长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。现在也有 **Qt 6 桌面界面**：选素材、烘 LUT、调质感、预览一帧、渲染整段。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。颜色可以走 **光谱 GPU（物理链，50 ms/帧）**，空间质感也能放到 GPU 上（2.6 MP 全质感 **245 ms/帧**，约 1.6 倍）。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。现在也有 **Qt 6 桌面界面**：选素材、烘 LUT、调质感、预览一帧、渲染整段。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -53,6 +53,8 @@
 - [x] **可选物理光谱引擎**（D044）：`--engine spectral` / UI“引擎：光谱”，2.6 MP 约 1.1 s/帧；默认仍是 LUT
 - [x] **GPU 探针**（D045）：Arc A750 D3D11，2.6 MP × 81 样本 **0.63 ms**
 - [x] **GPU 光谱引擎**（D046）：`--engine spectral-gpu` / UI“光谱 GPU”，2.6 MP 单帧 **50 ms**（CPU 1.1 s），视频 1427 → 379 ms/帧；与 CPU 参考 PSNR 82–119 dB，`test_gpu_film` 六组配置最差 3e-4；无 D3D11 时自动回退 CPU 光谱
+- [x] **GPU 质感**（D047）：`--texture-engine auto/cpu/gpu` / UI“GPU 质感”勾选框，颗粒 + 光晕 + 眩光 + 扩散全上 D3D11；视频 **382.7 → 245.6 ms/帧**，与 CPU 参考 143–166 dB，`test_gpu_texture` 九组配置最差 4.5e-7
+- [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
 - [x] 截图：`docs/ui-preview.png`、`docs/ui-queue.png`
@@ -99,10 +101,13 @@
 | 项 | 结果 |
 |---|---|
 | 编译器 | MinGW-w64 GCC 16.2.0 (ucrt, posix-seh) |
-| 单元测试 | **6/6** 通过 |
+| 单元测试 | **8/8** 通过（含 GPU 颜色 / GPU 质感 parity，无显卡时 skip） |
 | 33³ LUT 烘焙 | 108 ms（多线程）；单线程 198 ms |
 | 2.6 MP 套 LUT（16-bit） | **17 ms**（多线程）；单线程 96 ms |
 | 视频（2.6 MP，HEVC） | 无质感 187 ms/帧；全质感 **358.7 ms/帧**（缓存前 476.5）；4.1 s 素材约 35.5 秒 |
+| GPU 光谱（2.6 MP） | 单帧 **47–50 ms**（CPU 1.1 s）；ProRes 视频 1427 → **379 ms/帧** |
+| GPU 质感（2.6 MP，全质感） | **245.6 ms/帧**（CPU 382.7）；`demo-gpu-texture` 233.6 vs 386.8（1.66×） |
+| GPU 质感本身 | 约 **38 ms/帧**（CPU 约 160）；单帧 `lut apply` 309.5 → 214.5 ms |
 | 分段 / 续渲 | 4 s 素材 5 段；删第 4 段后续渲只花约 5 s，输出仍是 99 帧 / 4.125 s / 原声 / timecode |
 | 颗粒时间稳定性 | 帧间差 0.0025（rate 1）→ **0.0014**（rate 3） |
 | C++ vs Python 参考 | **PSNR 88.07 dB**，ΔE76 max 0.0065 |
@@ -119,8 +124,8 @@
 
 ## 下一步（M5）
 
-1. **GPU 光谱后端**（D045）：把完整 FilmModel 链移植到 D3D11 HLSL，目标 5–20 ms/帧；先和 CPU 光谱对 parity
-2. **界面内容**：胶片/相纸预设列表、队列缩略图、状态颜色点
+1. **颜色 + 质感合并成一次 GPU 提交**：现在两段各自上传/回读 42 MB，空管道仍约 207 ms/帧；合并后再省 15–30 ms/帧
+2. **预览实时化**：预览仍是 “ffmpeg 抽帧 → 写 PNG → CLI 进程 → 读回”；做常驻进程或低分辨率直出
 3. **真实点扩散核**：眩光 / 光晕 / 扩散现在是画幅比例 + 盒状模糊
 4. **浮点 / EXR**（D017 欠账）
 5. **多段并行渲染 / macOS Qt 打包**
