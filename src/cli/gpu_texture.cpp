@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 SpektraRoll contributors
 //
 // D3D11 compute implementation of the spatial texture chain (D047). Each shader
@@ -43,7 +43,6 @@ cbuffer Params : register(b0) {
     int lowHeight;
     int blurWidth;
     int blurHeight;
-    uint blurCount;
     uint seed;
     int fieldIndex;
     float amount;
@@ -54,6 +53,7 @@ cbuffer Params : register(b0) {
     float pad0;
     float pad1;
     float pad2;
+    float pad3;
 };
 
 StructuredBuffer<float4> rgbIn : register(t0);
@@ -269,7 +269,6 @@ struct GpuTexture::Impl {
         int lowHeight;
         int blurWidth;
         int blurHeight;
-        unsigned int blurCount;
         unsigned int seed;
         int fieldIndex;
         float amount;
@@ -280,6 +279,7 @@ struct GpuTexture::Impl {
         float pad0;
         float pad1;
         float pad2;
+        float pad3;
     };
 
     ID3D11Device* device = nullptr;
@@ -678,7 +678,6 @@ void GpuTexture::Impl::resetParams() {
     params.lowHeight = lowHeight;
     params.blurWidth = width;
     params.blurHeight = height;
-    params.blurCount = params.count;
 }
 
 bool GpuTexture::Impl::dispatch(Shader shader, UINT groupsX, UINT groupsY, Res* srv0, Res* srv1,
@@ -738,7 +737,6 @@ bool GpuTexture::Impl::blurWide(Res& buffer, int radius, int factor, std::string
     if (factor <= 1 || radius < factor * 2) {
         params.blurWidth = width;
         params.blurHeight = height;
-        params.blurCount = params.count;
         params.radius = radius;
         for (int pass = 0; pass < 3; ++pass) {
             if (!runScalar(kBlurH, 1, static_cast<UINT>((height + 63) / 64), &buffer,
@@ -766,7 +764,6 @@ bool GpuTexture::Impl::blurWide(Res& buffer, int radius, int factor, std::string
 
     params.blurWidth = lw;
     params.blurHeight = lh;
-    params.blurCount = static_cast<unsigned int>(lw) * static_cast<unsigned int>(lh);
     params.radius = std::max(1, radius / factor);
     for (int pass = 0; pass < 2; ++pass) {
         if (!runScalar(kBlurH, 1, static_cast<UINT>((lh + 63) / 64), &low, &lowScratch,
@@ -798,7 +795,6 @@ bool GpuTexture::Impl::buildGrainField(unsigned seed, int index, int radius, Res
     if (radius < 1) return true;
     params.blurWidth = width;
     params.blurHeight = height;
-    params.blurCount = params.count;
     params.radius = radius;
     for (int pass = 0; pass < 2; ++pass) {
         if (!runScalar(kBlurH, 1, static_cast<UINT>((height + 63) / 64), &target, &full1,
