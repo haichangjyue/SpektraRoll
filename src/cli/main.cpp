@@ -2102,11 +2102,12 @@ int evenDimension(double value) {
 std::string proxyCachePath(const std::string& clip, const Geometry& info, int width, int height) {
     std::error_code ec;
     const auto stamp = std::filesystem::last_write_time(clip, ec).time_since_epoch().count();
-    const std::string key = clip + "|" + std::to_string(stamp) + "|" +
+    // libc++'s file_time_type rep is wider than long long, which made
+    // std::to_string ambiguous on macOS (D053); cast explicitly.
+    const std::string key = clip + "|" + std::to_string(static_cast<long long>(stamp)) + "|" +
                             std::to_string(info.width) + "x" + std::to_string(info.height) + "|" +
                             std::to_string(width) + "x" + std::to_string(height);
-    // FNV-1a rather than std::hash: <functional> is not pulled in by <string>
-    // on libc++, and the macOS build caught it (D053).
+    // FNV-1a keeps the name stable without pulling in <functional>.
     std::uint64_t hash = 1469598103934665603ULL;
     for (const unsigned char ch : key) {
         hash ^= ch;
