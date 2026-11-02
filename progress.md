@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-02（预览实时化，D048）
-> **当前里程碑**：**M5 进行中 · 颜色与质感都在 GPU**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 常驻预览，D041–D048）
+> **最后更新**：2026-11-03（颜色 + 质感合并提交，D049）
+> **当前里程碑**：**M5 进行中 · 颜色与质感都在 GPU**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 常驻预览 + 融合提交，D041–D049）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,53 @@
 
 ---
 
-## 零之一、最近一次会话：预览实时化（D048）
+## 零之一、最近一次会话：颜色 + 质感合并提交（D049）
+
+会话目标：按产品负责人的选择做 **B**，把颜色和质感合并成一次 GPU 提交，少一次 42 MB 上传 + 回读。
+
+### 已完成
+
+1. **共用设备**：`GpuFilm::attach()` / `GpuTexture::attach()`，质感后端在 film 的设备上初始化。
+2. **拆开 film 的两端**：`processToDevice()` + `readback()`；融合路径中间结果不回 CPU。
+3. **质感直接吃 film 输出**：`GpuTexture::processBuffer()` 对 film 的 output buffer 建 SRV，先 GPU 内拷贝进 ping-pong 缓冲，再跑原链，只回读一次。
+4. **回退**：融合失败自动退回分段提交并 warning 一次；CPU 质感 / LUT 引擎路径完全不变。
+5. **`tests/test_gpu_chain.cpp`**：融合 vs CPU 参考 **124.1 dB**，并检查确定性。
+
+### 实测
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| 视频（2.6 MP，ProRes，全质感） | 233.6 ms/帧 | **207.1 ms/帧** |
+| 相对 D046（379 ms/帧） | 1.62× | **1.83×** |
+| 预览（光谱 GPU + GPU 质感） | 43 ms/帧 | **38 ms/帧** |
+| 与分段路径输出 | — | **逐位相同**（PSNR inf） |
+
+### 修掉的三个坑
+
+- film 输出 buffer 少了 `BIND_SHADER_RESOURCE`，质感无法建 SRV；
+- film dispatch 后没解绑 UAV，质感读同一 buffer 得到全黑；
+- `attach()` 后 `initialize()` 误以为已初始化，着色器没编译 → 访问冲突。
+
+### 未完成 / 下一步
+
+- [ ] **管道成为唯一瓶颈**：207 ms/帧已经等于空管道；下一步是 ffmpeg 硬件解码（D3D11VA/QSV）或并行编码。
+- [ ] **预览代理 / 磁盘缓存**：长片超出内存缓存后回退单帧。
+- [ ] 真实点扩散核、浮点/EXR、macOS GPU（Metal）。
+
+### 复现
+
+```powershell
+.\build\spektra-roll-cli.exe video --engine spectral-gpu --input apple-log --exposure 0.7 `
+  --scan negative --contrast 1.15 --couplers on --gamut oklch --grain 0.4 --halation 0.45 `
+  --glare 0.2 --diffusion 0.1 --in X:\agent\footage\A001_11011538_C001.mov `
+  --duration 2 --codec prores --out out\fused.mov
+
+.\build\test_gpu_chain.exe        # 融合 vs CPU，应 ≥60 dB（本机 124 dB）
+```
+
+---
+
+## 零之二、上一次会话：预览实时化（D048）
 
 会话目标：按建议先做 **A（预览实时化）**。先把旧预览链拆开量，再决定改法。
 
@@ -103,7 +149,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之二、上一次会话：空间质感上 GPU（D047）
+## 零之三、上一次会话：空间质感上 GPU（D047）
 
 会话目标：D046 之后颜色只剩约 50 ms/帧，视频却仍要约 380 ms/帧。先把时间花在哪量清楚，再决定要不要移植。
 
@@ -176,7 +222,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之三、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
+## 零之四、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
 
 会话目标：按你的要求，**能物理算的地方不要再靠 LUT 采样**，并且用满本机（i5-10600KF / 32 GB / Arc A750）。
 
@@ -231,7 +277,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之四、更早的一次会话（M3 阶段）做了什么
+## 零之五、更早的一次会话（M3 阶段）做了什么
 
 一次会话把项目从"M2 尾声"推到"M3 完成"，按时间顺序：
 
@@ -372,7 +418,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | 编译器 | MinGW-w64 GCC 16.2.0（便携版，无管理员权限） |
 | CMake | 4.4.4（`C:\Program Files\CMake\bin\cmake.exe`） |
 | Ninja | 1.13.2（`X:\agent\tools\ninja\ninja.exe`） |
-| 单元测试 | **8/8** 程序通过（LUT、胶片模型、图像 I/O、Apple Log/传输、色域、质感、GPU 颜色 parity、GPU 质感 parity） |
+| 单元测试 | **9/9** 程序通过（LUT、胶片模型、图像 I/O、Apple Log/传输、色域、质感、GPU 颜色 / 质感 / 融合 parity） |
 | 33³ LUT 烘焙 | **约 108 ms**（多线程，含写文件）；单线程 198 ms |
 | 2.6 MP 套 33³ LUT（16-bit） | **约 17 ms**（多线程）；单线程 96 ms |
 | 视频渲染（2.6 MP，HEVC） | 无质感 **187 ms/帧**；全质感 **358.7 ms/帧**（场缓存前 476.5）；4.1 s 素材约 35.5 秒 |
@@ -385,6 +431,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **GPU 质感本身** | 约 **38 ms/帧**（CPU 约 160）；单帧 `lut apply` 309.5 → 214.5 ms |
 | **GPU 质感 vs CPU 参考** | 九组配置 **143–166 dB**（最差 4.5e-7）；真实负片帧 **123.1 dB** |
 | **UI 预览（D048，1600×898）** | **47–64 ms/帧**（旧链 1.7–2.2 s，约 30×）；光谱 GPU 43 ms；首次打开解码 2–4 s |
+| **融合提交（D049）** | 视频全质感 **207.1 ms/帧**（分段 233.6）；与分段输出 **逐位相同**；预览光谱 GPU **38 ms/帧** |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -500,6 +547,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D046** | GPU 光谱引擎 | **`--engine spectral-gpu`：HLSL 逐行翻译 CPU 参考链（D3D11 compute），常量缓冲一次上传，失败/无设备自动回退 CPU 光谱** | 2.6 MP 单帧 47–50 ms、视频 379 ms/帧；与 CPU 参考 82–119 dB，CI 有 `gpu_film` parity 测试；UI 列出“光谱 GPU” |
 | **D047** | 空间质感上 GPU | **`--texture-engine auto/cpu/gpu`：halation / glare / diffusion / grain 逐 pass 翻译成 D3D11 compute；模糊保持 CPU 的累加顺序，自动回退** | 视频 382.7 → 245.6 ms/帧（1.56×）；质感本身约 160 → 38 ms；与 CPU 参考 143–166 dB；`test_gpu_texture` 九组配置 |
 | **D048** | 预览实时化 | **`preview` 常驻进程：整段解码进内存（≤1024 MB、最长边 1600），`frame` 只跑颜色 + 质感并输出 8-bit RGBA；UI 拖动 90 ms 合并** | 预览 **1.7–2.2 s → 47–64 ms/帧**；首次打开 2.3–2.7 s；`ffprobe -show_streams` 一次取全（rotation 查询从 3.8 s 降到 42 ms） |
+| **D049** | 融合 GPU 提交 | **颜色与质感共用一个 D3D11 设备：film 结果留在显存，质感以 SRV 直接读，只上传/回读一次** | 视频 233.6 → **207.1 ms/帧**；与分段路径 **逐位相同**；`test_gpu_chain` 与 CPU 参考 124 dB |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -517,12 +565,12 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. ~~把空间质感搬上 GPU~~ ✅ **已完成（D047）**：视频 382.7 → 245.6 ms/帧。~~预览实时化~~ ✅ **已完成（D048）**：47–64 ms/帧。
-2. **把颜色与质感合并成一次 GPU 提交**：视频仍是 245 ms/帧，空管道约 207 ms；省掉中间一次 42 MB 回读与 16-bit 往返，预计再省 15–30 ms/帧。
+1. ~~把空间质感搬上 GPU~~ ✅ **已完成（D047）**。~~预览实时化~~ ✅ **已完成（D048）**。~~颜色 + 质感合并提交~~ ✅ **已完成（D049）**：视频 207.1 ms/帧，已经等于空管道水平。
+2. **ffmpeg 硬件解码 / 并行编码**：207 ms/帧里几乎全是解码 + 编码；下一步是 D3D11VA/QSV 解码、分段并行（这是仅剩的大头）。
 3. **预览代理 / 磁盘缓存**：内存缓存只覆盖 99 帧（853 MB），长片超出的帧回退单帧；可生成半分辨率代理文件。
-4. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"，应该换成微米级、随分辨率缩放的核（GPU 只是照搬了形状）。
+4. **真实点扩散核**：眩光 / 光晕 / 扩散现在是"画幅比例 + 盒状模糊"。
 5. **浮点 / EXR**（D017 欠账）：16-bit PNG 之外还没有浮点交付。
-6. **并行渲染多段 / 多任务**：现在分段和队列都是顺序跑的；GPU 已把 CPU 让出来，可以并行（需先解决内存与编码争用）。
+6. **macOS 的 GPU 路线**：Metal 或继续 CPU。
 
 ### 🟡 中期路线（M4–M5）
 
@@ -618,7 +666,7 @@ macOS 上双击 `scripts\verify-macos.command`（需要 `xcode-select --install`
 ```powershell
 cd X:\agent\SpektraRoll
 .\build\spektra-roll-cli.exe version        # 应输出 spektra-roll-cli 0.1.0
-ctest --test-dir build --output-on-failure # 应 8/8 通过（gpu_film / gpu_texture 无显卡时 skip）
+ctest --test-dir build --output-on-failure # 应 9/9 通过（gpu_film / gpu_texture / gpu_chain 无显卡时 skip）
 .\build\spektra-roll-cli.exe lut bake --out out\check.cube
 .\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\check.cube
 # 应输出 PSNR ≈ 88 dB, PASS
@@ -680,7 +728,7 @@ X:\agent\SpektraRoll\
 ├── src/cli/gpu_film.{hpp,cpp}  D3D11 光谱后端（D046），非 Windows 编译成回退占位实现
 ├── src/cli/gpu_texture.{hpp,cpp} D3D11 质感后端（D047），非 Windows 编译成回退占位实现
 ├── src/ui-qt/main.cpp       Qt 6 桌面界面（D009），调用 CLI，不复制管线
-├── tests/                   8 个测试程序 + reference/ 冻结参考 LUT（两个 GPU 测试无显卡时 skip）
+├── tests/                   9 个测试程序 + reference/ 冻结参考 LUT（三个 GPU 测试无显卡时 skip）
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
 ├── third_party/stb/         stb_image / stb_image_write（单头文件）
@@ -741,14 +789,14 @@ X:\agent\SpektraRoll\
 
 AI 就应该：
 
-1. 先跑 `ctest --test-dir build --output-on-failure`：8 个测试，其中 `gpu_film` / `gpu_texture` 无显卡时会 skip（正常）
+1. 先跑 `ctest --test-dir build --output-on-failure`：9 个测试，其中 `gpu_film` / `gpu_texture` / `gpu_chain` 无显卡时会 skip（正常）
 2. 再跑 `scripts\verify-m1.cmd -NoOpen` 确认 M1 parity 还是 88.07 dB
 3. 再跑 `scripts\demo-m3.cmd -NoOpen` 确认视频 + 质感链路没坏（约 40 秒）
 4. 再跑 `scripts\demo-m4.cmd -NoOpen` 确认分段 + 续渲 + timecode（约 20 秒）
 5. 跑 `scripts\build-ui.cmd -NoLaunch` 确认 Qt 界面还能编译部署
 6. 颜色路径改过就补一次 GPU 校验：`lut apply --engine spectral` 与 `--engine spectral-gpu` 出图做 PSNR（应 ≥60 dB，本机实测 ≥82 dB）
-7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（本机约 1.6×、83 dB）
+7. 质感路径改过就跑 `scripts\demo-gpu-texture.cmd -NoOpen`：CPU vs GPU 两条 ms/帧、加速比与编码后 PSNR（融合后本机约 1.85×、83 dB）
 8. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应打进 **100 ms 以内**（本机 47–64 ms）
 9. 看 §三 的"下一步"（当前最大收益：把颜色 + 质感合并成一次 GPU 提交）
 
-约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 8 个测试程序。
+约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。

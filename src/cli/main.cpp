@@ -503,8 +503,11 @@ sr::TextureParams parseTexture(const Args& args) {
 // `auto` uses the GPU whenever the colour engine is already on the GPU (D047);
 // `cpu` keeps the reference chain, `gpu` asks for it explicitly. A device
 // failure is never fatal: the caller falls back and says so once.
+// `sharedDevice` is the film backend's ID3D11Device*: when given, the texture
+// chain runs on the same device so it can consume the film output directly
+// (D049) instead of uploading the frame a second time.
 sr::GpuTexture* prepareTextureGpu(const Args& args, const std::string& engine,
-                                  sr::GpuTexture& storage) {
+                                  sr::GpuTexture& storage, void* sharedDevice = nullptr) {
     std::string mode = args.get("texture-engine", "auto");
     if (mode != "auto" && mode != "cpu" && mode != "gpu") {
         std::fprintf(stderr, "warning: --texture-engine expects 'auto', 'cpu' or 'gpu'\n");
@@ -513,11 +516,37 @@ sr::GpuTexture* prepareTextureGpu(const Args& args, const std::string& engine,
     const bool wanted = mode == "gpu" || (mode == "auto" && engine == "spectral-gpu");
     if (!wanted) return nullptr;
     std::string error;
+    if (sharedDevice != nullptr && !storage.attach(sharedDevice, error)) {
+        std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
+        return nullptr;
+    }
     if (!storage.prepare(error)) {
         std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
         return nullptr;
     }
     return &storage;
+}
+
+// Runs film + texture in one submit when the texture backend shares the film
+// device (D049). Returns false when the caller should use the staged path;
+// `enabled` is cleared after the first failure so the warning appears once.
+bool processFused(sr::GpuFilm& film, sr::GpuTexture& texture, float* pixels, int width,
+                  int height, float strength, const sr::TextureParams& params, int frame,
+                  bool* enabled, std::string& error) {
+    if (!*enabled) return false;
+    const std::size_t count = static_cast<std::size_t>(width) * height;
+    if (film.processToDevice(pixels, count, strength, error) &&
+        texture.processBuffer(film.resultBuffer(), width, height, params, frame, pixels, error)) {
+        return true;
+    }
+    std::fprintf(stderr, "warning: %s; using the staged GPU path\n", error.c_str());
+    *enabled = false;
+    return false;
+}
+
+bool textureActive(const sr::TextureParams& texture) {
+    return texture.halation.amount > 0.0f || texture.glare.amount > 0.0f ||
+           texture.diffusion.amount > 0.0f || texture.grain.amount > 0.0f;
 }
 
 // Applies the chain on the GPU when one is set up; on any device failure it
@@ -926,6 +955,8 @@ struct VideoRender {
     sr::TextureParams texture;
     // D047: optional D3D11 texture chain. Set to nullptr to force the CPU path.
     sr::GpuTexture* textureGpu = nullptr;
+    // D049: texture shares the film device, so one submit does both.
+    bool fuseTexture = true;
     std::string codecArgs;
     std::string outFormat;
     std::string inMatrix;
@@ -1023,13 +1054,20 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
         const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
         if (got < raw.size()) break;
         for (size_t i = 0; i < raw.size(); ++i) frame[i] = raw[i] / 65535.0f;
-        if (job.gpu != nullptr &&
+        const int frameIndex =
+            static_cast<int>(rangeFrameBase + static_cast<long>(frames));
+        bool fused = false;
+        if (job.gpu != nullptr && job.textureGpu != nullptr && textureActive(job.texture)) {
+            fused = processFused(*job.gpu, *job.textureGpu, frame.data(), job.width, job.height,
+                                 job.strength, job.texture, frameIndex, &job.fuseTexture, error);
+        }
+        if (!fused && job.gpu != nullptr &&
             !job.gpu->process(frame.data(), pixels, frame.data(), job.strength, error)) {
             std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
                          error.c_str());
             job.gpu = nullptr;
         }
-        if (job.gpu == nullptr) {
+        if (!fused && job.gpu == nullptr) {
             sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
                     float* px = &frame[i * 3];
@@ -1044,9 +1082,10 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
                 }
             });
         }
-        applyTextureFrame(frame.data(), job.width, job.height, job.texture,
-                          static_cast<int>(rangeFrameBase + static_cast<long>(frames)), grainCache,
-                          &job.textureGpu);
+        if (!fused) {
+            applyTextureFrame(frame.data(), job.width, job.height, job.texture,
+                              frameIndex, grainCache, &job.textureGpu);
+        }
         for (size_t i = 0; i < raw.size(); ++i) {
             const float value = std::min(1.0f, std::max(0.0f, frame[i]));
             raw[i] = static_cast<unsigned short>(std::lround(value * 65535.0f));
@@ -1280,7 +1319,8 @@ int cmdVideo(const Args& args) {
     job.strength = strength;
     job.threads = threads;
     job.texture = texture;
-    job.textureGpu = prepareTextureGpu(args, engine, textureGpuStorage);
+    job.textureGpu = prepareTextureGpu(args, engine, textureGpuStorage,
+                                       gpu ? gpuFilm.deviceHandle() : nullptr);
     job.codecArgs = codecArgs;
     job.outFormat = outFormat;
     job.inMatrix = inMatrix;
@@ -1655,6 +1695,7 @@ struct Server {
     sr::GpuTexture* textureGpu = nullptr;
     bool texturePrepared = false;
     bool textureWarned = false;
+    bool fuseTexture = true;
     sr::TextureParams texture;
     sr::GrainFieldCache grainCache;
 
@@ -1702,6 +1743,14 @@ bool wantTextureGpu(Server& server) {
     if (!wanted) return false;
     if (server.texturePrepared) return server.textureGpu != nullptr;
     std::string error;
+    // Sharing the film device lets one submit do colour + texture (D049).
+    void* shared = server.gpuColor ? server.gpuFilm.deviceHandle() : nullptr;
+    if (shared != nullptr && !server.gpuTexture.attach(shared, error)) {
+        std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
+        server.texturePrepared = true;
+        server.textureGpu = nullptr;
+        return false;
+    }
     if (!server.gpuTexture.prepare(error)) {
         if (!server.textureWarned) {
             std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
@@ -1840,14 +1889,21 @@ bool renderFrame(Server& server, int index, const std::string& outPath, bool gra
     mark("unpack");
 
     if (graded) {
-        if (server.gpuColor &&
+        const bool textureOnGpu = wantTextureGpu(server);
+        bool fused = false;
+        if (server.gpuColor && textureOnGpu && textureActive(server.texture)) {
+            fused = processFused(server.gpuFilm, *server.textureGpu, server.pixels.data(),
+                                 server.width, server.height, 1.0f, server.texture, index,
+                                 &server.fuseTexture, error);
+        }
+        if (!fused && server.gpuColor &&
             !server.gpuFilm.process(server.pixels.data(), count, server.pixels.data(), 1.0f,
                                     error)) {
             std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
                          error.c_str());
             server.gpuColor = false;
         }
-        if (!server.gpuColor) {
+        if (!fused && !server.gpuColor) {
             const bool spectral = server.spectral;
             sr::parallelChunks(count, server.threads, [&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
@@ -1864,9 +1920,11 @@ bool renderFrame(Server& server, int index, const std::string& outPath, bool gra
                 }
             });
         }
-        sr::GpuTexture* gpu = wantTextureGpu(server) ? server.textureGpu : nullptr;
-        applyTextureFrame(server.pixels.data(), server.width, server.height, server.texture, index,
-                          &server.grainCache, &gpu);
+        if (!fused) {
+            sr::GpuTexture* gpu = textureOnGpu ? server.textureGpu : nullptr;
+            applyTextureFrame(server.pixels.data(), server.width, server.height, server.texture,
+                              index, &server.grainCache, &gpu);
+        }
     } else {
         // Already display-encoded sRGB when the source is sRGB; only Apple Log
         // needs the decode/BT.2020->sRGB/encode round trip.

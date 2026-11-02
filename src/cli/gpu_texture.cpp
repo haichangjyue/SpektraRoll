@@ -228,6 +228,12 @@ uint mix32(uint a, uint b) {
     rgbOut[i] = float4(clamp(c.x + delta, 0.0, 1.0), clamp(c.y + delta, 0.0, 1.0),
                        clamp(c.z + delta, 0.0, 1.0), 1.0);
 }
+
+[numthreads(64, 1, 1)] void CSCopyRgb(uint3 id : SV_DispatchThreadID) {
+    uint i = id.x;
+    if (i >= count) return;
+    rgbOut[i] = rgbIn[i];
+}
 )HLSL";
 
 #endif  // SR_HAVE_D3D11
@@ -255,6 +261,7 @@ struct GpuTexture::Impl {
         kDiffusionApply,
         kGrainField,
         kGrainApply,
+        kCopy,
         kShaderCount,
     };
 
@@ -300,6 +307,11 @@ struct GpuTexture::Impl {
     Res grain0;
     Res grain1;
     Res staging;
+    // An input buffer owned by another backend (the fused film pass, D049).
+    Res external;
+    void* externalBuffer = nullptr;
+    // False when the device came from attach(); the owner releases it.
+    bool ownsDevice = true;
 
     int width = 0;
     int height = 0;
@@ -315,7 +327,14 @@ struct GpuTexture::Impl {
     void releaseResources();
 #if SR_HAVE_D3D11
     bool createRes(UINT elements, UINT stride, Res& res, std::string& error);
+    // An SRV over a buffer this object does not own (fused film output, D049).
+    bool createResView(ID3D11Buffer* buffer, UINT elements, Res& res, std::string& error);
     void releaseRes(Res& res);
+    void releaseExternal();
+    // The effect chain itself: rgbA is the input, rgbB the scratch, and the
+    // result is read back from whichever buffer holds it at the end.
+    bool runChain(int width, int height, const TextureParams& params, int frame, float* out,
+                  std::string& error);
     bool dispatch(Shader shader, UINT groupsX, UINT groupsY, Res* srv0, Res* srv1, Res* srv2,
                   int uavSlot, Res* uav, std::string& error);
     // Scalar passes read t1 (scalarIn) and write u1 (scalarOut).
@@ -358,6 +377,24 @@ bool GpuTexture::prepare(std::string& error) {
 #endif
 }
 
+bool GpuTexture::attach(void* device, std::string& error) {
+#if !SR_HAVE_D3D11
+    (void)device;
+    error = "the GPU texture backend is only available on Windows (D3D11)";
+    return false;
+#else
+    if (device == nullptr) {
+        error = "cannot attach the texture backend to a null device";
+        return false;
+    }
+    if (impl_->device != nullptr) return impl_->device == device;
+    impl_->device = static_cast<ID3D11Device*>(device);
+    impl_->ownsDevice = false;
+    impl_->device->GetImmediateContext(&impl_->context);
+    return impl_->context != nullptr;
+#endif
+}
+
 bool GpuTexture::process(const float* rgb, int width, int height, const TextureParams& params,
                          int frame, float* out, std::string& error) {
 #if !SR_HAVE_D3D11
@@ -385,9 +422,7 @@ bool GpuTexture::process(const float* rgb, int width, int height, const TextureP
     if (!impl_->initialize(error)) return false;
     if (!impl_->ensureCapacity(width, height, error)) return false;
 
-    const auto started = std::chrono::steady_clock::now();
     Impl& g = *impl_;
-
     g.packed.resize(count * 4);
     for (std::size_t i = 0; i < count; ++i) {
         g.packed[i * 4 + 0] = rgb[i * 3 + 0];
@@ -396,7 +431,67 @@ bool GpuTexture::process(const float* rgb, int width, int height, const TextureP
         g.packed[i * 4 + 3] = 1.0f;
     }
     g.context->UpdateSubresource(g.rgbA.buffer, 0, nullptr, g.packed.data(), 0, 0);
+    return g.runChain(width, height, params, frame, out, error);
+#endif
+}
 
+bool GpuTexture::processBuffer(void* input, int width, int height, const TextureParams& params,
+                               int frame, float* out, std::string& error) {
+#if !SR_HAVE_D3D11
+    (void)input;
+    (void)width;
+    (void)height;
+    (void)params;
+    (void)frame;
+    (void)out;
+    error = "the GPU texture backend is only available on Windows (D3D11)";
+    return false;
+#else
+    if (input == nullptr) {
+        error = "fused texture input is null";
+        return false;
+    }
+    if (width <= 0 || height <= 0) {
+        error = "bad frame size for the GPU texture backend";
+        return false;
+    }
+    const std::size_t count = static_cast<std::size_t>(width) * height;
+    const bool active = params.halation.amount > 0.0f || params.glare.amount > 0.0f ||
+                        params.diffusion.amount > 0.0f || params.grain.amount > 0.0f;
+    if (!active) {
+        error = "the fused path needs at least one texture effect";
+        return false;
+    }
+    if (!impl_->initialize(error)) return false;
+    if (!impl_->ensureCapacity(width, height, error)) return false;
+
+    Impl& g = *impl_;
+    if (g.externalBuffer != input || g.external.elements != count) {
+        g.releaseExternal();
+        if (!g.createResView(static_cast<ID3D11Buffer*>(input), static_cast<UINT>(count),
+                             g.external, error)) {
+            return false;
+        }
+        g.externalBuffer = input;
+    }
+    // Copy the film result into our own buffer so the effect chain can keep
+    // ping-ponging between rgbA and rgbB exactly like the staged path.
+    const UINT groups = static_cast<UINT>((count + 63) / 64);
+    g.resetParams();
+    if (!g.dispatch(Impl::kCopy, groups, 1, &g.external, nullptr, nullptr, 0, &g.rgbA, error)) {
+        return false;
+    }
+    return g.runChain(width, height, params, frame, out, error);
+#endif
+}
+
+#if SR_HAVE_D3D11
+
+bool GpuTexture::Impl::runChain(int width, int height, const TextureParams& params, int frame,
+                                float* out, std::string& error) {
+    const std::size_t count = static_cast<std::size_t>(width) * height;
+    const auto started = std::chrono::steady_clock::now();
+    Impl& g = *this;
     const UINT fullGroups = static_cast<UINT>((count + 63) / 64);
     Impl::Res* current = &g.rgbA;
     Impl::Res* other = &g.rgbB;
@@ -510,18 +605,21 @@ bool GpuTexture::process(const float* rgb, int width, int height, const TextureP
 #if SR_HAVE_D3D11
 
 bool GpuTexture::Impl::initialize(std::string& error) {
-    if (device != nullptr) return true;
-    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
-    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
-                                 D3D11_SDK_VERSION, &device, &level, &context))) {
-        error = "could not create a D3D11 device for the texture backend";
-        return false;
+    // attach() supplies the device; the shaders still have to be compiled here.
+    if (device == nullptr) {
+        D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
+                                     D3D11_SDK_VERSION, &device, &level, &context))) {
+            error = "could not create a D3D11 device for the texture backend";
+            return false;
+        }
     }
+    if (shaders[0] != nullptr) return true;
 
     static const char* kEntries[kShaderCount] = {
         "CSHalationSource", "CSLuma",       "CSBlurH",      "CSBlurV",
         "CSDownsample",     "CSUpsample",   "CSHalationApply", "CSGlareApply",
-        "CSDiffusionApply", "CSGrainField", "CSGrainApply",
+        "CSDiffusionApply", "CSGrainField", "CSGrainApply", "CSCopyRgb",
     };
     for (int i = 0; i < kShaderCount; ++i) {
         ID3DBlob* code = nullptr;
@@ -605,6 +703,28 @@ void GpuTexture::Impl::releaseRes(Res& res) {
     res = Res{};
 }
 
+bool GpuTexture::Impl::createResView(ID3D11Buffer* buffer, UINT elements, Res& res,
+                                     std::string& error) {
+    D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+    desc.Format = DXGI_FORMAT_UNKNOWN;
+    desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    desc.Buffer.NumElements = elements;
+    if (FAILED(device->CreateShaderResourceView(buffer, &desc, &res.srv))) {
+        error = "could not create a view over the fused film output";
+        return false;
+    }
+    // Borrowed: the film backend owns the buffer.
+    res.buffer = buffer;
+    res.elements = elements;
+    return true;
+}
+
+void GpuTexture::Impl::releaseExternal() {
+    if (external.srv != nullptr) external.srv->Release();
+    external = Res{};
+    externalBuffer = nullptr;
+}
+
 void GpuTexture::Impl::releaseResources() {
     if (context != nullptr) {
         ID3D11ShaderResourceView* nullSrv[2] = {nullptr, nullptr};
@@ -621,6 +741,7 @@ void GpuTexture::Impl::releaseResources() {
     releaseRes(grain0);
     releaseRes(grain1);
     releaseRes(staging);
+    releaseExternal();
     width = 0;
     height = 0;
     lowWidth = 0;
@@ -828,7 +949,7 @@ GpuTexture::~GpuTexture() {
     if (impl_->constantBuffer != nullptr) impl_->constantBuffer->Release();
     if (impl_->stopQuery != nullptr) impl_->stopQuery->Release();
     if (impl_->context != nullptr) impl_->context->Release();
-    if (impl_->device != nullptr) impl_->device->Release();
+    if (impl_->device != nullptr && impl_->ownsDevice) impl_->device->Release();
 #endif
 }
 

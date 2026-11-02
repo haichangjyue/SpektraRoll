@@ -362,6 +362,8 @@ struct GpuFilm::Impl {
 #if SR_HAVE_D3D11
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* context = nullptr;
+    // False when the device came from attach(); the owner releases it.
+    bool ownsDevice = true;
     ID3D11ComputeShader* shader = nullptr;
     ID3D11Buffer* constantBuffer = nullptr;
     ID3D11Buffer* inputBuffer = nullptr;
@@ -520,10 +522,41 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
 
 bool GpuFilm::process(const float* rgb, std::size_t pixels, float* out, float strength,
                       std::string& error) {
+    if (!processToDevice(rgb, pixels, strength, error)) return false;
+    return readback(out, pixels, error);
+}
+
+void* GpuFilm::deviceHandle() const {
+#if !SR_HAVE_D3D11
+    return nullptr;
+#else
+    return impl_->device;
+#endif
+}
+
+bool GpuFilm::attach(void* device, std::string& error) {
+#if !SR_HAVE_D3D11
+    (void)device;
+    error = "the GPU spectral engine is only available on Windows (D3D11)";
+    return false;
+#else
+    if (device == nullptr) {
+        error = "cannot attach the GPU engine to a null device";
+        return false;
+    }
+    if (impl_->device != nullptr) return impl_->device == device;
+    impl_->device = static_cast<ID3D11Device*>(device);
+    impl_->ownsDevice = false;
+    impl_->device->GetImmediateContext(&impl_->context);
+    return impl_->context != nullptr;
+#endif
+}
+
+bool GpuFilm::processToDevice(const float* rgb, std::size_t pixels, float strength,
+                              std::string& error) {
 #if !SR_HAVE_D3D11
     (void)rgb;
     (void)pixels;
-    (void)out;
     (void)strength;
     error = "the GPU spectral engine is only available on Windows (D3D11)";
     return false;
@@ -562,13 +595,43 @@ bool GpuFilm::process(const float* rgb, std::size_t pixels, float* out, float st
     const UINT groups = static_cast<UINT>((pixels + 63) / 64);
     const auto started = std::chrono::steady_clock::now();
     impl_->context->Dispatch(groups, 1, 1);
+    // Unbind before the texture backend reads the same buffer as an SRV (D049).
+    ID3D11ShaderResourceView* nullSrv[1] = {nullptr};
+    ID3D11UnorderedAccessView* nullUav[1] = {nullptr};
+    impl_->context->CSSetShaderResources(0, 1, nullSrv);
+    impl_->context->CSSetUnorderedAccessViews(0, 1, nullUav, nullptr);
     impl_->context->End(impl_->stopQuery);
     impl_->context->Flush();
     BOOL done = FALSE;
     while (impl_->context->GetData(impl_->stopQuery, &done, sizeof(done), 0) != S_OK ||
            done == FALSE) {
     }
+    impl_->lastMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+            .count();
+    return true;
+#endif
+}
+
+void* GpuFilm::resultBuffer() const {
+#if !SR_HAVE_D3D11
+    return nullptr;
+#else
+    return impl_->outputBuffer;
+#endif
+}
+
+bool GpuFilm::readback(float* out, std::size_t pixels, std::string& error) {
+#if !SR_HAVE_D3D11
+    (void)out;
+    (void)pixels;
+    error = "the GPU spectral engine is only available on Windows (D3D11)";
+    return false;
+#else
+    if (pixels == 0) return true;
+    const auto started = std::chrono::steady_clock::now();
     impl_->context->CopyResource(impl_->staging, impl_->outputBuffer);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(impl_->context->Map(impl_->staging, 0, D3D11_MAP_READ, 0, &mapped))) {
         error = "could not read back the GPU result";
         return false;
@@ -580,7 +643,7 @@ bool GpuFilm::process(const float* rgb, std::size_t pixels, float* out, float st
         out[i * 3 + 2] = gpu[i * 4 + 2];
     }
     impl_->context->Unmap(impl_->staging, 0);
-    impl_->lastMs =
+    impl_->lastMs +=
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
             .count();
     return true;
@@ -589,13 +652,15 @@ bool GpuFilm::process(const float* rgb, std::size_t pixels, float* out, float st
 
 #if SR_HAVE_D3D11
 bool GpuFilm::Impl::initialize(std::string& error) {
-    if (device != nullptr) return true;
-    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
-    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
-                                 D3D11_SDK_VERSION, &device, &level, &context))) {
-        error = "could not create a D3D11 device";
-        return false;
+    if (device == nullptr) {
+        D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
+                                     D3D11_SDK_VERSION, &device, &level, &context))) {
+            error = "could not create a D3D11 device";
+            return false;
+        }
     }
+    if (shader != nullptr) return true;
     ID3DBlob* code = nullptr;
     ID3DBlob* messages = nullptr;
     const HRESULT compiled =
@@ -661,7 +726,8 @@ bool GpuFilm::Impl::ensureCapacity(std::size_t pixels, std::string& error) {
     }
 
     D3D11_BUFFER_DESC outputDesc = inputDesc;
-    outputDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+    // SHADER_RESOURCE lets the texture backend read this buffer directly (D049).
+    outputDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
     if (FAILED(device->CreateBuffer(&outputDesc, nullptr, &outputBuffer))) {
         error = "could not allocate the GPU output buffer";
         return false;
@@ -711,7 +777,7 @@ GpuFilm::~GpuFilm() {
     if (impl_->stopQuery != nullptr) impl_->stopQuery->Release();
     if (impl_->shader != nullptr) impl_->shader->Release();
     if (impl_->context != nullptr) impl_->context->Release();
-    if (impl_->device != nullptr) impl_->device->Release();
+    if (impl_->device != nullptr && impl_->ownsDevice) impl_->device->Release();
 #endif
 }
 

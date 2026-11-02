@@ -132,6 +132,21 @@ if(SR_BUILD_TESTS)
     endif()
     add_test(NAME gpu_texture COMMAND test_gpu_texture)
     set_tests_properties(gpu_texture PROPERTIES SKIP_RETURN_CODE 77)
+
+    # Fused colour+texture submit (D049); same skip contract.
+    add_executable(test_gpu_chain tests/test_gpu_chain.cpp src/cli/gpu_film.cpp
+        src/cli/gpu_texture.cpp)
+    target_link_libraries(test_gpu_chain PRIVATE sr_core)
+    target_compile_definitions(test_gpu_chain PRIVATE
+        SR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(WIN32)
+        target_link_libraries(test_gpu_chain PRIVATE d3d11 dxgi d3dcompiler)
+    endif()
+    if(MINGW)
+        target_link_options(test_gpu_chain PRIVATE -static)
+    endif()
+    add_test(NAME gpu_chain COMMAND test_gpu_chain)
+    set_tests_properties(gpu_chain PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

@@ -24,6 +24,10 @@ public:
 
     static bool available(std::string& error);
 
+    // Share a D3D11 device owned by someone else (D049); `device` is an
+    // ID3D11Device* and the caller keeps ownership.
+    bool attach(void* device, std::string& error);
+
     // Compiles the shaders up front so the first frame does not pay for it
     // inside its timing (a single-image run is dominated by that otherwise).
     bool prepare(std::string& error);
@@ -34,6 +38,11 @@ public:
     // then keeps using the CPU chain and the output buffer is untouched.
     bool process(const float* rgb, int width, int height, const TextureParams& params, int frame,
                  float* out, std::string& error);
+
+    // Fused path (D049): the input is a float4 buffer already on the device
+    // (the film pass output, `pixels` elements). No upload, no pack.
+    bool processBuffer(void* input, int width, int height, const TextureParams& params, int frame,
+                       float* out, std::string& error);
 
     double lastMilliseconds() const;
 

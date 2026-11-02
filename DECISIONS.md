@@ -721,6 +721,32 @@
 
 ---
 
+## D049 · 颜色 + 质感合并成一次 GPU 提交
+
+- **日期**：2026-11-03
+- **背景**：D047 之后视频是 233.6 ms/帧，但颜色和质感是两次独立提交，各自上传 42 MB、回读 42 MB；空管道（只解码 + 编码）约 207 ms/帧，说明 GPU 那两段已经比管道贵不了多少。
+- **实现**：
+  - `GpuFilm::attach()` / `GpuTexture::attach()`：质感后端可以共用 film 后端的 D3D11 设备（所有权仍在 film）。
+  - `GpuFilm::processToDevice()` + `readback()`：拆开“上传 + dispatch”和“回读”，融合路径不再读回中间结果。
+  - `GpuTexture::processBuffer()`：直接以 SRV 读 film 的输出 buffer，先做一次 GPU 内拷贝进自己的 ping-pong 缓冲，再跑原来的质感链，最后只回读一次。
+  - 只有“颜色在 GPU + 质感在 GPU + 至少一个质感项开启”时才走融合；否则仍是原路径。
+  - 任何一步失败都回退到分段提交，并在 stderr 打一次 warning。
+- **过程中修掉的三个坑**：
+  - film 的输出 buffer 原来只有 `BIND_UNORDERED_ACCESS`，补上 `BIND_SHADER_RESOURCE` 才能被质感链读。
+  - film dispatch 之后没有解绑 UAV，质感再以 SRV 读同一 buffer 会读到 0（整帧全黑）。
+  - `attach()` 之后 `initialize()` 只检查了 device 就提前返回，着色器没编译 → 访问冲突；改成按“着色器是否已编译”判断。
+- **实测（本机 Arc A750，2.6 MP，ProRes 422 HQ，全质感）**：
+  - 视频 **233.6 → 207.1 ms/帧**（1.13×）；相对 D046 的 379 ms/帧累计 **1.83×**
+  - 编码后输出与 D047 的分段路径 **逐位相同**（ffmpeg PSNR = inf）
+  - 新增 `tests/test_gpu_chain.cpp`：融合路径 vs CPU 参考 **124.1 dB**，最差 6.9e-6；确定性通过
+  - 预览（光谱 GPU + GPU 质感）**43 → 38 ms/帧**
+- **后果**：
+  - 颜色 + 质感已经基本被解码/编码管道掩盖（207 ms 就是空管道水平）；下一步想再快只能动 ffmpeg（硬件解码 / 并行编码）
+  - 融合路径依赖两个后端同设备；`--engine lut` + `--texture-engine gpu` 仍是分段路径
+  - `test_gpu_chain` 和另外两个 GPU 测试一样，无 D3D11 时 exit 77
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

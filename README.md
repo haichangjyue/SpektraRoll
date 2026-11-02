@@ -114,6 +114,13 @@ including the separable box blur's summation order, so the two agree at
 **143–166 dB PSNR** (worst deviation 4.5e-7); `ctest` enforces that too, and a
 device failure falls back to the CPU chain instead of failing the render.
 
+Colour and texture share one device: the film pass leaves its result on the
+card and the texture chain reads that buffer directly, so a frame is uploaded
+and read back once instead of twice. 2.6 MP video went from 233 to
+**207 ms/frame**, which is the decode/encode pipe itself; the fused output is
+bit-identical to the staged path, and `tests/test_gpu_chain.cpp` checks it
+against the CPU reference (124 dB).
+
 Preview uses a long-lived process (`spektra-roll-cli preview`) instead of
 spawning ffmpeg and the CLI per frame. It decodes the clip once into a bounded
 frame cache (1 GB / 1600 px longest side by default), then a preview frame is
