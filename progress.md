@@ -108,6 +108,7 @@ D050 后的分段计时是 `read 14 / convert 9 / process 44 / pack 5 / write 7`
 - 结果：视频 **85–92 → 79.2 ms/帧**，输出 **逐位相同**；`timing: wait 4 convert 11 process 48 pack 5`。
 - `demo-m3` 245.5 → **226.8 ms/帧**；分段 + 续渲不受影响（84.4 ms/帧，`part 1/2: already done`）。
 - 相对 D046 的 379 ms/帧累计 **4.8×**。
+- CI：run 63 的 macOS job 因 GitHub runner 容量不足（“not acquired by Runner … after multiple attempts”）在排队 15 分钟后失败，**不是代码问题**；空提交重跑后 **Windows + macOS 双绿**。
 
 ---
 
