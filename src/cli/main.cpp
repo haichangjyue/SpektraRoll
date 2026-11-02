@@ -3,17 +3,21 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -1011,6 +1015,170 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
 // re-encodes audio and A/V sync cannot drift between parts. `rangeFrameBase` is
 // the frame index within the requested range and keeps grain continuous across
 // segment boundaries.
+// --- overlapped frame pipes (D051) -----------------------------------------
+//
+// ffmpeg runs in its own processes, but the render loop used to sit idle while
+// fread() waited for the decoder and while fwrite() waited for the encoder.
+// A frame in flight on each side hides both: the reader fills the next frame
+// while the GPU grades the current one, and the writer drains the previous one
+// while the next frame is packed.
+
+class FramePipeReader {
+public:
+    FramePipeReader(FILE* pipe, std::size_t values)
+        : pipe_(pipe), values_(values), front_(values), back_(values) {}
+    ~FramePipeReader() { stop(); }
+
+    void start() { thread_ = std::thread([this] { loop(); }); }
+
+    // Blocks until the next frame is ready; false at end of stream.
+    bool next() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!eof_ && !pending_) {
+            pending_ = true;
+            cv_.notify_all();
+        }
+        cv_.wait(lock, [this] { return ready_ || eof_; });
+        if (!ready_) return false;
+        std::swap(front_, back_);
+        ready_ = false;
+        pending_ = true;
+        cv_.notify_all();
+        return true;
+    }
+
+    const unsigned short* data() const { return front_.data(); }
+
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true;
+            cv_.notify_all();
+        }
+        if (thread_.joinable()) thread_.join();
+    }
+
+private:
+    void loop() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        while (true) {
+            cv_.wait(lock, [this] { return pending_ || stop_; });
+            if (stop_) return;
+            lock.unlock();
+            const std::size_t got =
+                std::fread(back_.data(), sizeof(unsigned short), values_, pipe_);
+            lock.lock();
+            pending_ = false;
+            if (got == values_) {
+                ready_ = true;
+            } else {
+                eof_ = true;
+            }
+            cv_.notify_all();
+            if (eof_) return;
+        }
+    }
+
+    FILE* pipe_;
+    std::size_t values_;
+    std::vector<unsigned short> front_;
+    std::vector<unsigned short> back_;
+    std::thread thread_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool pending_ = false;
+    bool ready_ = false;
+    bool eof_ = false;
+    bool stop_ = false;
+};
+
+class FramePipeWriter {
+public:
+    FramePipeWriter(FILE* pipe, std::size_t values) : pipe_(pipe), values_(values) {
+        slots_.resize(2);
+        for (auto& slot : slots_) {
+            slot.assign(values, 0);
+            free_.push_back(&slot);
+        }
+        thread_ = std::thread([this] { loop(); });
+    }
+    ~FramePipeWriter() {
+        std::string ignored;
+        finish(ignored);
+    }
+
+    // A buffer to fill; nullptr when the encoder has already failed.
+    std::vector<unsigned short>* begin() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        space_.wait(lock, [this] { return !free_.empty() || failed_; });
+        if (failed_ || free_.empty()) return nullptr;
+        std::vector<unsigned short>* buffer = free_.back();
+        free_.pop_back();
+        return buffer;
+    }
+
+    void submit(std::vector<unsigned short>* buffer) {
+        if (buffer == nullptr) return;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ready_.push_back(buffer);
+        }
+        data_.notify_all();
+    }
+
+    // Drains the queue and joins; false when a write failed.
+    bool finish(std::string& error) {
+        if (!thread_.joinable()) return !failed_;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            done_ = true;
+        }
+        data_.notify_all();
+        thread_.join();
+        if (failed_) {
+            error = "encoder closed the pipe early";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    void loop() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        while (true) {
+            data_.wait(lock, [this] { return !ready_.empty() || done_; });
+            if (ready_.empty() && done_) return;
+            std::vector<unsigned short>* buffer = ready_.front();
+            ready_.pop_front();
+            lock.unlock();
+            const std::size_t wrote =
+                std::fwrite(buffer->data(), sizeof(unsigned short), values_, pipe_);
+            lock.lock();
+            if (wrote != values_) failed_ = true;
+            free_.push_back(buffer);
+            space_.notify_all();
+            if (failed_) return;
+        }
+    }
+
+    FILE* pipe_;
+    std::size_t values_;
+    std::vector<std::vector<unsigned short>> slots_;
+    std::deque<std::vector<unsigned short>*> free_;
+    std::deque<std::vector<unsigned short>*> ready_;
+    std::thread thread_;
+    std::mutex mutex_;
+    std::condition_variable space_;
+    std::condition_variable data_;
+    bool done_ = false;
+    bool failed_ = false;
+};
+
+// Renders `frameCount` frames from source frame `startFrame` into one video-only
+// file. Audio is muxed once from the source at the end, so a segment never
+// re-encodes audio and A/V sync cannot drift between parts. `rangeFrameBase` is
+// the frame index within the requested range and keeps grain continuous across
+// segment boundaries.
 bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeFrameBase,
                  const std::string& outPath, const std::string& timecode,
                  sr::GrainFieldCache* grainCache, long rangeTotal, size_t* rendered,
@@ -1050,32 +1218,35 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     }
 
     const size_t pixels = static_cast<size_t>(job.width) * job.height;
-    std::vector<unsigned short> raw(pixels * 3);
-    std::vector<float> frame(pixels * 3);
+    const size_t values = pixels * 3;
+    std::vector<float> frame(values);
+    FramePipeReader reader(decoder, values);
+    FramePipeWriter writer(encoder, values);
+    reader.start();
     size_t frames = 0;
     bool writeError = false;
     const bool debugTiming = std::getenv("SPEKTRA_VIDEO_DEBUG") != nullptr;
-    double tRead = 0.0, tConvert = 0.0, tProcess = 0.0, tPack = 0.0, tWrite = 0.0;
+    double tWait = 0.0, tConvert = 0.0, tProcess = 0.0, tPack = 0.0;
     const auto now = [] { return std::chrono::steady_clock::now(); };
     while (frameCount <= 0 || frames < static_cast<size_t>(frameCount)) {
         auto mark = now();
-        const size_t got = std::fread(raw.data(), sizeof(unsigned short), raw.size(), decoder);
-        if (got < raw.size()) break;
+        if (!reader.next()) break;
+        const unsigned short* src = reader.data();
         if (debugTiming) {
-            tRead += std::chrono::duration<double, std::milli>(now() - mark).count();
+            tWait += std::chrono::duration<double, std::milli>(now() - mark).count();
             mark = now();
         }
-        sr::parallelChunks(raw.size(), job.threads, [&](size_t begin, size_t end) {
+        sr::parallelChunks(values, job.threads, [&](size_t begin, size_t end) {
             for (size_t i = begin; i < end; ++i) {
-                frame[i] = static_cast<float>(raw[i]) * (1.0f / 65535.0f);
+                frame[i] = static_cast<float>(src[i]) * (1.0f / 65535.0f);
             }
         });
         if (debugTiming) {
             tConvert += std::chrono::duration<double, std::milli>(now() - mark).count();
             mark = now();
         }
-        const int frameIndex =
-            static_cast<int>(rangeFrameBase + static_cast<long>(frames));        bool fused = false;
+        const int frameIndex = static_cast<int>(rangeFrameBase + static_cast<long>(frames));
+        bool fused = false;
         if (job.gpu != nullptr && job.textureGpu != nullptr && textureActive(job.texture)) {
             fused = processFused(*job.gpu, *job.textureGpu, frame.data(), job.width, job.height,
                                  job.strength, job.texture, frameIndex, &job.fuseTexture, error);
@@ -1090,11 +1261,11 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
             sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
                     float* px = &frame[i * 3];
-                    const sr::Rgb src{px[0], px[1], px[2]};
+                    const sr::Rgb source{px[0], px[1], px[2]};
                     const sr::Rgb mapped = job.spectral
-                                               ? job.model->transformFrom(job.bake, src)
-                                               : job.lut->apply(src, job.interp);
-                    const sr::Rgb result = sr::mix(src, mapped, job.strength);
+                                               ? job.model->transformFrom(job.bake, source)
+                                               : job.lut->apply(source, job.interp);
+                    const sr::Rgb result = sr::mix(source, mapped, job.strength);
                     px[0] = result.r;
                     px[1] = result.g;
                     px[2] = result.b;
@@ -1102,32 +1273,31 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
             });
         }
         if (!fused) {
-            applyTextureFrame(frame.data(), job.width, job.height, job.texture,
-                              frameIndex, grainCache, &job.textureGpu);
+            applyTextureFrame(frame.data(), job.width, job.height, job.texture, frameIndex,
+                              grainCache, &job.textureGpu);
         }
         if (debugTiming) {
             tProcess += std::chrono::duration<double, std::milli>(now() - mark).count();
             mark = now();
         }
-        sr::parallelChunks(raw.size(), job.threads, [&](size_t begin, size_t end) {
+        std::vector<unsigned short>* out = writer.begin();
+        if (out == nullptr) {
+            writeError = true;
+            break;
+        }
+        unsigned short* dst = out->data();
+        sr::parallelChunks(values, job.threads, [&](size_t begin, size_t end) {
             for (size_t i = begin; i < end; ++i) {
                 const float value = std::min(1.0f, std::max(0.0f, frame[i]));
                 // Rounding without std::lround: the library call costs ~130 ms
                 // per 2.6 MP frame, more than the whole GPU pass (D050).
-                raw[i] = static_cast<unsigned short>(value * 65535.0f + 0.5f);
+                dst[i] = static_cast<unsigned short>(value * 65535.0f + 0.5f);
             }
         });
         if (debugTiming) {
             tPack += std::chrono::duration<double, std::milli>(now() - mark).count();
-            mark = now();
         }
-        if (std::fwrite(raw.data(), sizeof(unsigned short), raw.size(), encoder) != raw.size()) {
-            writeError = true;
-            break;
-        }
-        if (debugTiming) {
-            tWrite += std::chrono::duration<double, std::milli>(now() - mark).count();
-        }
+        writer.submit(out);
         ++frames;
         if (frames % 24 == 0) {
             if (rangeTotal > 0) {
@@ -1139,14 +1309,19 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
             std::fflush(stdout);
         }
     }
+    reader.stop();
     closePipe(decoder);
+    if (!writer.finish(error)) {
+        closePipe(encoder);
+        return false;
+    }
     closePipe(encoder);
 
     if (debugTiming && frames > 0) {
         const double n = static_cast<double>(frames);
         std::fprintf(stderr,
-                     "timing: read %.0f  convert %.0f  process %.0f  pack %.0f  write %.0f (ms/frame)\n",
-                     tRead / n, tConvert / n, tProcess / n, tPack / n, tWrite / n);
+                     "timing: wait %.0f  convert %.0f  process %.0f  pack %.0f (ms/frame)\n",
+                     tWait / n, tConvert / n, tProcess / n, tPack / n);
     }
 
     if (rendered != nullptr) *rendered = frames;

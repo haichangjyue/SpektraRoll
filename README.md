@@ -121,6 +121,8 @@ turning the RGB48 quantise loop's `std::lround` into a multiply-and-add and
 running both full-frame conversions through the thread pool took 2.6 MP video
 from 207 to **85–92 ms/frame** (about 4.3x since the CPU colour path), with
 bit-identical output. `SPEKTRA_VIDEO_DEBUG=1` prints the per-stage timings.
+Decode and encode now also run in their own threads, so the loop no longer waits
+on the ffmpeg pipes: **79 ms/frame** (about 4.8x since D046), still bit-identical.
 
 Hardware decode was measured and rejected: QSV plus the download step is
 21.8 ms/frame against 19.5 ms for the software decoder on this footage.

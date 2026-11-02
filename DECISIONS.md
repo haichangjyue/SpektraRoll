@@ -775,6 +775,28 @@
 
 ---
 
+## D051 · 解码 / 编码与处理重叠（读写线程）
+
+- **日期**：2026-11-03
+- **背景**：D050 之后视频 85–92 ms/帧，分段计时是 `read 14 / convert 9 / process 44 / pack 5 / write 7`——解码和编码各让循环空等十几毫秒，而 ffmpeg 本来就在独立进程里。
+- **实现**：
+  - `FramePipeReader`：一个后台线程把下一帧读进双缓冲，主循环 `next()` 只等“已经就绪”的帧；解码与 GPU 处理重叠。
+  - `FramePipeWriter`：两个槽位 + 后台写线程，主循环把打包好的帧交出去就继续下一帧；`finish()` 先排空再 join，失败标记传回。
+  - 两个线程都在关闭管道之前停止/join，避免读写已关闭的 `FILE*`。
+  - 计时项从 `read/write` 改成 `wait`（等读线程的时间）。
+- **实测（2.6 MP，ProRes，全质感）**：
+  - 视频 **85–92 → 79.2 ms/帧**；`timing: wait 4 convert 11 process 48 pack 5`
+  - 与重叠前输出 **逐位相同**（PSNR = inf）
+  - `demo-m3`（LUT + CPU 质感）245.5 → **226.8 ms/帧**
+  - 分段 + 续渲不受影响（48 帧 2 段 84.4 ms/帧，`part 1/2: already done`）
+  - 相对 D046 的 379 ms/帧累计 **4.8×**
+- **后果**：
+  - 现在 79 ms 里 48 ms 是 GPU 颜色 + 质感，剩下是转换/打包与等待；再往下只剩并行分段（多 worker）或减小 GPU 工作量
+  - 线程只在一次 `renderRange` 内存在，分段之间重新创建，行为与以前一致
+  - `SPEKTRA_VIDEO_DEBUG=1` 现在打印 `wait / convert / process / pack`
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
