@@ -52,6 +52,8 @@ void printUsage() {
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
+        "                         [--engine lut|spectral] [--input srgb|apple-log]\n"
+        "                         [--film <json>] [--paper <json>]\n"
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
@@ -68,7 +70,10 @@ void printUsage() {
         "      tags. --segment renders in chunks under <out>.parts and --resume\n"
         "      skips the chunks that already finished, so an interrupted long\n"
         "      render continues where it stopped. The source timecode is copied\n"
-        "      to the output unless --no-timecode is given.\n"
+        "      to the output unless --no-timecode is given. With\n"
+        "      --engine spectral the LUT is bypassed and every pixel runs the\n"
+        "      physical film/paper chain (slow but physical; --film/--paper and\n"
+        "      --input choose the materials).\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -100,10 +105,14 @@ void printUsage() {
         "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
+        "                             [--engine lut|spectral] [--input srgb|apple-log]\n"
+        "                             [--film <json>] [--paper <json>]\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
         "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
+        "      --engine spectral runs the per-pixel physical chain instead of a LUT\n"
+        "      (no --lut needed; --film/--paper/--input choose the materials).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
@@ -263,68 +272,72 @@ bool parseTriple(const std::string& text, sr::Triple& out) {
     return static_cast<bool>(stream >> out[0] >> out[1] >> out[2]);
 }
 
-int cmdLutBake(const Args& args) {
-    const std::string out = args.get("out", "out/portra400_endura_33.cube");
+struct FilmRecipe {
+    sr::Profile film;
+    sr::Profile paper;
+    sr::FilmModel model;
+    sr::BakeOptions options;
+    sr::Triple filters{};
+    bool couplers = false;
+};
+
+// Shared by `lut bake`, the spectral image path and the spectral video path:
+// resolves profiles, neutral filters and every BakeOptions flag from the CLI.
+bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& error) {
     const std::string filmPath = args.get("film", kDefaultFilm);
     const std::string paperPath = args.get("paper", kDefaultPaper);
     const std::string filtersPath = args.get("filters", kDefaultFilters);
-    const int size = std::max(2, args.getInt("size", 33));
 
-    sr::Profile film;
-    sr::Profile paper;
-    std::string error;
-    if (!sr::loadProfile(filmPath, film, error)) return fail(error);
-    if (!sr::loadProfile(paperPath, paper, error)) return fail(error);
+    if (!sr::loadProfile(filmPath, recipe.film, error)) return false;
+    if (!sr::loadProfile(paperPath, recipe.paper, error)) return false;
 
-    sr::Triple filters{0.0, 0.0, 0.0};
     if (args.has("cc")) {
-        if (!parseTriple(args.get("cc"), filters)) {
-            return fail("--cc expects three numbers, e.g. --cc 0,51.57,52.53");
+        if (!parseTriple(args.get("cc"), recipe.filters)) {
+            error = "--cc expects three numbers, e.g. --cc 0,51.57,52.53";
+            return false;
         }
-    } else if (!sr::loadNeutralFilters(filtersPath, paper.info.stock, film.info.stock, "TH-KG3",
-                                       filters, error)) {
-        return fail(error + " (pass --cc C,M,Y to override)");
+    } else if (!sr::loadNeutralFilters(filtersPath, recipe.paper.info.stock,
+                                       recipe.film.info.stock, "TH-KG3", recipe.filters,
+                                       error)) {
+        error += " (pass --cc C,M,Y to override)";
+        return false;
     }
 
-    sr::BakeOptions options;
     if (args.has("input")) {
-        if (!sr::parseInputTransfer(args.get("input"), options.input)) {
-            return fail("--input expects 'srgb' or 'apple-log'");
+        if (!sr::parseInputTransfer(args.get("input"), recipe.options.input)) {
+            error = "--input expects 'srgb' or 'apple-log'";
+            return false;
         }
     }
-    options.exposureEv = args.getDouble("exposure", 0.0);
-    options.threads = args.getInt("threads", 0);
+    recipe.options.exposureEv = args.getDouble("exposure", 0.0);
+    recipe.options.threads = args.getInt("threads", 0);
 
     if (args.has("scan")) {
         const std::string mode = args.get("scan");
         if (mode == "negative" || mode == "film") {
-            options.scan = sr::ScanMode::Negative;
+            recipe.options.scan = sr::ScanMode::Negative;
         } else if (mode != "print") {
-            return fail("--scan expects 'print' or 'negative'");
+            error = "--scan expects 'print' or 'negative'";
+            return false;
         }
     }
-    // Negative scans default to a little contrast (D026); the print path ignores
-    // this value entirely.
-    options.contrast =
-        args.getDouble("contrast", options.scan == sr::ScanMode::Negative ? 1.15 : 1.0);
+    recipe.options.contrast = args.getDouble(
+        "contrast", recipe.options.scan == sr::ScanMode::Negative ? 1.15 : 1.0);
 
-    // Gamut compression defaults on only for Apple Log input (D027): the print    // path from Apple Log can produce negative linear values, while the sRGB
-    // path must stay byte-identical to the M1 reference.
-    options.gamutCompress = options.input == sr::InputTransfer::AppleLog;
+    recipe.options.gamutCompress = recipe.options.input == sr::InputTransfer::AppleLog;
     if (args.has("gamut")) {
         const std::string mode = args.get("gamut");
         if (mode == "oklch") {
-            options.gamutCompress = true;
+            recipe.options.gamutCompress = true;
         } else if (mode == "off") {
-            options.gamutCompress = false;
+            recipe.options.gamutCompress = false;
         } else {
-            return fail("--gamut expects 'off' or 'oklch'");
+            error = "--gamut expects 'off' or 'oklch'";
+            return false;
         }
     }
 
-    // DIR couplers default on for Apple Log and off for the sRGB reference
-    // (D028); `--couplers off` turns them back off.
-    bool couplers = options.input == sr::InputTransfer::AppleLog;
+    bool couplers = recipe.options.input == sr::InputTransfer::AppleLog;
     if (args.has("couplers")) {
         const std::string value = args.get("couplers");
         if (value == "on") {
@@ -332,31 +345,50 @@ int cmdLutBake(const Args& args) {
         } else if (value == "off") {
             couplers = false;
         } else {
-            return fail("--couplers expects 'on' or 'off'");
+            error = "--couplers expects 'on' or 'off'";
+            return false;
         }
     }
 
-    sr::FilmModel model;
     sr::FilmModelOptions modelOptions;
     modelOptions.couplers = couplers;
-    if (!model.configure(film, paper, filters, error, modelOptions)) return fail(error);
+    recipe.couplers = couplers;
+    if (!recipe.model.configure(recipe.film, recipe.paper, recipe.filters, error,
+                                modelOptions)) {
+        return false;
+    }
 
     if (args.has("hdr")) {
         const std::string value = args.get("hdr");
         if (value == "pq") {
-            options.hdr = sr::HdrMode::Pq;
+            recipe.options.hdr = sr::HdrMode::Pq;
         } else if (value == "hlg") {
-            options.hdr = sr::HdrMode::Hlg;
+            recipe.options.hdr = sr::HdrMode::Hlg;
         } else if (value != "off") {
-            return fail("--hdr expects 'pq', 'hlg' or 'off'");
+            error = "--hdr expects 'pq', 'hlg' or 'off'";
+            return false;
         }
     }
-    options.peakNits = args.getDouble("peak", 1000.0);
+    recipe.options.peakNits = args.getDouble("peak", 1000.0);
+    return true;
+}
+
+int cmdLutBake(const Args& args) {
+    const std::string out = args.get("out", "out/portra400_endura_33.cube");
+    const int size = std::max(2, args.getInt("size", 33));
+
+    FilmRecipe recipe;
+    std::string error;
+    if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+    const sr::Profile& film = recipe.film;
+    const sr::Profile& paper = recipe.paper;
+    const sr::BakeOptions& options = recipe.options;
 
     std::printf("film:              %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
     std::printf("paper:             %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
-    std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
-    std::printf("print exposure:    %.12f\n", model.printExposureFactor());
+    std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", recipe.filters[0],
+                recipe.filters[1], recipe.filters[2]);
+    std::printf("print exposure:    %.12f\n", recipe.model.printExposureFactor());
     std::printf("input:             %s", sr::inputTransferName(options.input));
     if (options.exposureEv != 0.0) std::printf(" (%+.2f EV)", options.exposureEv);
     std::printf("\n");
@@ -364,7 +396,7 @@ int cmdLutBake(const Args& args) {
                 options.scan == sr::ScanMode::Negative ? "negative (no paper)" : "print");
     if (options.contrast != 1.0) std::printf("contrast:          %.2f\n", options.contrast);
     std::printf("gamut:             %s\n", options.gamutCompress ? "oklch" : "off");
-    std::printf("couplers:          %s\n", couplers ? "on" : "off");
+    std::printf("couplers:          %s\n", recipe.couplers ? "on" : "off");
     if (options.hdr != sr::HdrMode::Off) {
         std::printf("hdr:               %s, white at %.0f nits\n",
                     options.hdr == sr::HdrMode::Pq ? "pq" : "hlg", options.peakNits);
@@ -373,7 +405,7 @@ int cmdLutBake(const Args& args) {
     const auto started = std::chrono::steady_clock::now();
     const std::string title =
         args.get("title", "SpektraRoll " + film.info.stock + " + " + paper.info.stock);
-    const sr::Lut3D lut = model.bake(size, title, options);
+    const sr::Lut3D lut = recipe.model.bake(size, title, options);
     if (lut.empty()) return fail("failed to bake the LUT");
 
     if (!lut.saveCube(out, error)) return fail(error);
@@ -381,9 +413,9 @@ int cmdLutBake(const Args& args) {
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
             .count();
 
-    const sr::Rgb mid = model.transformFrom(options, {0.5f, 0.5f, 0.5f});
-    const sr::Rgb black = model.transformFrom(options, {0.0f, 0.0f, 0.0f});
-    const sr::Rgb white = model.transformFrom(options, {1.0f, 1.0f, 1.0f});
+    const sr::Rgb mid = recipe.model.transformFrom(options, {0.5f, 0.5f, 0.5f});
+    const sr::Rgb black = recipe.model.transformFrom(options, {0.0f, 0.0f, 0.0f});
+    const sr::Rgb white = recipe.model.transformFrom(options, {1.0f, 1.0f, 1.0f});
 
     std::printf("wrote %s (%d^3, %d entries, %.1f ms)\n", out.c_str(), size,
                 size * size * size, elapsed);
@@ -530,12 +562,22 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
 }
 
 int cmdLutApply(const Args& args) {
-    const std::string lutPath = args.get("lut");
-    if (lutPath.empty()) return fail("lut apply requires --lut <file.cube>");
+    const std::string engine = args.get("engine", "lut");
+    if (engine != "lut" && engine != "spectral") {
+        return fail("--engine expects 'lut' or 'spectral'");
+    }
+    const bool spectral = engine == "spectral";
 
+    const std::string lutPath = args.get("lut");
     sr::Lut3D lut;
+    FilmRecipe recipe;
     std::string error;
-    if (!lut.loadCube(lutPath, error)) return fail(error);
+    if (!spectral) {
+        if (lutPath.empty()) return fail("lut apply requires --lut <file.cube>");
+        if (!lut.loadCube(lutPath, error)) return fail(error);
+    } else {
+        if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+    }
 
     const std::string interpName = args.get("interp", "tetra");
     const sr::Interp mode =
@@ -543,6 +585,7 @@ int cmdLutApply(const Args& args) {
     const float strength = static_cast<float>(std::atof(args.get("strength", "1.0").c_str()));
 
     if (args.has("in-dir") || args.has("out-dir")) {
+        if (spectral) return fail("--engine spectral currently handles a single image only");
         return applyDirectory(lut, mode, strength, args.get("in-dir"), args.get("out-dir"), args);
     }
 
@@ -564,7 +607,9 @@ int cmdLutApply(const Args& args) {
         for (size_t i = begin; i < end; ++i) {
             float* px = &image.pixels[i * 3];
             const sr::Rgb src{px[0], px[1], px[2]};
-            const sr::Rgb mapped = lut.apply(src, mode);
+            const sr::Rgb mapped =
+                spectral ? recipe.model.transformFrom(recipe.options, src)
+                         : lut.apply(src, mode);
             const sr::Rgb result = sr::mix(src, mapped, strength);
             px[0] = result.r;
             px[1] = result.g;
@@ -578,10 +623,19 @@ int cmdLutApply(const Args& args) {
 
     if (!sr::saveImage(outPath, image, error, bits)) return fail(error);
 
-    std::printf("applied %s (%d^3) to %s\n", lutPath.c_str(), lut.size(), inPath.c_str());
-    std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms, %s)\n",
-                outPath.c_str(), image.width, image.height, count, bits, sourceBits, elapsed,
-                mode == sr::Interp::Trilinear ? "trilinear" : "tetrahedral");
+    if (spectral) {
+        std::printf("engine: spectral %s + %s\n", recipe.film.info.name.c_str(),
+                    recipe.paper.info.name.c_str());
+        std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
+                    outPath.c_str(), image.width, image.height, count, bits, sourceBits,
+                    elapsed);
+    } else {
+        std::printf("applied %s (%d^3) to %s\n", lutPath.c_str(), lut.size(), inPath.c_str());
+        std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms, %s)\n",
+                    outPath.c_str(), image.width, image.height, count, bits, sourceBits,
+                    elapsed,
+                    mode == sr::Interp::Trilinear ? "trilinear" : "tetrahedral");
+    }
     return 0;
 }
 
@@ -805,6 +859,12 @@ struct VideoRender {
     int height = 0;
     double fps = 24.0;
     const sr::Lut3D* lut = nullptr;
+    // Set when `--engine spectral`: the per-pixel physical chain replaces the
+    // LUT. Kept as a pointer because FilmModel is not copyable and lives in
+    // cmdVideo for the whole render.
+    const sr::FilmModel* model = nullptr;
+    sr::BakeOptions bake;
+    bool spectral = false;
     sr::Interp interp = sr::Interp::Tetrahedral;
     float strength = 1.0f;
     int threads = 1;
@@ -909,7 +969,9 @@ bool renderRange(const VideoRender& job, long startFrame, long frameCount, long 
             for (size_t i = begin; i < end; ++i) {
                 float* px = &frame[i * 3];
                 const sr::Rgb src{px[0], px[1], px[2]};
-                const sr::Rgb mapped = job.lut->apply(src, job.interp);
+                const sr::Rgb mapped = job.spectral
+                                           ? job.model->transformFrom(job.bake, src)
+                                           : job.lut->apply(src, job.interp);
                 const sr::Rgb result = sr::mix(src, mapped, job.strength);
                 px[0] = result.r;
                 px[1] = result.g;
@@ -975,13 +1037,23 @@ int cmdVideo(const Args& args) {
     const std::string inPath = args.get("in");
     const std::string outPath = args.get("out");
     const std::string lutPath = args.get("lut");
-    if (lutPath.empty()) return fail("video requires --lut <file.cube>");
+    const std::string engine = args.get("engine", "lut");
+    if (engine != "lut" && engine != "spectral") {
+        return fail("--engine expects 'lut' or 'spectral'");
+    }
+    const bool spectral = engine == "spectral";
+    if (!spectral && lutPath.empty()) return fail("video requires --lut <file.cube>");
     if (inPath.empty()) return fail("video requires --in <clip>");
     if (outPath.empty()) return fail("video requires --out <clip>");
 
     sr::Lut3D lut;
+    FilmRecipe recipe;
     std::string error;
-    if (!lut.loadCube(lutPath, error)) return fail(error);
+    if (spectral) {
+        if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+    } else if (!lut.loadCube(lutPath, error)) {
+        return fail(error);
+    }
 
     const std::string ffmpeg = ffmpegPath(args);
     const std::string ffprobe = siblingTool(ffmpeg);
@@ -1031,6 +1103,14 @@ int cmdVideo(const Args& args) {
     const std::string trc = args.get("trc", "srgb");
     const bool hdr = trc == "pq" || trc == "hlg";
     const std::string inMatrix = args.get("in-matrix", "bt2020");
+    if (spectral) {
+        // The LUT path bakes PQ/HLG into the table; spectral output encodes it
+        // at the end of the chain, using the same --trc.
+        recipe.options.hdr = trc == "pq" ? sr::HdrMode::Pq
+                             : trc == "hlg" ? sr::HdrMode::Hlg
+                                            : sr::HdrMode::Off;
+        recipe.options.peakNits = args.getDouble("peak", 1000.0);
+    }
 
     // Time range (D031) and segmentation (D040).
     const double start = parseSeconds(args.get("start", "0"));
@@ -1115,7 +1195,10 @@ int cmdVideo(const Args& args) {
     job.width = width;
     job.height = height;
     job.fps = fps;
-    job.lut = &lut;
+    job.spectral = spectral;
+    job.lut = spectral ? nullptr : &lut;
+    job.model = spectral ? &recipe.model : nullptr;
+    job.bake = recipe.options;
     job.interp = mode;
     job.strength = strength;
     job.threads = threads;
@@ -1154,6 +1237,12 @@ int cmdVideo(const Args& args) {
                                    : (codec == "hevc" ? "HEVC Main10" : "H.264");
     std::printf("output: %s (%s, %s)\n", outPath.c_str(), codecName,
                 hdr ? (trc == "pq" ? "PQ" : "HLG") : "SDR");
+    if (spectral) {
+        std::printf("engine: spectral %s + %s\n", recipe.film.info.name.c_str(),
+                    recipe.paper.info.name.c_str());
+    } else {
+        std::printf("engine: lut %s\n", lutPath.c_str());
+    }
 
     const std::filesystem::path outFile(outPath);
     std::string extension = outFile.extension().string();

@@ -50,6 +50,7 @@
 - [x] **直方图叠加** + **适合/100% 缩放**（滚轮缩放、拖拽平移、Ctrl+0/1、双击切换）
 - [x] **冲印流程分组**（D042）：右栏“显影前 / 显影后 / 队列 / 日志”；DIR 耦合剂与 OkLCh 色域压缩可在界面开关
 - [x] **胶片 / 相纸选择**（D043）：11 支彩色负片 × 6 种相纸；选胶片自动切到推荐相纸
+- [x] **可选物理光谱引擎**（D044）：`--engine spectral` / UI“引擎：光谱”，2.6 MP 约 1.1 s/帧；默认仍是 LUT
 - [x] `scripts\build-ui.cmd`：配置 → 编译 → windeployqt → 启动
 - [x] 界面不复制管线，预览和渲染都调用同一个 `spektra-roll-cli`
 - [x] 截图：`docs/ui-preview.png`、`docs/ui-queue.png`

@@ -90,4 +90,9 @@ jobs:
           "$exe" video --lut m1.cube --in ci_src.mov --out ci_seg.mov --trc srgb --in-matrix bt709 --duration 0.5 --segment 0.2 --resume
           test "$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of default=nw=1:nk=1 ci_seg.mov | head -n 1)" = "12"
           ffprobe -v error -show_entries stream_tags=timecode -of default=nw=1:nk=1 ci_seg.mov | grep -q 01:00:00:00
+          "$exe" gen --out ci_frame.png --width 160 --height 90
+          "$exe" lut apply --engine spectral --input srgb --in ci_frame.png --out ci_spectral.png
+          test -f ci_spectral.png
+          "$exe" video --engine spectral --input srgb --in ci_src.mov --out ci_spec.mov --trc srgb --in-matrix bt709 --frames 4
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of default=nw=1:nk=1 ci_spec.mov | head -n 1)" = "4"
           ffprobe -v error -show_entries stream=codec_name,nb_frames -of default=noprint_wrappers=1 ci_trim.mov

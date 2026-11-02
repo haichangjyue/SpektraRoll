@@ -44,6 +44,13 @@ display-encoded sRGB
 Everything is a pure function of one RGB triple. That is what makes the bake
 deterministic and the LUT meaningful.
 
+`--engine spectral` is the escape hatch from the table: it calls the same
+`FilmModel::transformFrom` for every pixel at run time. It is still one RGB
+triple in, one out; the difference is sampling error versus a 33³ lookup.
+Measured on the i5-10600KF: 1.08 s for a 2.6 MP still and 1.26 s per video frame
+with 12 threads, so it is the offline/final-render path, not the interactive
+one. The LUT remains the default.
+
 Two input domains are supported (D023). The LUT domain is whichever one you
 bake:
 

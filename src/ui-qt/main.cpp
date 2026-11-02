@@ -997,6 +997,7 @@ private:
         lutLayout->addWidget(lutEdit_, 1);
         auto* lutBrowse = new QPushButton(QStringLiteral("…"));
         lutBrowse->setFixedWidth(28);
+        lutBrowseButton_ = lutBrowse;
         connect(lutBrowse, &QPushButton::clicked, this, [this] {
             const QString file = QFileDialog::getOpenFileName(
                 this, QStringLiteral("选择 LUT"), lutEdit_->text(), QStringLiteral("LUT (*.cube)"));
@@ -1019,6 +1020,12 @@ private:
         outputSection->addWidget(labeledRow(
             QStringLiteral("输出文件"),
             saveRow(outputEdit_, QStringLiteral("保存视频"), QStringLiteral("视频 (*.mov *.mp4)"))));
+        engine_ = new QComboBox;
+        engine_->addItem(QStringLiteral("LUT（快）"), QStringLiteral("lut"));
+        engine_->addItem(QStringLiteral("光谱（物理，慢）"), QStringLiteral("spectral"));
+        engine_->setToolTip(
+            QStringLiteral("LUT：每帧查表，实时；光谱：逐像素物理链，约 1.2 秒 / 2.6 MP"));
+        outputSection->addWidget(labeledRow(QStringLiteral("引擎"), engine_));
         codec_ = new QComboBox;
         codec_->addItem(QStringLiteral("H.264"), QStringLiteral("h264"));
         codec_->addItem(QStringLiteral("HEVC（HDR 推荐）"), QStringLiteral("hevc"));
@@ -1360,6 +1367,10 @@ private:
         });
         connect(paperCombo_, &QComboBox::currentIndexChanged, this,
                 [this](int) { markLookChanged(); });
+        connect(engine_, &QComboBox::currentIndexChanged, this, [this](int) {
+            updateEngineUi();
+            markLookChanged();
+        });
         connect(trc_, &QComboBox::currentIndexChanged, this,
                 [this](int) { markLookChanged(); });
 
@@ -1477,6 +1488,7 @@ private:
         diffusion_->setValue(settings.value(QStringLiteral("texture/diffusion"), 0.1).toDouble());
 
         selectData(codec_, settings.value(QStringLiteral("render/codec"), QStringLiteral("h264")).toString());
+        selectData(engine_, settings.value(QStringLiteral("render/engine"), QStringLiteral("lut")).toString());
         start_->setValue(settings.value(QStringLiteral("render/start"), 0.0).toDouble());
         frames_->setValue(settings.value(QStringLiteral("render/frames"), 0).toInt());
         segment_->setValue(settings.value(QStringLiteral("render/segment"), 10).toInt());
@@ -1494,6 +1506,7 @@ private:
         for (QLineEdit* edit : {inputEdit_, ffmpegEdit_, lutEdit_, outputEdit_}) {
             edit->setCursorPosition(0);
         }
+        updateEngineUi();
 
         // If the LUT was baked by this UI, remember whether the controls still
         // match it; otherwise preview/render would silently use an old look.
@@ -1531,6 +1544,7 @@ private:
         settings.setValue(QStringLiteral("texture/glare"), glare_->value());
         settings.setValue(QStringLiteral("texture/diffusion"), diffusion_->value());
         settings.setValue(QStringLiteral("render/codec"), codec_->currentData().toString());
+        settings.setValue(QStringLiteral("render/engine"), engine_->currentData().toString());
         settings.setValue(QStringLiteral("render/start"), start_->value());
         settings.setValue(QStringLiteral("render/frames"), frames_->value());
         settings.setValue(QStringLiteral("render/segment"), segment_->value());
@@ -1562,6 +1576,10 @@ private:
     }
 
     bool bakeLut() {
+        if (spectralEngine()) {
+            status_->setText(QStringLiteral("光谱引擎直接计算物理链，不需要 LUT"));
+            return false;
+        }
         QString path = lutEdit_->text().trimmed();
         if (path.isEmpty()) path = repoRoot_ + QStringLiteral("/out/ui-portra400.cube");
         QDir().mkpath(QFileInfo(path).absolutePath());
@@ -1609,6 +1627,7 @@ private:
     }
 
     bool ensureLut() {
+        if (spectralEngine()) return true;
         const QString path = lutEdit_->text().trimmed();
         if (!path.isEmpty() && QFileInfo::exists(path)) {
             if (lutBaked_ && lutStale_) return bakeLut();
@@ -1627,7 +1646,8 @@ private:
     }
 
     QString lookSignature() const {
-        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9")
+        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9|%10")
+            .arg(engine_->currentData().toString())
             .arg(source_->currentData().toString())
             .arg(number(exposure_->value(), 4))
             .arg(scan_->currentData().toString())
@@ -1825,12 +1845,18 @@ private:
 
         QString outputText;
         QApplication::setOverrideCursor(Qt::WaitCursor);
+        status_->setText(spectralEngine() ? QStringLiteral("光谱预览中（逐像素物理链）…")
+                                          : QStringLiteral("LUT 预览中…"));
         bool ok = runSync(ffmpegEdit_->text(), ffmpegArgs, &outputText);
         if (ok) {
-            QStringList args{QStringLiteral("lut"), QStringLiteral("apply"),
-                             QStringLiteral("--lut"), lutEdit_->text(),
-                             QStringLiteral("--in"),  source,
-                             QStringLiteral("--out"), output};
+            QStringList args{QStringLiteral("lut"), QStringLiteral("apply")};
+            if (spectralEngine()) {
+                args << QStringLiteral("--engine") << QStringLiteral("spectral");
+                args << lookArgs(true);
+            } else {
+                args << QStringLiteral("--lut") << lutEdit_->text();
+            }
+            args << QStringLiteral("--in") << source << QStringLiteral("--out") << output;
             args << textureArgs();
             ok = runSync(cliPath_, args, &outputText);
         }
@@ -1856,12 +1882,58 @@ private:
                              .arg(number(previewTime_->value(), 2)));
     }
 
+    bool spectralEngine() const {
+        return engine_ != nullptr &&
+               engine_->currentData().toString() == QStringLiteral("spectral");
+    }
+
+    // Everything the physical chain needs at run time, shared by the spectral
+    // image and video paths. `withHdr` is false for video because `--trc`
+    // already selects PQ/HLG there.
+    QStringList lookArgs(bool withHdr) const {
+        QStringList args;
+        args << QStringLiteral("--input") << source_->currentData().toString()
+             << QStringLiteral("--film") << filmCombo_->currentData().toString()
+             << QStringLiteral("--paper") << paperCombo_->currentData().toString()
+             << QStringLiteral("--exposure") << number(exposure_->value(), 2)
+             << QStringLiteral("--scan") << scan_->currentData().toString()
+             << QStringLiteral("--contrast") << number(contrast_->value(), 2)
+             << QStringLiteral("--couplers")
+             << (couplers_->isChecked() ? QStringLiteral("on") : QStringLiteral("off"))
+             << QStringLiteral("--gamut")
+             << (gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("off"));
+        const QString trc = trc_->currentData().toString();
+        if (withHdr && (trc == QStringLiteral("pq") || trc == QStringLiteral("hlg"))) {
+            args << QStringLiteral("--hdr") << trc << QStringLiteral("--peak")
+                 << QStringLiteral("1000");
+        }
+        return args;
+    }
+
+    void updateEngineUi() {
+        const bool spectral = spectralEngine();
+        if (lutEdit_ != nullptr) lutEdit_->setEnabled(!spectral);
+        if (lutBrowseButton_ != nullptr) lutBrowseButton_->setEnabled(!spectral);
+        if (bakeButton_ != nullptr) bakeButton_->setEnabled(!spectral);
+        if (status_ != nullptr) {
+            status_->setText(
+                spectral ? QStringLiteral("光谱引擎：逐像素物理链，约 1.2 s / 2.6 MP 每帧")
+                         : QStringLiteral("LUT 引擎：每帧查表"));
+        }
+    }
+
     QStringList buildVideoArgs(const QString& input, const QString& output,
                                const QString& lut) const {
-        QStringList args{QStringLiteral("video"), QStringLiteral("--lut"), lut,
-                         QStringLiteral("--in"), input, QStringLiteral("--out"),
-                         output, QStringLiteral("--trc"), trc_->currentData().toString(),
-                         QStringLiteral("--ffmpeg"), ffmpegEdit_->text()};
+        QStringList args{QStringLiteral("video")};
+        if (spectralEngine()) {
+            args << QStringLiteral("--engine") << QStringLiteral("spectral");
+            args << lookArgs(false);
+        } else {
+            args << QStringLiteral("--lut") << lut;
+        }
+        args << QStringLiteral("--in") << input << QStringLiteral("--out") << output
+             << QStringLiteral("--trc") << trc_->currentData().toString()
+             << QStringLiteral("--ffmpeg") << ffmpegEdit_->text();
         args << textureArgs();
         args << QStringLiteral("--codec") << codec_->currentData().toString();
         if (start_->value() > 0.0) {
@@ -1903,7 +1975,9 @@ private:
         rendering_ = true;
         setBusy(true);
         progress_->setRange(0, 0);
-        status_->setText(QStringLiteral("渲染中…"));
+        status_->setText(spectralEngine()
+                             ? QStringLiteral("光谱渲染中：逐像素物理链，约 1.2 秒/帧")
+                             : QStringLiteral("渲染中…"));
 
         auto* process = new QProcess(this);
         renderProcess_ = process;
@@ -2101,7 +2175,17 @@ private:
                 job.finishedMs = 0;
             }
             if (job.input.isEmpty() || job.output.isEmpty() || job.args.isEmpty()) continue;
-            if (job.lutSnapshot.isEmpty() || !QFileInfo::exists(job.lutSnapshot)) continue;
+            bool spectralJob = false;
+            for (int i = 0; i + 1 < job.args.size(); ++i) {
+                if (job.args[i] == QStringLiteral("--engine") &&
+                    job.args[i + 1] == QStringLiteral("spectral")) {
+                    spectralJob = true;
+                }
+            }
+            if (!spectralJob &&
+                (job.lutSnapshot.isEmpty() || !QFileInfo::exists(job.lutSnapshot))) {
+                continue;
+            }
             jobs_.append(job);
         }
         refreshQueueTable();
@@ -2125,8 +2209,8 @@ private:
         QDir().mkpath(directory);
         const QString suffix = baseInfo.suffix().isEmpty() ? QStringLiteral("mov")
                                                            : baseInfo.suffix();
-        const QString snapshot = createLutSnapshot();
-        if (snapshot.isEmpty()) return;
+        const QString snapshot = spectralEngine() ? QString() : createLutSnapshot();
+        if (!spectralEngine() && snapshot.isEmpty()) return;
         for (const QString& video : videos) {
             const QString stem = QFileInfo(video).completeBaseName();
             const QString output = uniqueOutputPath(directory + QLatin1Char('/') + stem +
@@ -2155,8 +2239,8 @@ private:
         output = uniqueOutputPath(output);
         QDir().mkpath(QFileInfo(output).absolutePath());
 
-        const QString snapshot = createLutSnapshot();
-        if (snapshot.isEmpty()) return;
+        const QString snapshot = spectralEngine() ? QString() : createLutSnapshot();
+        if (!spectralEngine() && snapshot.isEmpty()) return;
         addQueueJob(inputEdit_->text(), output, snapshot);
 
         refreshQueueTable();
@@ -2528,6 +2612,7 @@ private:
     QDoubleSpinBox* diffusion_ = nullptr;
 
     QComboBox* codec_ = nullptr;
+    QComboBox* engine_ = nullptr;
     QDoubleSpinBox* start_ = nullptr;
     QSpinBox* frames_ = nullptr;
     QSpinBox* segment_ = nullptr;
@@ -2535,6 +2620,7 @@ private:
     QDoubleSpinBox* previewTime_ = nullptr;
 
     QPushButton* bakeButton_ = nullptr;
+    QPushButton* lutBrowseButton_ = nullptr;
     QPushButton* previewButton_ = nullptr;
     QPushButton* compareButton_ = nullptr;
     QPushButton* renderButton_ = nullptr;

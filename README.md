@@ -90,6 +90,13 @@ effects; **显影后** holds paper, scan mode, contrast, gamut compression and
 lens/scan diffusion. The film and paper pickers list 11 colour negative stocks
 and 6 papers; choosing a film auto-selects its recommended paper.
 
+Colour normally runs as a baked 3D LUT. `--engine spectral` (CLI, or **引擎** in
+the UI) bypasses the LUT and runs the per-pixel film/paper chain directly:
+measured on this machine, **1.08 s per 2.6 MP still** and **1.26 s per video
+frame** (12 threads). It is the fully physical option for short/final renders;
+the LUT stays the default for interactive preview and long clips. On the same
+frame the 33³ LUT and the physical path agree at **62.2 dB PSNR**.
+
 ![Post-dev inspector](docs/ui-postdev.png)
 
 ![Render queue](docs/ui-queue.png)
