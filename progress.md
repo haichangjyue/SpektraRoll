@@ -33,6 +33,52 @@
 
 ---
 
+## 零之一、本阶段交接摘要：D056–D060（Metal → 浮点 → Log）
+
+> 新开对话只需要读这一节 + §三；按决策编号的详细记录从 D060 开始往下排。
+
+### 已完成（按交付）
+
+| 编号 | 内容 | 关键结果 |
+|---|---|---|
+| **D056** | macOS Metal 光谱 | 2.6 MP 单帧 **424.3 → 129.0 ms（3.3×）**；M1 上 `MTLCreateSystemDefaultDevice` 返回 nil，`MTLCopyAllDevices` 兜底；新增 `gpu-info` 诊断 |
+| **D057** | macOS Metal 质感 | 14 个 pass / 一个 command buffer / `setBytes` 内联；真机九组 **逐位相同**，融合 **134.80 dB**；质感本身约 125 → 48 ms |
+| **D058** | 线性 EXR | `--exr-linear [--exr-trc srgb\|pq\|hlg] [--peak]`；1.0 = 白/峰值；同帧 display 0.016..0.887 → linear 0.0012..0.762 |
+| **D059** | EXR ZIP | 默认 ZIP、`--exr-raw` 关闭；已调色帧 −28%、half −38%、带颗粒 ≈0%；ffmpeg 交叉验证 92.6 dB |
+| **D060** | 多相机 Log | S-Log3 / C-Log3 / V-Log；曲线 101 点 vs colour-science **完全一致**；CPU vs D3D11 **110.67 dB**；UI 下拉可选 |
+
+- CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
+- 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 9/9 测试。
+
+### 关键决策（D056–D060）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D056 | macOS GPU 颜色 | Metal 移植光谱链；**fast math 必须关**（否则 NaN 保护被优化掉）；默认设备 nil 时用设备列表兜底 |
+| D057 | macOS GPU 质感 | 14 pass 一个 command buffer；参数/PSF taps 用 `setBytes` 内联；融合路径借用 film 的 `MTLBuffer` |
+| D058 | 线性浮点交付 | 可选 `--exr-linear`；1.0 = 白/峰值；sRGB 解码不钳制；不改默认 |
+| D059 | EXR 压缩 | 默认 ZIP、可 `--exr-raw`；压不动逐块回退；只用 stb zlib，无新依赖 |
+| D060 | 多相机 Log | 官方曲线 + 原生 gamut 矩阵；CPU/GPU 同一套 `inputMode`；手动选输入 |
+
+### 未完成的待办（按建议顺序）
+
+1. **更多 Log / gamut**：ARRI LogC3/4、S-Gamut3（非 Cine）等
+2. **OCIO**：先定依赖策略（引入 OpenColorIO vs OCIO-lite）；线性 EXR 已有，但不是完整色彩管理
+3. **PIZ / DWA 压缩**：带颗粒的 float 用 ZIP 基本不省
+4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积
+5. **macOS Qt 打包**：Mac 目前只有 CLI
+6. **Mac 视频 ms/帧**：现在只有 2.6 MP 静帧数字，`video` 还没在 Mac 上量
+
+### 新对话的第一步
+
+1. `ctest --test-dir build --output-on-failure`（9/9；Mac 上三个 GPU 测试都应真跑）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `scripts\demo-exr.cmd -NoOpen`（读回 PSNR = inf；linear 范围 0.0012..0.7619）
+4. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`（2.6 MP CPU vs Metal）
+5. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 110 dB）
+
+---
+
 ## 会话 D060 · 多相机 Log 输入
 
 会话目标：按产品负责人选择做 **A · 多相机 Log 输入**（S-Log3 / C-Log3 / V-Log），不再要求用户先把素材转成 sRGB / Apple Log。
@@ -1287,7 +1333,8 @@ AI 就应该：
 10. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应 <100 ms（短片 47 ms；长片走 960 px 代理约 100 ms）
 11. 视频管道改过就设 `SPEKTRA_VIDEO_DEBUG=1` 跑一次 2 秒渲染：应看到 `wait / convert / process / pack` 四项，总时长约 79–82 ms/帧
 12. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
-13. macOS / Metal 改过就在 Mac 上跑 `scripts/verify-macos.command`：`gpu_film` / `gpu_texture` / `gpu_chain` 都应真跑（不是 skip），第 5 步会打印设备信息、三组 parity 与 CPU vs Metal 的 PSNR
-14. 看 §三 的"下一步"（当前最该做：Mac 2.6 MP 实测，然后线性 / OCIO）
+13. macOS / Metal 改过就在 Mac 上跑 `scripts/verify-macos.command`：`gpu_film` / `gpu_texture` / `gpu_chain` 都应真跑（不是 skip），第 5 步会打印设备信息、三组 parity 与 CPU vs Metal 的 PSNR；顺手跑 `scripts/bench-macos.command` 记录 2.6 MP 的 CPU vs Metal
+14. Log 输入改过就 `lut bake --input s-log3 --scan negative`，再用 `--engine spectral` 与 `--engine spectral-gpu` 出图比 PSNR（应 ≥60 dB，本机实测 110 dB）
+15. 看 §三 的"下一步"（当前最该做：更多 Log / gamut，然后 OCIO 依赖决策）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。
