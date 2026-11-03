@@ -16,6 +16,22 @@ endif()
 option(SR_BUILD_TESTS "Build the test binaries" ON)
 option(SR_BUILD_QT_UI "Build the Qt 6 desktop UI (D009)" OFF)
 
+# The GPU backends are per-platform: D3D11 on Windows, Metal on macOS (D056).
+# Each platform compiles exactly one implementation of GpuFilm / GpuTexture.
+if(APPLE)
+    enable_language(OBJCXX)
+    set(SR_GPU_FILM_SRC src/cli/gpu_film_metal.mm)
+    set(SR_GPU_TEXTURE_SRC src/cli/gpu_texture.cpp)
+    set_source_files_properties(src/cli/gpu_film_metal.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    find_library(SR_METAL_FRAMEWORK Metal REQUIRED)
+    find_library(SR_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    set(SR_GPU_LIBS ${SR_METAL_FRAMEWORK} ${SR_FOUNDATION_FRAMEWORK})
+else()
+    set(SR_GPU_FILM_SRC src/cli/gpu_film.cpp)
+    set(SR_GPU_TEXTURE_SRC src/cli/gpu_texture.cpp)
+    set(SR_GPU_LIBS "")
+endif()
+
 add_library(sr_core
     src/core/src/lut3d.cpp
     src/core/src/image.cpp
@@ -38,8 +54,8 @@ target_compile_options(sr_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>)
 
-add_executable(spektra-roll-cli src/cli/main.cpp src/cli/gpu_film.cpp src/cli/gpu_texture.cpp)
-target_link_libraries(spektra-roll-cli PRIVATE sr_core)
+add_executable(spektra-roll-cli src/cli/main.cpp ${SR_GPU_FILM_SRC} ${SR_GPU_TEXTURE_SRC})
+target_link_libraries(spektra-roll-cli PRIVATE sr_core ${SR_GPU_LIBS})
 if(WIN32)
     target_link_libraries(spektra-roll-cli PRIVATE d3d11 dxgi d3dcompiler)
 endif()
@@ -107,9 +123,9 @@ if(SR_BUILD_TESTS)
     endif()
     add_test(NAME texture COMMAND test_texture)
 
-    # The GPU parity test skips itself (exit 77) when no D3D11 device exists.
-    add_executable(test_gpu_film tests/test_gpu_film.cpp src/cli/gpu_film.cpp)
-    target_link_libraries(test_gpu_film PRIVATE sr_core)
+    # The GPU parity test skips itself (exit 77) when no GPU device exists.
+    add_executable(test_gpu_film tests/test_gpu_film.cpp ${SR_GPU_FILM_SRC})
+    target_link_libraries(test_gpu_film PRIVATE sr_core ${SR_GPU_LIBS})
     target_compile_definitions(test_gpu_film PRIVATE
         SR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(WIN32)
@@ -122,8 +138,8 @@ if(SR_BUILD_TESTS)
     set_tests_properties(gpu_film PROPERTIES SKIP_RETURN_CODE 77)
 
     # Same skip contract for the spatial chain (D047).
-    add_executable(test_gpu_texture tests/test_gpu_texture.cpp src/cli/gpu_texture.cpp)
-    target_link_libraries(test_gpu_texture PRIVATE sr_core)
+    add_executable(test_gpu_texture tests/test_gpu_texture.cpp ${SR_GPU_TEXTURE_SRC})
+    target_link_libraries(test_gpu_texture PRIVATE sr_core ${SR_GPU_LIBS})
     if(WIN32)
         target_link_libraries(test_gpu_texture PRIVATE d3d11 dxgi d3dcompiler)
     endif()
@@ -134,9 +150,9 @@ if(SR_BUILD_TESTS)
     set_tests_properties(gpu_texture PROPERTIES SKIP_RETURN_CODE 77)
 
     # Fused colour+texture submit (D049); same skip contract.
-    add_executable(test_gpu_chain tests/test_gpu_chain.cpp src/cli/gpu_film.cpp
-        src/cli/gpu_texture.cpp)
-    target_link_libraries(test_gpu_chain PRIVATE sr_core)
+    add_executable(test_gpu_chain tests/test_gpu_chain.cpp ${SR_GPU_FILM_SRC}
+        ${SR_GPU_TEXTURE_SRC})
+    target_link_libraries(test_gpu_chain PRIVATE sr_core ${SR_GPU_LIBS})
     target_compile_definitions(test_gpu_chain PRIVATE
         SR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(WIN32)

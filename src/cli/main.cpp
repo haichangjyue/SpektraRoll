@@ -93,10 +93,12 @@ void printUsage() {
         "      --engine spectral the LUT is bypassed and every pixel runs the\n"
         "      physical film/paper chain (slow but physical; --film/--paper and\n"
         "      --input choose the materials). --engine spectral-gpu runs the same\n"
-        "      chain on the D3D11 GPU and falls back to the CPU engine when no\n"
+        "      chain on the GPU (D3D11 on Windows, Metal on macOS) and falls back\n"
+        "      to the CPU engine when no\n"
         "      device is available. --texture-engine gpu moves grain, halation,\n"
         "      glare and diffusion onto the same GPU (D047); the default 'auto'\n"
-        "      does this whenever the colour engine is spectral-gpu.\n"
+        "      does this whenever the colour engine is spectral-gpu. The texture\n"
+        "      chain is still D3D11-only; macOS keeps it on the CPU for now (D056).\n"
         "      Halation, glare and diffusion are physical point spreads since D054:\n"
         "      --halation-spread/--glare-spread/--diffusion-spread are effective\n"
         "      sigmas in micrometres on the negative (--frame-width-mm maps them to\n"
@@ -579,7 +581,9 @@ sr::TextureParams parseTexture(const Args& args) {
 // `auto` uses the GPU whenever the colour engine is already on the GPU (D047);
 // `cpu` keeps the reference chain, `gpu` asks for it explicitly. A device
 // failure is never fatal: the caller falls back and says so once.
-// `sharedDevice` is the film backend's ID3D11Device*: when given, the texture
+// The texture chain is still D3D11-only (D056 brings Metal colour first), so on
+// macOS `auto` quietly keeps the CPU chain and an explicit `gpu` says why.
+// `sharedDevice` is the film backend's device handle: when given, the texture
 // chain runs on the same device so it can consume the film output directly
 // (D049) instead of uploading the frame a second time.
 sr::GpuTexture* prepareTextureGpu(const Args& args, const std::string& engine,
@@ -591,6 +595,14 @@ sr::GpuTexture* prepareTextureGpu(const Args& args, const std::string& engine,
     }
     const bool wanted = mode == "gpu" || (mode == "auto" && engine == "spectral-gpu");
     if (!wanted) return nullptr;
+#if !defined(_WIN32)
+    if (mode == "gpu") {
+        std::fprintf(stderr,
+                     "warning: the GPU texture chain is not available on this platform yet; "
+                     "keeping the CPU texture chain\n");
+    }
+    return nullptr;
+#else
     std::string error;
     if (sharedDevice != nullptr && !storage.attach(sharedDevice, error)) {
         std::fprintf(stderr, "warning: %s; keeping the CPU texture chain\n", error.c_str());
@@ -601,6 +613,7 @@ sr::GpuTexture* prepareTextureGpu(const Args& args, const std::string& engine,
         return nullptr;
     }
     return &storage;
+#endif
 }
 
 // Runs film + texture in one submit when the texture backend shares the film

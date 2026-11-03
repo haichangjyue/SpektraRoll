@@ -10,10 +10,10 @@
 
 namespace sr {
 
-// D3D11 implementation of the per-pixel physical chain (D046). Windows-only;
-// on other platforms available() returns false and the caller keeps the CPU
-// spectral or LUT path. Not thread-safe: one instance drives one dispatch at a
-// time.
+// GPU implementation of the per-pixel physical chain (D046, Metal since D056).
+// D3D11 on Windows, Metal on macOS; elsewhere available() returns false and the
+// caller keeps the CPU spectral or LUT path. Not thread-safe: one instance
+// drives one dispatch at a time.
 class GpuFilm {
 public:
     GpuFilm();
@@ -25,12 +25,14 @@ public:
 
     bool configure(const FilmModel& model, const BakeOptions& options, std::string& error);
 
-    // Share a D3D11 device owned by someone else (D049). `device` is an
-    // ID3D11Device*; the caller keeps ownership and must outlive this object.
-    // Off Windows, or with a null handle, this returns false.
+    // Share a GPU device owned by someone else (D049). `device` is an
+    // ID3D11Device* on Windows and an id<MTLDevice> on macOS; the caller keeps
+    // ownership and must outlive this object. With a null handle this returns
+    // false.
     bool attach(void* device, std::string& error);
 
-    // The raw device handle (ID3D11Device*), for attaching another backend.
+    // The raw device handle (ID3D11Device* / id<MTLDevice>), for attaching
+    // another backend.
     void* deviceHandle() const;
 
     // `rgb` and `out` are interleaved float RGB, `pixels * 3` values. They may
