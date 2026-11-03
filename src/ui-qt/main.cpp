@@ -3371,13 +3371,14 @@ int main(int argc, char** argv) {
     app.setStyleSheet(QString::fromUtf8(kStyleSheet));
 
     MainWindow window;
-    window.show();
+    const QStringList arguments = QCoreApplication::arguments();
+    // The OCIO check only bakes a LUT; do not flash a window for scripts.
+    if (!arguments.contains(QStringLiteral("--ocio-selftest"))) window.show();
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &window,
                      [&window] { window.shutdownPreview(); });
 
     // Diagnostic hook for scripts and CI: run one real preview through the same
     // code the button uses, print the status line, then exit.
-    const QStringList arguments = QCoreApplication::arguments();
     if (arguments.contains(QStringLiteral("--preview-selftest"))) {
         QTimer::singleShot(400, &window, [&window] {
             const QString first = window.previewSelfTest();
