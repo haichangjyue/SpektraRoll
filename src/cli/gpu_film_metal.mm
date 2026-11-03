@@ -468,9 +468,16 @@ bool GpuFilm::Impl::initialize(std::string& error) {
     if (pipeline != nil) return true;
 
     NSError* compileError = nil;
+    // Metal compiles with fast math on by default, which lets the compiler
+    // assume no NaNs and delete the `density != density` guards in the spectral
+    // sum. A few wavelengths carry NaN densities by design (the CPU reference
+    // skips them), so fast math turns every pixel into NaN (D056). Keep IEEE
+    // semantics to match the CPU and D3D11 references.
+    MTLCompileOptions* compileOptions = [[MTLCompileOptions alloc] init];
+    compileOptions.fastMathEnabled = NO;
     id<MTLLibrary> library =
         [device newLibraryWithSource:[NSString stringWithUTF8String:kShaderSource]
-                             options:nil
+                             options:compileOptions
                                error:&compileError];
     if (library == nil) {
         error = "could not compile the Metal film shader";
