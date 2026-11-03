@@ -58,6 +58,7 @@
 - D063 是界面接 OCIO：UI 不链接库，靠 CLI 的 `ocio-info --json` 填下拉；`findCli` 优先用带 OCIO 的完整构建，`SPEKTRA_CLI` 可覆盖。
 - CI：D063 的 run **102** Windows + macOS 全绿；macOS 用 Homebrew 的 OCIO 真跑 `ocio-info --json`（Python 解析断言 52 个空间）+ LUT，Windows 跑 stub 并断言那句报错。
 - CI：D064/D065 的 run **104** Windows + macOS 全绿（11m32s）；macOS 真跑 Metal 光谱/质感/融合链和 OCIO，Windows 真跑 D3D11。
+- CI：D066 的 run **107** Windows + macOS 全绿（含 macOS 的 `warning: ;` 断言）。
 - 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 **10/10** 测试。
 
 ### 关键决策（D056–D062）
@@ -122,6 +123,7 @@
 | `lut apply --engine spectral-gpu --ocio-*` | 只剩一条明确的 OCIO 回退 warning |
 | `ctest` | 10/10 |
 | UI 构建 / `--stocks-selftest` | 正常（16 films / 8 papers） |
+| CI | run **107** Windows + macOS 全绿（macOS 断言不再出现 `warning: ;`） |
 | 实际速度 | OCIO + CPU 光谱在 4K 上约 **3.5 s/帧**；想快就用 LUT 引擎或关掉 OCIO |
 
 ---

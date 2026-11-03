@@ -1203,6 +1203,7 @@
 - **验证**：
   - `lut apply --engine spectral-gpu --ocio-config ... --ocio-input "S-Log3 S-Gamut3.Cine"` 现在只输出一条 OCIO 回退 warning，没有空 warning。
   - `ctest` 10/10；UI 构建与 `--stocks-selftest` 正常。
+  - CI：run **107** Windows + macOS 双绿；macOS 的 OCIO 步骤断言日志里没有 `warning: ;`。
 - **后果**：
   - OCIO + 光谱 GPU 仍然自动用 CPU 光谱（这条限制没变），但现在提示明确，不会伪装成失败。
   - 想要全速：用 LUT 引擎（界面默认），或改用 `--engine spectral` 明确 CPU，或关掉 OCIO。
