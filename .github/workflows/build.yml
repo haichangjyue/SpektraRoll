@@ -21,8 +21,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # D062: the Windows job builds without OpenColorIO (a MinGW build takes
+      # ~20 minutes); the macOS job installs the Homebrew package so the OCIO
+      # code path and test_ocio run for real on every push.
+      - name: Install OpenColorIO (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install opencolorio
+          echo "OCIO_PREFIX=$(brew --prefix)" >> "$GITHUB_ENV"
+
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          set -e
+          if [ -n "${OCIO_PREFIX:-}" ]; then
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_PREFIX_PATH="$OCIO_PREFIX"
+          else
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          fi
 
       - name: Build
         shell: bash
@@ -81,6 +98,27 @@ jobs:
             --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1 \
             --in chart16.png --out spectral_texture.png
           ls -l spectral.png spectral_gpu.png spectral_texture.png
+
+      - name: OpenColorIO (D062)
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          cfg=data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio
+          if "$exe" ocio-info --ocio-config "$cfg" > ocio.txt 2>&1; then
+            head -5 ocio.txt
+            test -f chart16.png
+            "$exe" convert --ocio-config "$cfg" --ocio-input "Apple Log" \
+              --in chart16.png --out ocio-apple.png --bits 16
+            "$exe" lut bake --ocio-config "$cfg" --ocio-input "ARRI LogC3 (EI800)" \
+              --scan negative --out ocio-logc3.cube
+            ls -l ocio-apple.png ocio-logc3.cube
+          else
+            # Windows CI has no OCIO: the stub must say so, not pretend.
+            cat ocio.txt
+            grep -q "without OpenColorIO" ocio.txt
+          fi
 
       - name: Bake the M1 film LUT and compare with the frozen reference
         shell: bash

@@ -258,6 +258,32 @@ X:\agent\SpektraRoll\scripts\demo-log-inputs.cmd
 - 容器的 YUV→RGB 矩阵**跟着素材标签走**（`--in-matrix auto`），不用按相机猜；标签写错才用 `--in-matrix bt709` / `bt2020` 覆盖
 - 还没做自动识别 Log 格式：曲线无法从像素可靠推断，仍然要手动选
 
+## OpenColorIO（可选）
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-ocio.cmd
+```
+
+四节，全部离线（配置在仓库里）：
+
+1. `ocio-info`：版本、配置名、自动选中的线性空间、配置里有哪些相机空间
+2. 同一帧：**内置 Apple Log 解码 vs OCIO 的 Apple Log**（本机 **93.6 dB**）
+3. 同一帧：**ACES 2.0 显示器变换**（SDR 100 nits），出一张 `out\ocio-demo\apple-aces2-sdr.png`
+4. 同一张负片 LUT：**内置 ARRI LogC3 vs OCIO 的 ARRI LogC3**（本机 **63.9 dB**）
+
+自己用的时候：
+
+- 先要有一个带 OCIO 的构建。Windows：双击 **`tools\ocio\build-ocio.cmd`** 编一次（约 15–20 分钟，编到 `X:\agent\tools\ocio`，之后不用再编）；macOS：`brew install opencolorio`，然后 `cmake -DCMAKE_PREFIX_PATH="$(brew --prefix)"`。
+- 看配置里有什么：`spektra-roll-cli ocio-info --ocio-config <配置.ocio>`（不填 `--ocio-config` 就用环境变量 `$OCIO`）。
+- 用任意色彩空间烘 LUT：`lut bake --ocio-config <配置> --ocio-input "ARRI LogC3 (EI800)" --scan negative --out x.cube`。**解码已经烘进 LUT，之后 `lut apply` / `video` 不需要 OCIO。**
+- 只解码或看显示器变换：`convert --ocio-config <配置> --ocio-input "Apple Log" --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" --in a.png --out b.png`。
+- 光谱视频（`--engine spectral`）也能直接吃 OCIO 输入；`--engine spectral-gpu` 会打 warning 并回退 CPU（着色器里还没有 OCIO）。
+- 没有 OCIO 的构建**一切照旧**，只会明确告诉你“这个构建没有 OpenColorIO”，不会静默跳过。
+
+**要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。界面暂时还没有 OCIO 下拉（CLI 先通了）。
+
 ## 用图形界面（Qt 6）
 
 双击：

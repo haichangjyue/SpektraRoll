@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "sr/lut3d.hpp"
+#include "sr/ocio.hpp"
 #include "sr/parallel.hpp"
 #include "sr/profile.hpp"
 #include "sr/transfer.hpp"
@@ -44,6 +45,10 @@ struct BakeOptions {
     double peakNits = 1000.0;
     // 0 = auto (hardware threads minus one).
     int threads = 0;
+    // D062: when set, the input decode goes through OpenColorIO instead of the
+    // built-in camera curves. `ocioInput` is only for signatures and messages.
+    const OcioProcessor* ocio = nullptr;
+    std::string ocioInput;
 };
 
 struct FilmModelOptions {

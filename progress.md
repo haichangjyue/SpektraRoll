@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-03（D049–D061 已整理成交接摘要）
-> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci，D041–D061）
+> **最后更新**：2026-11-03（D049–D062 已整理成交接摘要）
+> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO + 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO，D041–D062）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,7 @@
 
 ---
 
-## 零之一、本阶段交接摘要：D056–D061（Metal → 浮点 → 相机 Log）
+## 零之一、本阶段交接摘要：D056–D062（Metal → 浮点 → 相机 Log → OCIO）
 
 > 新开对话只需要读这一节 + §三；按决策编号的详细记录从 D060 开始往下排。
 
@@ -47,6 +47,7 @@
 | **D059** | EXR ZIP | 默认 ZIP、`--exr-raw` 关闭；已调色帧 −28%、half −38%、带颗粒 ≈0%；ffmpeg 交叉验证 92.6 dB |
 | **D060** | 多相机 Log | S-Log3 / C-Log3 / V-Log；曲线 101 点 vs colour-science **完全一致**；CPU vs D3D11 **110.67 dB**；UI 下拉可选 |
 | **D061** | 更多相机 Log | LogC3 / LogC4 / BMD Gen5 / DaVinci / S-Gamut3；101 点曲线 **0 差**；CPU vs D3D11 **118.06–119.97 dB**；`--in-matrix auto` 按素材标签解码 |
+| **D062** | OpenColorIO | 可选依赖（`SR_WITH_OCIO`）；MinGW 自建静态 OCIO 2.4.2；`ocio-info` / `lut bake --ocio-input` / `convert --ocio-*`；OCIO sRGB vs 内置 **118.24 dB**、Apple Log **93.60 dB** |
 
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
 - 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 9/9 测试。
@@ -61,24 +62,89 @@
 | D059 | EXR 压缩 | 默认 ZIP、可 `--exr-raw`；压不动逐块回退；只用 stb zlib，无新依赖 |
 | D060 | 多相机 Log | 官方曲线 + 原生 gamut 矩阵；CPU/GPU 同一套 `inputMode`；手动选输入 |
 | D061 | 更多 Log + 容器矩阵 | 追加 5 种输入（枚举只能往末尾加）；未知 `inputMode` 回退 sRGB；`--in-matrix auto` 读素材 `color_space` |
+| D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 
 ### 未完成的待办（按建议顺序）
 
-1. **OCIO**：先定依赖策略（引入 OpenColorIO vs OCIO-lite）；现在只有"官方曲线 + 固定矩阵"
-2. **PIZ / DWA 压缩**：带颗粒的 float 用 ZIP 基本不省
-3. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积
-4. **macOS Qt 打包**：Mac 目前只有 CLI
-5. **Mac 视频 ms/帧**：现在只有 2.6 MP 静帧数字，`video` 还没在 Mac 上量
-6. **Log 的细支**：LogC3 的其他 EI、SUP 2.x、ACEScct、自动识别（仍不可靠）
+1. **UI 的 OCIO 下拉**：CLI 已能用，界面还没暴露（UI 构建也是故意不链 OCIO）
+2. **光谱 GPU 的 OCIO**：目前给了 `--ocio-input` 会回退 CPU 光谱
+3. **PIZ / DWA 压缩**：带颗粒的 float 用 ZIP 基本不省
+4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积
+5. **macOS Qt 打包**：Mac 目前只有 CLI
+6. **Mac 视频 ms/帧**：`video` 还没在 Mac 上量过
 
 ### 新对话的第一步
 
-1. `ctest --test-dir build --output-on-failure`（9/9；Mac 上三个 GPU 测试都应真跑）
+1. `ctest --test-dir build --output-on-failure`（10/10；`ocio` 在没有 OCIO 的机器上 skip）
 2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
 3. `scripts\demo-exr.cmd -NoOpen`（读回 PSNR = inf；linear 范围 0.0012..0.7619）
 4. `scripts\demo-log-inputs.cmd -NoOpen`（9 种输入各自的烘焙耗时 + GPU/CPU 118–120 dB）
-5. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`（2.6 MP CPU vs Metal）
-6. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+5. `scripts\demo-ocio.cmd -NoOpen`（Apple Log 双实现 93.6 dB；ARRI LogC3 LUT 63.9 dB）
+6. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`
+7. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+
+---
+
+## 会话 D062 · OpenColorIO 接入
+
+会话目标：产品负责人选 **A：引入 OpenColorIO**。先解决“能不能真的编出来”，再谈功能。
+
+### 一、已完成的事项
+
+**D062 · 可选的 OpenColorIO 依赖**
+- `sr/ocio.hpp` 是纯 C++ 接口（pimpl），只有 `src/core/src/ocio.cpp` 包含 OCIO 头；没有 OCIO 时编 `ocio_stub.cpp`，API 一致、所有 `--ocio-*` 报同一句“这个构建没有 OpenColorIO”。
+- CMake：`-DSR_WITH_OCIO=ON`（默认）→ 先 `find_package(OpenColorIO CONFIG)`，再找自建前缀（`$OCIO_ROOT` 或 `X:/agent/tools/ocio`）。
+- Windows 自建：`tools\ocio\build-ocio.cmd` 用 MinGW 编 **OCIO 2.4.2**，产物是自包含前缀（`libOpenColorIO.a` + expat / Imath / minizip-ng / pystring / yaml-cpp / zlib）。两个 MinGW 补丁：`tools/ocio/mingw.patch`（`SystemMonitor_windows.cpp` 的窄 tstring）+ 关掉 `OCIO_USE_WINDOWS_UNICODE` + 给 yaml-cpp 0.7.0 补 `<cstdint>`。
+- 契约：胶片模型永远吃**线性 Rec.709**；`--ocio-linear` 不填时自动找（5 个常见名字，再退化成“唯一 Linear+Rec.709”）。OCIO 解码后**负值钳 0**，与内置解码一致。
+- CLI：`ocio-info`、`lut bake --ocio-config/--ocio-input/--ocio-linear`、`convert --ocio-input` / `--ocio-display --ocio-view`。**LUT 把解码烘进表里**，所以 `lut apply`/`video` 完全不需要 OCIO。
+- GPU：`--engine spectral-gpu` 没有 OCIO，明确 warning 并回退 CPU 光谱；LUT 引擎下给 `--ocio-*` 直接报错并提示改用 `lut bake`。
+- 分段签名带 OCIO 输入名。UI 构建 `-DSR_WITH_OCIO=OFF`（Qt 的 GCC 13.1 与 OCIO 的 GCC 16.2 静态库符号不兼容，且 UI 不直接调 OCIO）。
+- 仓库内置 ACES 2.0 **studio** 配置（Apache-2.0，`data/ocio/`，74 KB），离线可用。
+
+### 二、一条关键决策（详见 DECISIONS D062）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
+
+### 三、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| 测试 | **10/10**（新增 `test_ocio`；无 OCIO 时 exit 77 skip） |
+| OCIO `sRGB Encoded Rec.709 (sRGB)` vs 内置 `srgbDecode` | 2.6 MP **118.24 dB**（max 1.5e-5 = 16-bit 1 LSB） |
+| OCIO `Apple Log` vs 内置 Apple Log | **93.60 dB**（两条独立实现互证） |
+| OCIO `ARRI LogC3 (EI800)` LUT vs 内置 `--input logc3` | **63.89 dB**，max 1.1e-2（ACES 的 D60→D65 适应） |
+| ACES 2.0 显示器变换 | `sRGB - Display` / `ACES 2.0 - SDR 100 nits (Rec.709)` 正常出图 |
+| `ocio-info` | 自动选中 `Linear Rec.709 (sRGB)`；列出 60+ 颜色空间与 8 个显示器 |
+| 回归 | M1 parity 88.07 dB、9 个原测试全过、UI 第二次预览 48 ms |
+
+### 四、怎么用
+
+```powershell
+# 配置里有什么（先看名字）
+.\build\spektra-roll-cli.exe ocio-info --ocio-config data\ocio\studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio
+
+# 用 ACES 配置里的 ARRI LogC3 烘一张负片 LUT（之后 lut apply / video 不需要 OCIO）
+.\build\spektra-roll-cli.exe lut bake --ocio-config data\ocio\studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio `
+  --ocio-input "ARRI LogC3 (EI800)" --scan negative --out out\logc3-ocio.cube
+
+# 只解码/看显示器变换
+.\build\spektra-roll-cli.exe convert --ocio-config <cfg> --ocio-input "Apple Log" `
+  --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" `
+  --in frame.png --out frame-aces2.png
+
+# 光谱视频（CPU）也能直接用 OCIO 输入
+.\build\spektra-roll-cli.exe video --engine spectral --ocio-config <cfg> `
+  --ocio-input "S-Log3 S-Gamut3.Cine" --scan negative --in clip.mov --out out\graded.mov
+```
+
+### 五、未完成的待办
+
+- [ ] **UI 的下拉**：界面还没暴露 OCIO（构建也故意不链 OCIO）
+- [ ] **光谱 GPU 的 OCIO**：现在回退 CPU 光谱
+- [ ] `--exr-linear` 还不认 OCIO 的显示变换
+- [ ] Windows CI 不装 OCIO（跑 stub 路径）；macOS CI 用 Homebrew 的 OCIO 真跑
 
 ---
 
@@ -996,6 +1062,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **EXR ZIP（D059）** | 已调色帧 31.49 → **22.73 MB（−28%）**；带颗粒 ≈0%；half **9.82 MB（−38%）**；合成图表 −98.6%；ffmpeg 解码 92.6 dB |
 | **多相机 Log（D060）** | 三条曲线 101 点扫描 vs colour-science **max diff = 0**；S-Log3 CPU vs D3D11 **110.67 dB**；`c-log3` LUT 烘焙正常 |
 | **更多 Log + 容器矩阵（D061）** | 五条新曲线 101 点：**0 差**（LogC4/DaVinci ≤ 2.3e-16）；2.6 MP CPU vs D3D11 **118.06–119.97 dB**；`--in-matrix auto` 与 bt2020 **逐位相同**、与 bt709 44.02 dB；九种输入烘表 112–133 ms |
+| **OpenColorIO（D062）** | 可选依赖（`SR_WITH_OCIO`）+ 自建 MinGW 静态库；OCIO sRGB vs 内置 **118.24 dB**、Apple Log vs 内置 **93.60 dB**、ARRI LogC3 LUT vs 内置 **63.89 dB**；10/10 测试（`ocio` 无库时 skip） |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -1124,6 +1191,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D059** | EXR 压缩 | **默认 ZIP（16 行/chunk），`--exr-raw` 关闭；stb zlib；压不动回退原始块；读取器支持 NONE+ZIP** | 已调色帧 −28%、带颗粒 ≈0%、half −38%；ffmpeg 交叉验证 92.6 dB |
 | **D060** | 多相机 Log | **S-Log3 / C-Log3 / V-Log 官方曲线 + 原生 gamut 矩阵；CPU/GPU 同一套；UI 可选** | 曲线与 colour-science 完全一致；CPU vs D3D11 **110.67 dB** |
 | **D061** | 更多 Log + 容器矩阵 | **追加 LogC3 / LogC4 / BMD Gen5 / DaVinci / S-Gamut3；未知 `inputMode` 回退 sRGB；`--in-matrix auto` 读素材 `color_space`** | 101 点曲线 0 差；CPU vs D3D11 118–120 dB；错误矩阵实测只有 44 dB |
+| **D062** | OpenColorIO | **可选依赖 `SR_WITH_OCIO`（找不到就编 stub）；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU** | OCIO sRGB 118.24 dB、Apple Log 93.60 dB；LUT 烘焙后不再依赖 OCIO |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -1141,12 +1209,12 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. **OCIO（先定依赖策略）**：A) 引入 OpenColorIO B) OCIO-lite；线性 EXR 已有，但不是完整色彩管理。
-2. **PIZ / DWA 压缩**：颗粒重的素材 ZIP 收益接近 0。
-3. **代理清理 / 4K 预览**、**macOS Qt 打包**。
-4. **Log 细支**：LogC3 其他 EI、SUP 2.x、ACEScct、自动识别。
+1. **UI 的 OCIO 下拉**：CLI 已能用（`ocio-info` / `lut bake --ocio-input`），界面还没暴露。
+2. **光谱 GPU 的 OCIO**：现在给了 `--ocio-input` 会回退 CPU 光谱。
+3. **PIZ / DWA 压缩**：颗粒重的素材 ZIP 收益接近 0。
+4. **代理清理 / 4K 预览**、**macOS Qt 打包**。
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵、D062 OpenColorIO。
 
 ### 🟡 中期路线（M4–M5）
 
@@ -1189,6 +1257,7 @@ GCC     X:\agent\tools\mingw64\bin\g++.exe        (16.2.0 ucrt posix-seh)
 ffmpeg  J:\ffmpeg\bin\ffmpeg.exe                  M2 起用来从 .mov 抽帧验收
 Qt      X:\agent\tools\qt\6.8.3\mingw_64          Qt 6.8.3 (Widgets)
 Qt GCC  X:\agent\tools\qt\Tools\mingw1310_64      13.1.0，只给 UI 构建用
+OCIO    X:\agent\tools\ocio                      OpenColorIO 2.4.2 静态前缀（tools\ocio\build-ocio.cmd 可重建）
 ```
 
 ### ⚠️ 几个已知陷阱
@@ -1239,6 +1308,7 @@ scripts\demo-gpu-texture.cmd     GPU 质感对比（CPU vs GPU 的 ms/帧与 PSN
 scripts\demo-spread.cmd          空间扩散对比（旧盒状模糊 vs 新物理核，并排图 + ms/帧）
 scripts\demo-exr.cmd             浮点交付（PNG16 / float EXR / half EXR + 读回比对）
 scripts\demo-log-inputs.cmd      九种相机 Log 输入（各烘一张 LUT + GPU/CPU 对照表）
+scripts\demo-ocio.cmd            OpenColorIO（配置信息 / Apple Log 双实现 / ACES 显示器变换 / LUT 对比）
 scripts\build-ui.cmd            编译 Qt 6 界面、部署 DLL 并启动（首次约 1–2 分钟）
 scripts\verify-m1.cmd           一键验收：编译 + 测试 + 烘 LUT + 和参考对比
 scripts\demo.cmd                M0 的合成 LUT 冒烟测试（不是胶片）
@@ -1308,15 +1378,17 @@ transfer = unknown（即 Apple Log），24 fps，4.125 s，99 帧。
 
 ```
 X:\agent\SpektraRoll\
-├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, transfer, gamut, texture, parallel, spectral_data）
-├── src/core/src/            实现 + 生成的 spectral_tables.cpp
+├── src/core/include/sr/     公开头文件（lut3d, image, json, profile, film_model, metrics, transfer, gamut, texture, parallel, spectral_data, ocio）
+├── src/core/src/            实现 + 生成的 spectral_tables.cpp + ocio.cpp / ocio_stub.cpp
 ├── src/cli/main.cpp         命令行入口（gen / convert / video / preview / lut bake|apply|compare|info / version）
 ├── src/cli/gpu_film.{hpp,cpp}  D3D11 光谱后端（D046），非 Windows 编译成回退占位实现
 ├── src/cli/gpu_texture.{hpp,cpp} D3D11 质感后端（D047），非 Windows 编译成回退占位实现
 ├── src/ui-qt/main.cpp       Qt 6 桌面界面（D009），调用 CLI，不复制管线
 ├── tests/                   9 个测试程序 + reference/ 冻结参考 LUT（三个 GPU 测试无显卡时 skip）
 ├── data/profiles/           上游 profile JSON（CC BY-SA 4.0）+ NOTICE.md
+├── data/ocio/               ACES 2.0 studio 配置（Apache-2.0，D062）+ NOTICE.md
 ├── tools/parity/            Python 参考链、上游交叉检查、说明
+├── tools/ocio/              MinGW 编 OpenColorIO 的脚本 + 补丁（build-ocio.cmd）
 ├── third_party/stb/         stb_image / stb_image_write（单头文件）
 ├── scripts/                 .ps1 + .cmd 双份，.cmd 给用户双击
 ├── .github/workflows/       build.yml：Windows + macOS 矩阵
@@ -1382,6 +1454,11 @@ X:\agent\SpektraRoll\
 - ❌ **不要让着色器里的未知 `inputMode` 落到最后一个分支**：D060 的最后一段默认是 V-Log，加输入后会静默用错曲线；现在显式回退 sRGB（D061）
 - ❌ **不要按"输入类型"猜 YUV → RGB 矩阵**：同一种 Log 可能在 bt709 或 bt2020 容器里，猜错同帧只有 44 dB；跟素材的 `color_space` 标签走（`--in-matrix auto`）（D061）
 - ❌ **不要在分段签名里漏掉 `input` 和 `matrix`**：`--engine spectral` 换输入后 `--resume` 会把两种观感混在一支片子里（D061）
+- ❌ **不要把 OpenColorIO 变成硬依赖**：编不到时必须编 stub，CLI 照常工作，只有 `--ocio-*` 报错（D062）
+- ❌ **不要省掉 OCIO 解码后的负值钳制**：不钳制时 (1,1,0) 这类越界色会让密度曲线跑飞，LUT 对比从 63.89 掉到 **9.84 dB**（D062）
+- ❌ **不要在光谱 GPU 上假装支持 OCIO**：着色器里没有 OCIO，必须 warning 后回退 CPU 光谱；LUT 引擎下用 `--ocio-*` 要报错并提示改用 `lut bake`（D062）
+- ❌ **不要在 UI 构建里打开 `SR_WITH_OCIO`**：Qt 的 GCC 13.1 和 OCIO 的 GCC 16.2 静态库 libstdc++ 符号对不上（`std::istream::seekg(std::fpos<...>)`）（D062）
+- ❌ **不要改 `data/ocio/` 里的配置文件**：那是 ACES 官方 studio 配置原件（Apache-2.0），要换版本就整份替换并更新 NOTICE
 
 ---
 
@@ -1407,6 +1484,7 @@ AI 就应该：
 12. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
 13. macOS / Metal 改过就在 Mac 上跑 `scripts/verify-macos.command`：`gpu_film` / `gpu_texture` / `gpu_chain` 都应真跑（不是 skip），第 5 步会打印设备信息、三组 parity 与 CPU vs Metal 的 PSNR；顺手跑 `scripts/bench-macos.command` 记录 2.6 MP 的 CPU vs Metal
 14. Log 输入改过就 `lut bake --input s-log3 --scan negative`，再用 `--engine spectral` 与 `--engine spectral-gpu` 出图比 PSNR（应 ≥60 dB，本机实测 118–120 dB）；九种输入一次跑 `scripts\demo-log-inputs.cmd -NoOpen`
-15. 看 §三 的"下一步"（当前最该做：OCIO 依赖策略）
+15. OCIO 改过就跑 `.\build\spektra-roll-cli.exe ocio-info`（应自动选中 `Linear Rec.709 (sRGB)`）和 `scripts\demo-ocio.cmd -NoOpen`（Apple Log 93.6 dB、LogC3 LUT 63.9 dB）；没有 OCIO 的构建应只报“without OpenColorIO”
+16. 看 §三 的"下一步"（当前最该做：UI 的 OCIO 下拉）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。

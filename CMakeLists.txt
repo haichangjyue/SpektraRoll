@@ -15,6 +15,44 @@ endif()
 
 option(SR_BUILD_TESTS "Build the test binaries" ON)
 option(SR_BUILD_QT_UI "Build the Qt 6 desktop UI (D009)" OFF)
+option(SR_WITH_OCIO "Link OpenColorIO when it can be found (D062)" ON)
+
+# --- OpenColorIO (D062) -----------------------------------------------------
+# Two ways in: a normal CMake package (Homebrew on macOS, an SDK on Windows) or
+# a hand-built prefix with headers in include/ and static libs in lib/. The
+# static prefix needs its own dependencies (expat, yaml-cpp, pystring, Imath,
+# minizip-ng, zlib), so they are linked explicitly. Without any of this the stub
+# is compiled and --ocio-* explains that the build has no OCIO.
+set(SR_OCIO_FOUND OFF)
+if(SR_WITH_OCIO)
+    find_package(OpenColorIO CONFIG QUIET)
+    if(OpenColorIO_FOUND AND TARGET OpenColorIO::OpenColorIO)
+        set(SR_OCIO_FOUND ON)
+        message(STATUS "OpenColorIO: package (D062)")
+        set(SR_OCIO_LIBS OpenColorIO::OpenColorIO)
+    else()
+        set(SR_OCIO_ROOT "$ENV{OCIO_ROOT}" CACHE PATH
+            "OpenColorIO prefix (include/OpenColorIO + lib/libOpenColorIO.a)")
+        if(NOT SR_OCIO_ROOT AND EXISTS "X:/agent/tools/ocio/include/OpenColorIO/OpenColorIO.h")
+            set(SR_OCIO_ROOT "X:/agent/tools/ocio")
+        endif()
+        if(SR_OCIO_ROOT AND EXISTS "${SR_OCIO_ROOT}/include/OpenColorIO/OpenColorIO.h")
+            find_library(SR_OCIO_LIBRARY NAMES OpenColorIO HINTS "${SR_OCIO_ROOT}/lib")
+            if(SR_OCIO_LIBRARY)
+                set(SR_OCIO_FOUND ON)
+                set(SR_OCIO_LIBS ${SR_OCIO_LIBRARY})
+                foreach(dep expat Imath-3_1 minizip-ng pystring yaml-cpp zlibstatic)
+                    find_library(SR_OCIO_DEP_${dep} NAMES ${dep}
+                                 HINTS "${SR_OCIO_ROOT}/lib")
+                    if(SR_OCIO_DEP_${dep})
+                        list(APPEND SR_OCIO_LIBS ${SR_OCIO_DEP_${dep}})
+                    endif()
+                endforeach()
+                message(STATUS "OpenColorIO: ${SR_OCIO_ROOT} (static prefix, D062)")
+            endif()
+        endif()
+    endif()
+endif()
 
 # The GPU backends are per-platform: D3D11 on Windows, Metal on macOS (D056).
 # Each platform compiles exactly one implementation of GpuFilm / GpuTexture.
@@ -44,6 +82,24 @@ add_library(sr_core
     src/core/src/transfer.cpp
     src/core/src/gamut.cpp
     src/core/src/texture.cpp)
+
+if(SR_OCIO_FOUND)
+    target_sources(sr_core PRIVATE src/core/src/ocio.cpp)
+    target_compile_definitions(sr_core PUBLIC SR_HAVE_OCIO=1)
+    target_link_libraries(sr_core PUBLIC ${SR_OCIO_LIBS})
+    if(NOT TARGET OpenColorIO::OpenColorIO)
+        # A hand-built static prefix: OCIO headers use dllimport unless this is
+        # set, and the prefix's own deps have to be linked too (D062).
+        target_include_directories(sr_core SYSTEM PUBLIC "${SR_OCIO_ROOT}/include")
+        target_compile_definitions(sr_core PUBLIC OpenColorIO_SKIP_IMPORTS)
+        if(WIN32)
+            target_link_libraries(sr_core PUBLIC user32 gdi32 ole32 uuid)
+        endif()
+    endif()
+else()
+    target_sources(sr_core PRIVATE src/core/src/ocio_stub.cpp)
+    message(STATUS "OpenColorIO: not found, --ocio-* will report it is unavailable")
+endif()
 
 target_include_directories(sr_core
     PUBLIC src/core/include)
@@ -164,6 +220,17 @@ if(SR_BUILD_TESTS)
     endif()
     add_test(NAME gpu_chain COMMAND test_gpu_chain)
     set_tests_properties(gpu_chain PROPERTIES SKIP_RETURN_CODE 77)
+
+    # OpenColorIO (D062) skips itself when the build has no OCIO (exit 77).
+    add_executable(test_ocio tests/test_ocio.cpp)
+    target_link_libraries(test_ocio PRIVATE sr_core)
+    target_compile_definitions(test_ocio PRIVATE
+        SR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MINGW)
+        target_link_options(test_ocio PRIVATE -static)
+    endif()
+    add_test(NAME ocio COMMAND test_ocio)
+    set_tests_properties(ocio PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 install(TARGETS spektra-roll-cli RUNTIME DESTINATION bin)

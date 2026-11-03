@@ -13,7 +13,9 @@ footage as input, can either print it
 (`--scan print`) or scan the negative (`--scan negative`, much more latitude),
 writes SDR or **HDR (PQ/HLG)** as 16-bit PNG or unclipped **float/half EXR**,
 and renders clips in resumable segments while keeping the camera timecode. A
-**Qt 6 desktop UI** wraps the same pipeline.
+**Qt 6 desktop UI** wraps the same pipeline. Colour management is optional:
+linking **OpenColorIO** turns any camera or ACES space into a valid LUT domain
+and enables ACES display views.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -61,6 +63,30 @@ ctest --test-dir build --output-on-failure
 # re-running the full parity against the upstream Python model needs the
 # upstream checkout and Python, see tools/parity/README.md
 ```
+
+### OpenColorIO (optional, D062)
+
+The colour management layer is optional. With a config you can use any camera
+or ACES space as the LUT domain, and render display views:
+
+```bash
+# macOS
+brew install opencolorio
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$(brew --prefix)"   # finds OpenColorIO
+
+# Windows (MinGW): no package exists, so build the static prefix once
+tools\ocio\build-ocio.cmd
+
+# both: prove it is there, then bake a LUT in an ACES camera space
+spektra-roll-cli ocio-info --ocio-config data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio
+spektra-roll-cli lut bake --ocio-config data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio \
+    --ocio-input "ARRI LogC3 (EI800)" --scan negative --out logc3.cube
+```
+
+`-DSR_WITH_OCIO=OFF` (or a machine without the library) compiles a stub: the
+tool works exactly as before and `--ocio-*` explains that this build has no
+OpenColorIO. The baked LUT carries the decode, so `lut apply` and `video` never
+need the library. `data/ocio/` ships the ACES 2.0 studio config (Apache-2.0).
 
 ## Desktop UI (Qt 6)
 
@@ -276,6 +302,8 @@ src/core/       C++20 library, no UI, no I/O policy
   transfer      sRGB / Apple Log / S-Log3 (+S-Gamut3) / C-Log3 / V-Log /
                 LogC3 / LogC4 / BMD Gen5 / DaVinci Intermediate decode
                 (M2, D060/D061)
+  ocio          optional OpenColorIO bridge: config, input and display
+                processors, linear Rec.709 contract (D062)
 src/cli/        headless entry point (render-farm friendly later)
 tests/          assert-based tests, no framework; frozen reference LUT
 data/profiles/  upstream CC BY-SA 4.0 film / paper data + NOTICE

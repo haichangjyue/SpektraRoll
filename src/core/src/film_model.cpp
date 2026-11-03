@@ -436,7 +436,16 @@ Rgb FilmModel::transform(Rgb srgb) const {
 Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
     const double encoded[3] = {value.r, value.g, value.b};
     double linear[3];
-    decodeInputToLinearSrgb(options.input, encoded, linear);
+    if (options.ocio != nullptr) {
+        // D062: the LUT domain is an OpenColorIO colour space; the processor
+        // already returns linear Rec.709, so no built-in curve runs. Out-of-
+        // gamut results are clamped like decodeInputToLinearSrgb does, because
+        // the film model has no meaning for negative light.
+        options.ocio->apply(encoded, linear);
+        for (int c = 0; c < 3; ++c) linear[c] = std::max(0.0, linear[c]);
+    } else {
+        decodeInputToLinearSrgb(options.input, encoded, linear);
+    }
     if (options.exposureEv != 0.0) {
         const double gain = std::exp2(options.exposureEv);
         for (int c = 0; c < 3; ++c) linear[c] *= gain;

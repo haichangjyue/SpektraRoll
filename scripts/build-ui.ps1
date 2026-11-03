@@ -37,11 +37,15 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host ""
 
 Write-Host "1/3  Configure..." -ForegroundColor Cyan
+# The UI compiler is Qt's MinGW 13.1, while the OCIO static library is built
+# with the main toolchain (GCC 16.2); mixing the two libstdc++ ABIs does not
+# link. The UI never calls OCIO itself (it drives the CLI), so the UI build
+# leaves it out until the UI exposes OCIO (D062).
 & $cmake -S . -B build-ui -G Ninja `
     "-DCMAKE_MAKE_PROGRAM=$ninja" `
     "-DCMAKE_CXX_COMPILER=$mingw\bin\g++.exe" `
     "-DCMAKE_PREFIX_PATH=$qt" `
-    -DSR_BUILD_QT_UI=ON -DSR_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+    -DSR_BUILD_QT_UI=ON -DSR_BUILD_TESTS=OFF -DSR_WITH_OCIO=OFF -DCMAKE_BUILD_TYPE=Release
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""

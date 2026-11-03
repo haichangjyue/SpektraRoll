@@ -1076,6 +1076,41 @@
 
 ---
 
+## D062 · OpenColorIO 接入（可选依赖）
+
+- **日期**：2026-11-03
+- **背景**：产品负责人选 **A：引入 OpenColorIO**。之前只有“手写曲线 + 固定 gamut 矩阵”，没有 ACES/相机配置，也没有显示变换；D059 时因为“装了不了的环境编不了”押后，这一轮先把**能不能真的编出来**解决掉。
+- **实现**：
+  - **可选依赖**：`-DSR_WITH_OCIO=ON`（默认）。优先 `find_package(OpenColorIO CONFIG)`（macOS/系统 SDK）；否则找自建前缀（`$OCIO_ROOT`，或这台机器的 `X:/agent/tools/ocio`）。都找不到就编 `ocio_stub.cpp`，API 不变、所有 `--ocio-*` 明确报“这个构建没有 OpenColorIO”。
+  - **Windows 怎么编出来的**（`tools\ocio\build-ocio.cmd`）：OCIO **2.4.2** + 两个 MinGW 补丁：
+    1. `tools/ocio/mingw.patch`：`SystemMonitor_windows.cpp` 在窄 `tstring` 下的 WCHAR→UTF-8；
+    2. 关掉 `OCIO_USE_WINDOWS_UNICODE`（MinGW 的 libstdc++ 没有宽字符 fstream），并给拉下来的 yaml-cpp 0.7.0 补 `#include <cstdint>`（GCC 13+ 不再间接包含）。
+    产物是**自包含前缀**：`libOpenColorIO.a` + expat / Imath / minizip-ng / pystring / yaml-cpp / zlib 六个静态库，CMake 直接链接，Windows 上仍然是一个 exe。
+  - **隔离**：只有 `src/core/src/ocio.cpp` 包含 OCIO 头；`ocio.hpp` 是纯 C++ 接口（pimpl），其余代码不需要知道 OCIO 是否存在。
+  - **契约**：胶片模型永远吃 **线性 Rec.709**。`--ocio-input` 的处理器是 `输入空间 → 配置里的 Linear Rec.709`；`--ocio-linear` 可覆盖（不填时按 `Linear Rec.709 (sRGB)`、`Linear Rec.709`、`Linear sRGB`、`Utility - Linear - Rec.709`、`lin_rec709` 依次找，最后退化成“名字里同时有 linear 和 Rec.709 的唯一一项”）。
+  - 负值在 OCIO 解码后**钳 0**，与内置 `decodeInputToLinearSrgb` 的行为一致（胶片模型对负光没有意义）。这也是第一次接 OCIO 时 PSNR 只有 9.84 dB 的原因：不钳制时 (1,1,0) 这种越界色会让密度曲线跑飞，钳制后 63.89 dB。
+  - **CLI**：
+    - `ocio-info [--ocio-config <file.ocio>] [--ocio-linear <name>]`：版本、配置名、线性空间、全部颜色空间、显示器 + view；
+    - `lut bake --ocio-config <file> --ocio-input <space>`：LUT 定义域变成任意 OCIO 颜色空间（**解码烘进表里，`lut apply`/`video` 不需要 OCIO**）；
+    - `convert --ocio-input <space>` 与 `--ocio-display <display> --ocio-view <view>`：解码/显示器变换。
+  - `--engine spectral-gpu` 的着色器没有 OCIO：给了 `--ocio-input` 就打一次 warning 并回退 **CPU 光谱**，绝不静默出错。`lut apply`/`video` 在 LUT 引擎下用 `--ocio-*` 直接报错，并提示改用 `lut bake --ocio-input`。
+  - 分段签名带上 OCIO 输入名，换空间续渲不会混。
+  - **UI 暂不链接 OCIO**：UI 用 Qt 的 GCC 13.1，OCIO 静态库是 GCC 16.2 编的，libstdc++ 符号对不上（`std::istream::seekg(std::fpos<...>)`）；UI 也不直接调用 OCIO，所以 `build-ui.ps1` 传 `-DSR_WITH_OCIO=OFF`。UI 的 OCIO 下拉留到下一轮。
+- **验证**：
+  - `ctest` **10/10**（`ocio` 测试在没有 OCIO 的构建里 exit 77 skip）。
+  - OCIO 的 `sRGB Encoded Rec.709 (sRGB)` vs 内置 `srgbDecode`：2.6 MP **118.24 dB**（max 1.5e-5 = 16-bit 1 LSB）。
+  - OCIO 的 `Apple Log` vs 内置 Apple Log 解码：**93.60 dB**（两条完全独立的实现互证曲线和色域）。
+  - OCIO 的 `ARRI LogC3 (EI800)` 负片 LUT vs 内置 `--input logc3`：**63.89 dB**，max 1.1e-2（差异来自 ACES 配置的 D60→D65 适应，不是曲线错误；18% 灰在两边都是 0.18）。
+  - `ocio-info` 在 ACES 2.0 studio 配置上自动选中 `Linear Rec.709 (sRGB)`；`--ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)"` 正常出图。
+  - 双击验收：`scripts\demo-ocio.cmd`（四节：配置信息 / Apple Log 双实现对比 / ACES 显示器变换 / ARRI LogC3 LUT 对比）。
+- **后果**：
+  - 有 OCIO 的构建可以用**任意**相机空间、ACES 空间、显示器变换；没有 OCIO 的构建行为与 D061 完全一致。
+  - 仓库内置一份 **ACES 2.0 studio 配置**（Apache-2.0，`data/ocio/`），离线可用；也接受任意 `.ocio` 或 `$OCIO`。
+  - Windows CI 不装 OCIO（自建一次 20 分钟，不划算）→ CI 跑的是 stub 路径；macOS CI 用 Homebrew 的 OCIO 真跑测试。
+  - 仍未做：UI 的 OCIO 下拉、光谱 GPU 的 OCIO、OCIO 输出的 EXR 线性标记（`--exr-linear` 目前只认 sRGB/PQ/HLG）。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

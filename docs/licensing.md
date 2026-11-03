@@ -45,6 +45,13 @@ code stays GPL. The two licences are compatible for distribution: the combined
 work is distributed under GPL, while the profile data and its derivatives
 remain available under CC BY-SA 4.0.
 
+`data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio` is an unmodified copy
+of the ACES 2.0 **Studio** config from
+[OpenColorIO-Config-ACES](https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES)
+v3.0.0, licensed **Apache-2.0** (compatible with GPL-3.0). It is data, not
+linked code; see `data/ocio/NOTICE.md`. ACES is a trademark of the Academy of
+Motion Picture Arts and Sciences.
+
 Note that the upstream LUT files are separately offered under a custom
 "commercial use, free share, no resale" terms. The LUTs *we* bake in this
 repository are not copied from upstream; they are produced by our own code
@@ -62,7 +69,7 @@ disclaimer of non-affiliation, and never in the product name, logo or domain.
 |---|---|---|
 | stb_image / stb_image_write | public domain / MIT | decode + 8-bit encode; 16-bit PNG chunks are ours |
 | colour-science (numeric tables only) | BSD-3-Clause | CMFs, D55/D50, Mallett basis, XYZ→sRGB matrix embedded in `spectral_tables.cpp` |
-| OpenColorIO (planned) | BSD-3-Clause | check LICENCE at the pinned tag |
+| OpenColorIO (optional, D062) | Apache-2.0 | statically linked on Windows (hand-built MinGW prefix), Homebrew package on macOS; only used when `SR_WITH_OCIO` finds it |
 | OpenImageIO (planned) | Apache-2.0 | |
 | FFmpeg (subprocess) | LGPL-2.1+ by default | decoded/encoded by a child process; avoid shipping an `--enable-gpl` build |
 | Qt 6 (Widgets) | LGPL-3.0 / GPL-3.0 (commercial available) | dynamically linked, deployed as DLLs; must ship the LGPL notice and keep the DLLs replaceable |

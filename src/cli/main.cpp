@@ -61,10 +61,16 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log|<camera log>]\n"
         "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
+        "                           [--ocio-config <file.ocio>] [--ocio-input <space>]\n"
+        "                           [--ocio-display <display> --ocio-view <view>]\n"
+        "                           [--ocio-linear <name>]\n"
         "                           [--exr-half] [--exr-raw] [--exr-linear [--exr-trc srgb|pq|hlg]\n"
         "                           [--peak 1000]]\n"
         "      Decode an image to display-encoded sRGB without the film model. Used\n"
         "      to render an Apple Log frame as a plain SDR reference.\n"
+        "      With --ocio-input the decode goes through OpenColorIO instead of a\n"
+        "      built-in curve; --ocio-display/--ocio-view then write that display\n"
+        "      view instead of plain sRGB (D062).\n"
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
         "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|<camera log>]\n"
@@ -107,7 +113,9 @@ void printUsage() {
         "      fraction-of-width box blur with --halation-radius/-glare-radius/\n"
         "      -diffusion-radius. --in-matrix auto (the default) reads the clip's\n"
         "      color_space tag for the YUV -> RGB step and falls back to bt2020; pass\n"
-        "      bt2020 or bt709 to override a badly tagged file.\n"
+        "      bt2020 or bt709 to override a badly tagged file. --ocio-input works\n"
+        "      with --engine spectral only (the GPU shaders have no OCIO yet, D062);\n"
+        "      with a LUT, bake it once with `lut bake --ocio-input <space>`.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -122,6 +130,8 @@ void printUsage() {
         "                            [--gamut oklch|off] [--couplers on|off]\n"
         "                            [--hdr pq|hlg] [--peak 1000]\n"
         "                            [--threads N] [--title <text>]\n"
+        "                            [--ocio-config <file.ocio>] [--ocio-input <space>]\n"
+        "                            [--ocio-linear <name>]\n"
         "      Bake the M1 spectral film model (Kodak Portra 400 + Portra Endura\n"
         "      by default) into a .cube LUT. Output is display-encoded sRGB. With\n"
         "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
@@ -139,6 +149,12 @@ void printUsage() {
         "        logc4               ARRI LogC4 in Wide Gamut 4\n"
         "        bmd-film            Blackmagic Film Gen 5 in Blackmagic Wide Gamut\n"
         "        davinci             DaVinci Intermediate in DaVinci Wide Gamut\n"
+        "      --ocio-input <space> replaces the built-in decode with OpenColorIO\n"
+        "      (D062): the LUT domain becomes that colour space. --ocio-config names\n"
+        "      the .ocio file (or use $OCIO); --ocio-linear overrides the linear\n"
+        "      Rec.709 space the film model is fed when a config spells it\n"
+        "      differently. The LUT is still display-encoded sRGB, so `lut apply`\n"
+        "      needs no OCIO at all.\n"
         "      --scan negative scans the negative itself (inverted against the film\n"
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
         "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
@@ -207,6 +223,12 @@ void printUsage() {
         "      Report the GPU backend, every device it can see, and whether the\n"
         "      spectral and texture GPU chains are available. Use this when a\n"
         "      render unexpectedly falls back to the CPU.\n"
+        "\n"
+        "  spektra-roll-cli ocio-info [--ocio-config <file.ocio>] [--ocio-linear <name>]\n"
+        "      OpenColorIO: print the version, the config name, every colour space,\n"
+        "      and the display/view pairs. Also prints which linear Rec.709 space the\n"
+        "      film model will be fed, which is what --ocio-input names are relative\n"
+        "      to. Without --ocio-config the $OCIO environment variable is used.\n"
         "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
@@ -436,7 +458,50 @@ struct FilmRecipe {
     sr::BakeOptions options;
     sr::Triple filters{};
     bool couplers = false;
+    // D062: set only with --ocio-input. The config and the compiled input
+    // processor must outlive every bake/render that borrows the pointer in
+    // `options.ocio`.
+    std::shared_ptr<sr::OcioConfig> ocioConfig;
+    std::shared_ptr<sr::OcioProcessor> ocioProcessor;
+    std::string ocioSource;
+    std::string ocioLinear;
 };
+
+// True when any --ocio-* flag was passed (so a wrong combination can be
+// rejected instead of silently ignored).
+bool hasOcioFlags(const Args& args) {
+    return args.has("ocio-config") || args.has("ocio-input") || args.has("ocio-linear") ||
+           args.has("ocio-display") || args.has("ocio-view");
+}
+
+bool openOcioFromArgs(const Args& args, std::shared_ptr<sr::OcioConfig>& config,
+                      std::string& linearSpace, std::string& error) {
+    if (!sr::ocioAvailable()) {
+        error = "this build was compiled without OpenColorIO (rebuild with -DSR_WITH_OCIO=ON; "
+                "see RUN.md / D062)";
+        return false;
+    }
+    config = std::make_shared<sr::OcioConfig>();
+    if (!sr::openOcioConfig(args.get("ocio-config"), *config, error)) return false;
+    if (!sr::pickOcioLinearSpace(*config, args.get("ocio-linear"), linearSpace, error)) {
+        return false;
+    }
+    return true;
+}
+
+// Resolves --ocio-config/--ocio-input/--ocio-linear into a compiled processor.
+bool configureOcioInput(const Args& args, std::shared_ptr<sr::OcioConfig>& config,
+                        std::shared_ptr<sr::OcioProcessor>& processor, std::string& source,
+                        std::string& linearSpace, std::string& error) {
+    if (!openOcioFromArgs(args, config, linearSpace, error)) return false;
+    source = args.get("ocio-input");
+    if (source.empty()) {
+        error = "--ocio-input needs a colour space name (run `ocio-info` to list them)";
+        return false;
+    }
+    processor = std::make_shared<sr::OcioProcessor>();
+    return sr::makeOcioInputProcessor(*config, source, linearSpace, *processor, error);
+}
 
 // Shared by `lut bake`, the spectral image path and the spectral video path:
 // resolves profiles, neutral filters and every BakeOptions flag from the CLI.
@@ -465,6 +530,22 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
             error = std::string("--input expects one of: ") + sr::inputTransferList();
             return false;
         }
+    }
+    // D062: an OpenColorIO colour space replaces the built-in camera decode.
+    if (args.has("ocio-input")) {
+        if (args.has("input")) {
+            error = "--input and --ocio-input are mutually exclusive";
+            return false;
+        }
+        if (!configureOcioInput(args, recipe.ocioConfig, recipe.ocioProcessor, recipe.ocioSource,
+                                recipe.ocioLinear, error)) {
+            return false;
+        }
+        recipe.options.ocio = recipe.ocioProcessor.get();
+        recipe.options.ocioInput = recipe.ocioSource;
+    } else if (hasOcioFlags(args)) {
+        error = "--ocio-config / --ocio-linear only apply together with --ocio-input";
+        return false;
     }
     recipe.options.exposureEv = args.getDouble("exposure", 0.0);
     recipe.options.threads = args.getInt("threads", 0);
@@ -530,6 +611,41 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
     return true;
 }
 
+// D062: list what an OCIO config offers, and which linear space the film model
+// will be fed. This is also the way to find the exact names for --ocio-input.
+int cmdOcioInfo(const Args& args) {
+    if (!sr::ocioAvailable()) {
+        return fail("this build was compiled without OpenColorIO (rebuild with -DSR_WITH_OCIO=ON; "
+                    "see RUN.md / D062)");
+    }
+    sr::OcioConfig config;
+    std::string error;
+    if (!sr::openOcioConfig(args.get("ocio-config"), config, error)) return fail(error);
+
+    sr::OcioSummary summary;
+    if (!sr::describeOcioConfig(config, args.get("ocio-linear"), summary, error)) {
+        return fail(error);
+    }
+    std::printf("OpenColorIO:   %s\n", summary.version.c_str());
+    std::printf("config:        %s\n",
+                summary.configName.empty() ? "(unnamed)" : summary.configName.c_str());
+    std::printf("config file:   %s\n", summary.configFile.c_str());
+    std::printf("linear space:  %s\n", summary.linearSpace.c_str());
+    std::printf("               (the film model always receives linear Rec.709)\n");
+    std::printf("colour spaces (%d):\n", static_cast<int>(summary.colorSpaces.size()));
+    for (const std::string& name : summary.colorSpaces) {
+        std::printf("  %s\n", name.c_str());
+    }
+    std::printf("displays (%d):\n", static_cast<int>(summary.displays.size()));
+    for (const auto& entry : summary.views) {
+        std::printf("  %s\n", entry.first.c_str());
+        for (const std::string& view : entry.second) {
+            std::printf("    %s\n", view.c_str());
+        }
+    }
+    return 0;
+}
+
 int cmdLutBake(const Args& args) {
     const std::string out = args.get("out", "out/portra400_endura_33.cube");
     const int size = std::max(2, args.getInt("size", 33));
@@ -546,7 +662,12 @@ int cmdLutBake(const Args& args) {
     std::printf("neutral filters:   C=%.3f M=%.3f Y=%.3f\n", recipe.filters[0],
                 recipe.filters[1], recipe.filters[2]);
     std::printf("print exposure:    %.12f\n", recipe.model.printExposureFactor());
-    std::printf("input:             %s", sr::inputTransferName(options.input));
+    if (!recipe.ocioSource.empty()) {
+        std::printf("input:             ocio '%s' -> %s\n", recipe.ocioSource.c_str(),
+                    recipe.ocioLinear.c_str());
+    } else {
+        std::printf("input:             %s", sr::inputTransferName(options.input));
+    }
     if (options.exposureEv != 0.0) std::printf(" (%+.2f EV)", options.exposureEv);
     std::printf("\n");
     std::printf("scan:              %s\n",
@@ -827,11 +948,22 @@ int cmdLutApply(const Args& args) {
         if (!lut.loadCube(lutPath, error)) return fail(error);
     } else {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+        if (recipe.options.ocio != nullptr && gpu) {
+            // The shaders have no OCIO; the CPU spectral engine does (D062).
+            std::fprintf(stderr,
+                         "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
+                         "engine\n");
+            gpu = false;
+        }
         if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
         if (!gpu && engine == "spectral-gpu") {
             std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
                          error.c_str());
         }
+    }
+    if (!spectral && hasOcioFlags(args)) {
+        return fail("--ocio-* only applies to --engine spectral; when using a LUT, bake it with "
+                    "`lut bake --ocio-input <space>` instead");
     }
 
     const std::string interpName = args.get("interp", "tetra");
@@ -1206,8 +1338,10 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
     signature << std::setprecision(9) << "spektra-roll video v1\n"
               << "input " << job.inPath << "\n"
               << "size " << job.width << "x" << job.height << " fps " << job.fps << "\n"
-              << "decode " << sr::inputTransferName(job.bake.input) << " " << job.inMatrix
-              << "\n"
+              << "decode "
+              << (job.bake.ocioInput.empty() ? std::string(sr::inputTransferName(job.bake.input))
+                                             : "ocio:" + job.bake.ocioInput)
+              << " " << job.inMatrix << "\n"
               << "lut " << fileHash(lutPath) << "\n"
               << "start " << startFrame << " total " << totalFrames << " segment "
               << segmentFrames << "\n"
@@ -1594,6 +1728,13 @@ int cmdVideo(const Args& args) {
     std::string error;
     if (spectral) {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+        if (recipe.options.ocio != nullptr && gpu) {
+            // The shaders have no OCIO; the CPU spectral engine does (D062).
+            std::fprintf(stderr,
+                         "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
+                         "engine\n");
+            gpu = false;
+        }
         if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
         if (!gpu && engine == "spectral-gpu") {
             std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
@@ -1601,6 +1742,10 @@ int cmdVideo(const Args& args) {
         }
     } else if (!lut.loadCube(lutPath, error)) {
         return fail(error);
+    }
+    if (!spectral && hasOcioFlags(args)) {
+        return fail("--ocio-* only applies to --engine spectral; bake the LUT with "
+                    "`lut bake --ocio-input <space>` instead");
     }
 
     const std::string ffmpeg = ffmpegPath(args);
@@ -2048,6 +2193,39 @@ int cmdConvert(const Args& args) {
     sr::Image image;
     int sourceBits = 8;
     std::string error;
+
+    // D062: OCIO input decode and/or a display/view transform. Either can be
+    // used alone; both need a config.
+    const bool wantsOcioInput = args.has("ocio-input");
+    const bool wantsOcioDisplay = args.has("ocio-display") || args.has("ocio-view");
+    std::shared_ptr<sr::OcioConfig> ocioConfig;
+    std::shared_ptr<sr::OcioProcessor> ocioIn;
+    std::shared_ptr<sr::OcioProcessor> ocioOut;
+    std::string ocioLinear;
+    std::string ocioSource;
+    if (wantsOcioInput || wantsOcioDisplay) {
+        if (wantsOcioInput && args.has("from")) {
+            return fail("--from and --ocio-input are mutually exclusive");
+        }
+        if (!openOcioFromArgs(args, ocioConfig, ocioLinear, error)) return fail(error);
+        if (wantsOcioInput) {
+            ocioSource = args.get("ocio-input");
+            ocioIn = std::make_shared<sr::OcioProcessor>();
+            if (!sr::makeOcioInputProcessor(*ocioConfig, ocioSource, ocioLinear, *ocioIn, error)) {
+                return fail(error);
+            }
+        }
+        if (wantsOcioDisplay) {
+            ocioOut = std::make_shared<sr::OcioProcessor>();
+            if (!sr::makeOcioDisplayProcessor(*ocioConfig, ocioLinear, args.get("ocio-display"),
+                                              args.get("ocio-view"), *ocioOut, error)) {
+                return fail(error);
+            }
+        }
+    } else if (args.has("ocio-config") || args.has("ocio-linear")) {
+        return fail("--ocio-config / --ocio-linear need --ocio-input or --ocio-display/--ocio-view");
+    }
+
     if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
     const int bits = requestedBits(args, std::min(sourceBits, 16));
 
@@ -2060,9 +2238,23 @@ int cmdConvert(const Args& args) {
         float* px = &image.pixels[i * 3];
         const double code[3] = {px[0], px[1], px[2]};
         double linear[3];
-        sr::decodeInputToLinearSrgb(from, code, linear);
+        if (ocioIn) {
+            ocioIn->apply(code, linear);
+        } else {
+            sr::decodeInputToLinearSrgb(from, code, linear);
+        }
+        for (int c = 0; c < 3; ++c) linear[c] *= gain;
+        if (ocioOut) {
+            double shown[3];
+            ocioOut->apply(linear, shown);
+            for (int c = 0; c < 3; ++c) {
+                px[c] = static_cast<float>(floatOut ? shown[c]
+                                                    : std::min(1.0, std::max(0.0, shown[c])));
+            }
+            continue;
+        }
         for (int c = 0; c < 3; ++c) {
-            const double encoded = sr::srgbEncode(linear[c] * gain);
+            const double encoded = sr::srgbEncode(linear[c]);
             px[c] = static_cast<float>(floatOut ? encoded
                                                 : std::min(1.0, std::max(0.0, encoded)));
         }
@@ -2081,8 +2273,9 @@ int cmdConvert(const Args& args) {
     }
     if (isExrPath(outPath)) reportFloatRange(image);
 
-    std::printf("converted %s (%s -> srgb, %+.2f EV) to %s\n", inPath.c_str(),
-                sr::inputTransferName(from), exposureEv, outPath.c_str());
+    std::printf("converted %s (%s -> %s, %+.2f EV) to %s\n", inPath.c_str(),
+                ocioIn ? (ocioSource + " via OpenColorIO").c_str() : sr::inputTransferName(from),
+                ocioOut ? "display/view (OpenColorIO)" : "srgb", exposureEv, outPath.c_str());
     std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
                 outPath.c_str(), image.width, image.height, count, outputBits(outPath, bits),
                 sourceBits, elapsed);
@@ -2775,6 +2968,7 @@ int main(int argc, char** argv) {
     if (command == "convert") return cmdConvert(args);
     if (command == "video") return cmdVideo(args);
     if (command == "preview") return cmdPreview(args);
+    if (command == "ocio-info") return cmdOcioInfo(args);
 
     if (command == "gpu-info") {
         std::printf("%s", sr::GpuFilm::deviceInfo().c_str());
