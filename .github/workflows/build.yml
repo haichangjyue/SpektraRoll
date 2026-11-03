@@ -53,6 +53,20 @@ jobs:
           "$exe" lut apply --lut warm.cube --in chart.png --out chart_warm.png
           ls -l chart.png chart_warm.png
 
+      - name: Smoke test floating point EXR (D055)
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          "$exe" gen --out chart.exr --width 160 --height 90
+          "$exe" lut gen --out warm.cube --size 17 --preset warm
+          "$exe" lut apply --lut warm.cube --in chart.png --out chart_warm.exr
+          # Read the EXR back through our own reader and write a PNG.
+          "$exe" lut apply --lut warm.cube --in chart_warm.exr --out chart_back.png --bits 16
+          test -f chart_back.png
+          ls -l chart.exr chart_warm.exr chart_back.png
+
       - name: Smoke test the physical engines (GPU falls back to CPU without a device)
         shell: bash
         run: |

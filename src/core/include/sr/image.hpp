@@ -27,12 +27,15 @@ struct Image {
     }
 };
 
-// `sourceBits` (optional) receives 8 or 16, the bit depth actually decoded.
+// `sourceBits` (optional) receives 8, 16 or 32, the bit depth actually decoded
+// (32 for a float/half EXR).
 bool loadImage(const std::string& path, Image& out, std::string& error,
                int* sourceBits = nullptr);
-// `bits` is 8 or 16. 16-bit output is PNG only (stb has no 16-bit writer, so
-// we emit the PNG chunks ourselves; see image.cpp).
-bool saveImage(const std::string& path, const Image& image, std::string& error, int bits = 8);
+// `bits` is 8 or 16 for PNG. A path ending in `.exr` is always written as
+// OpenEXR: 32-bit float by default, 16-bit half with `exrHalf`. Unlike PNG the
+// EXR path does not clamp, so out-of-range values survive (D055).
+bool saveImage(const std::string& path, const Image& image, std::string& error, int bits = 8,
+               bool exrHalf = false);
 
 // Synthetic test chart: grey ramp on top, colour patches below. Used by the
 // `gen` command and by the demo, so there is always something to feed the LUT.

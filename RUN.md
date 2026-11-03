@@ -189,6 +189,28 @@ X:\agent\SpektraRoll\scripts\demo-spread.cmd
 
 **你要看**：高光边缘是不是"贴边的暖芯 + 很淡很宽的外晕"；暗部有没有被眩光弄脏。想调距离就用 `demo-spread.cmd -HalationSpread 120 -GlareSpread 500`；想完全回到旧观感就加 `--spread-model box`（脚本已经各跑一遍）。
 
+## 交付浮点 / EXR
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-exr.cmd
+```
+
+它把同一帧渲染成 **16-bit PNG**、**32-bit float EXR**、**half EXR** 三种文件，然后：
+
+- 打印三种文件的体积（本机约 15 MB / 30 MB / 15 MB）
+- 用同一个 CLI 把 EXR 读回来再写 PNG，和原 PNG 比较（本机 **PSNR = inf**，逐位相同）
+- 再做一次 **+3 EV** 的转换：EXR 里有 **33%** 的像素超过 1（最亮 5.34）被保留，PNG 那版全部切到 1
+
+自己用的时候：
+
+- `--out 名字.exr` 就是浮点输出；加 `--exr-half` 写 half
+- 一整段序列：`lut apply --lut x.cube --in-dir frames --out-dir frames_exr --out-ext exr`
+- EXR 也能当输入：`lut apply --lut x.cube --in frame.exr --out frame.png --bits 16`
+
+**要注意**：EXR 里存的是显示编码值（sRGB 或 PQ/HLG 码值），不是线性光。进 DaVinci / Nuke 时要把输入变换设成对应的 sRGB 或 PQ，不要当线性素材拉。
+
 ## 用图形界面（Qt 6）
 
 双击：

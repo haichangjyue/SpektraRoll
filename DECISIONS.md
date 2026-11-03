@@ -870,6 +870,31 @@
 
 ---
 
+## D055 · 浮点交付（OpenEXR）
+
+- **日期**：2026-11-03
+- **背景**：D017 把 OpenImageIO / EXR 推后时留了一句“等真正需要浮点的时候”。现在颜色、质感、HDR 都齐了，唯一的交付还是 16-bit PNG：`toShort()` 把 0..1 之外全部切掉，HDR / 高光 / 后续调色都没有余量。DaVinci / Nuke / 合成也默认吃 EXR。
+- **实现**：
+  - **自带最小 OpenEXR**（`src/core/src/image.cpp`）：scanline、NONE 压缩、RGB 三通道、FLOAT32 或 HALF，读写都是自己拼，不引入新依赖。头里写 `chromaticities`（sRGB/Rec.709 + D65）。
+  - **输出格式按扩展名走**：`--out *.exr` 一律写 EXR（默认 float，`--exr-half` 写 half），`bits` 不参与；`.png` 仍只接受 8/16，`--bits 32 --out x.png` 明确报错。
+  - **EXR 输入**：`loadImage` 认 `.exr`（NONE 压缩，FLOAT/HALF，任意通道顺序，必须有 R/G/B），`sourceBits` 报 32；PNG 输入 32-bit 时输出默认降到 16（PNG 装不下）。
+  - **序列**：`lut apply --in-dir/--out-dir --out-ext exr` 把一整段 PNG 序列转成 float EXR；不加 `--out-ext` 就保持输入扩展名。
+  - **不钳制**：`convert` 在写 EXR 时不再把结果夹到 0..1（写 PNG 仍夹），所以 `--exposure 3` 的超白能留下来。
+  - **可见的交代**：写 EXR 时打印 `range: min .. max (x% below 0, y% above 1, written unclipped)`。
+  - **测试 / CI**：`test_image` 覆盖 float 精确往返、half 精度往返、±越界值保留、16-bit PNG 对照钳制、`--bits 32` + PNG 报错；CI 新增 EXR 冒烟（写 EXR → 自己读回 → 出 PNG），Windows + macOS 都跑。
+- **实测（2160×1214）**：
+  - float EXR **30.0 MB**、half EXR **15.0 MB**、16-bit PNG **15.0 MB**（PNG 有压缩，EXR 目前没有）。
+  - 写 EXR 与写 16-bit PNG 的耗时基本一样（同一帧 295 vs 293 ms，含颜色 + 质感）。
+  - 正常帧：EXR 读回再写 16-bit PNG 与原 PNG **PSNR = inf**（逐位相同）。
+  - 独立解码器校验：ffmpeg 解 float EXR → PNG 与原图 **92.6 dB**（1 LSB 级舍入），half EXR **82.8 dB**。
+  - `convert --from apple-log --exposure 3`：EXR 范围 **0.0000 .. 5.3438**，**32.973%** 的像素 >1 且保留；同参数 PNG 全部切到 1。
+- **后果**：
+  - 浮点交付有了，但仍不是“场景线性 EXR”：样本是 **display-encoded**（sRGB 或 PQ/HLG 码值），只是不钳制。导入 Resolve/Nuke 时要设对应的输入变换，不要当线性素材用。
+  - 不压缩是为了少一个依赖；2.6 MP 一帧 30 MB，长序列会很大。half 是一半，日常交付够用。
+  - 下一步若要做真正的线性交付，应该加 `--exr-linear`（按输出 TRC 反解）或直接接 OCIO，而不是偷偷改现有定义。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

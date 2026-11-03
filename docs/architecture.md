@@ -92,6 +92,13 @@ image's white to `--peak` nits (default 1000) and writes ST 2084 code values,
 `--hdr hlg` writes BT.2100 HLG. The film model is untouched, so SDR and HDR
 renders share every earlier stage.
 
+Delivery (D055) is 8/16-bit PNG or OpenEXR. The EXR writer emits uncompressed
+scanline RGB with FLOAT or HALF samples, so nothing is clamped to 0..1 and a
+super-white HDR frame survives. It carries display-encoded values (sRGB or
+PQ/HLG code values), not scene-linear light, and the reader accepts the same
+subset. Compression (ZIP/PIZ) and an explicit linear option are deliberately
+still open.
+
 Video (D022) is a child-process integration: `spektra-roll-cli video` runs
 ffprobe once for geometry and rotation, then pipes raw RGB48 frames from an
 ffmpeg decoder through the LUT into an ffmpeg encoder, mapping the source audio
@@ -150,7 +157,7 @@ Deliberately off so far (each has a decision record):
 ```
 core/        C++20, no UI, no policy. C ABI on the outside.
   lut3d      .cube parse / write + tetrahedral/trilinear    (built)
-  image      8/16-bit PNG decode + encode, test chart       (built)
+  image      8/16-bit PNG + float/half EXR, test chart    (built)
   json       minimal JSON reader for profile files          (built)
   profile    profile JSON -> spectral arrays                (built)
   film_model M1 spectral chain + LUT bake                   (built)

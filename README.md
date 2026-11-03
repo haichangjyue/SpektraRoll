@@ -9,8 +9,9 @@ Status: **M5 in progress** — the M1 spectral chain bakes a real **Kodak Portra
 **PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log** footage (BT.2020,
 log-encoded) as input, can either print it (`--scan print`) or scan the
 negative (`--scan negative`, much more latitude), writes SDR or **HDR
-(PQ/HLG)**, and renders clips in resumable segments while keeping the camera
-timecode. A **Qt 6 desktop UI** wraps the same pipeline.
+(PQ/HLG)** as 16-bit PNG or unclipped **float/half EXR**, and renders clips in
+resumable segments while keeping the camera timecode. A **Qt 6 desktop UI**
+wraps the same pipeline.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -172,6 +173,13 @@ spektra-roll-cli lut bake --out portra400_endura.cube --size 33
 spektra-roll-cli gen --out chart.png --bits 16
 spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded.png
 
+# float delivery: an .exr path writes 32-bit float (or half) and is not clamped
+spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded.exr
+spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded_half.exr --exr-half
+spektra-roll-cli lut apply --lut portra400_endura.cube --in-dir frames --out-dir frames_exr --out-ext exr
+# EXR input works too (uncompressed scanline, FLOAT or HALF)
+spektra-roll-cli lut apply --lut portra400_endura.cube --in graded.exr --out back.png --bits 16
+
 # compare against a reference bake
 spektra-roll-cli lut compare --a reference.cube --b portra400_endura.cube
 
@@ -236,7 +244,7 @@ to the M2 colour work (D021).
 ```
 src/core/       C++20 library, no UI, no I/O policy
   lut3d         .cube parse / write + tetrahedral/trilinear interpolation
-  image         stb decode + 8/16-bit PNG encode + test chart
+  image         stb decode + 8/16-bit PNG + uncompressed float/half EXR + test chart
   profile       spektrafilm profile JSON -> spectral data
   film_model    M1 spectral chain: upsampling, curves, print, scan
   metrics       PSNR and CIE76 delta E for parity checks
@@ -252,8 +260,9 @@ docs/           architecture and licensing notes
 
 ## Known limitations (on purpose, for now)
 
-- No per-layer grain and no physical point-spread functions: glare, diffusion
-  and halation are display-space blurs (D033/D035).
+- No per-layer grain: grain is one seeded field per frame. Halation, glare and
+  diffusion are point spreads measured in micrometres (D054), but they are
+  two-Gaussian approximations rather than measured film/lens PSFs.
 - Output gamut compression is on for Apple Log input (`--gamut oklch`, D027) and
   off by default for sRGB input so the M1 reference stays bit-identical.
 - Apple Log input works, with two ways out: print (`--scan print`, the M1
@@ -267,10 +276,12 @@ docs/           architecture and licensing notes
   (D022), so a clip can be graded, trimmed, rendered as ProRes or HDR, and
   resumed from completed segments in one command.
 - Output gamut compression is off by default for sRGB input; extreme colours can
-  produce out-of-range LUT values, which are clamped when writing an image.
+  produce out-of-range LUT values, which are clamped when writing PNG and kept
+  when writing EXR.
 - Source timecode is copied and offset by `--start`; drop-frame sources are
   offset in nominal frames, so they can drift by a few frames per hour.
-- 16-bit PNG only; no EXR or OpenImageIO yet.
+- EXR is uncompressed scanline RGB (float or half) and carries display-encoded
+  values, not scene-linear light; there is no OpenImageIO and no zip/PIZ yet.
 - Mallett 2019 spectral upsampling only; hanatos2025 is a later option.
 - `.cube` only; `.3dl` and OCIO configs come later.
 - Windows UI does not exist; the CLI is the first deliverable.

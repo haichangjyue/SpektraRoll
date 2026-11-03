@@ -2,6 +2,7 @@
 // Copyright (C) 2026 SpektraRoll contributors
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -53,11 +54,14 @@ void printUsage() {
         "spektra-roll-cli %s\n"
         "\n"
         "Usage:\n"
-        "  spektra-roll-cli gen --out <file.png> [--width N] [--height N] [--bits 8|16]\n"
-        "      Write the built-in test chart (grey ramp + colour patches).\n"
+        "  spektra-roll-cli gen --out <file.png|file.exr> [--width N] [--height N]\n"
+        "                       [--bits 8|16] [--exr-half]\n"
+        "      Write the built-in test chart (grey ramp + colour patches). An .exr\n"
+        "      output is float (or half with --exr-half) and is not clamped.\n"
         "\n"
         "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log]\n"
         "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
+        "                           [--exr-half]\n"
         "      Decode an image to display-encoded sRGB without the film model. Used\n"
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "\n"
@@ -136,16 +140,21 @@ void printUsage() {
         "                             [--grain 0..1] [--halation 0..1]\n"
         "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
         "                             [--spread-model physical|box] [--frame-width-mm 36]\n"
-        "                             [--texture-engine auto|cpu|gpu]\n"
+        "                             [--texture-engine auto|cpu|gpu] [--exr-half]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "      --engine spectral runs the per-pixel physical chain instead of a LUT\n"
         "      (no --lut needed; --film/--paper/--input choose the materials).\n"
+        "      An --out path ending in .exr writes OpenEXR instead: 32-bit float by\n"
+        "      default, 16-bit half with --exr-half, and nothing is clamped. EXR\n"
+        "      input is read back too (uncompressed scanline files, FLOAT or HALF).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
-        "                             [--texture-engine auto|cpu|gpu]\n"
-        "      Apply the LUT to every PNG in --in-dir (sorted by name). Used to grade\n"
-        "      image sequences without starting the process once per frame.\n"
+        "                             [--texture-engine auto|cpu|gpu] [--out-ext png|exr]\n"
+        "                             [--exr-half]\n"
+        "      Apply the LUT to every PNG or EXR in --in-dir (sorted by name). Used to\n"
+        "      grade image sequences without starting the process once per frame.\n"
+        "      --out-ext exr turns a PNG sequence into float EXR frames (D055).\n"
         "\n"
         "  spektra-roll-cli lut compare --a <reference.cube> --b <test.cube>\n"
         "                               [--min-psnr 60]\n"
@@ -227,11 +236,41 @@ int fail(const std::string& message) {
 int requestedBits(const Args& args, int fallback) {
     if (!args.has("bits")) return fallback;
     const int bits = args.getInt("bits", fallback);
-    if (bits != 8 && bits != 16) {
+    if (bits != 8 && bits != 16 && bits != 32) {
         std::fprintf(stderr, "warning: --bits %d is not supported, using %d\n", bits, fallback);
         return fallback;
     }
     return bits;
+}
+
+// A path ending in .exr is written as OpenEXR and always reports 32-bit float,
+// whatever --bits says (D055).
+bool isExrPath(const std::string& path) {
+    if (path.size() < 4) return false;
+    std::string ext = path.substr(path.size() - 4);
+    for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return ext == ".exr";
+}
+
+int outputBits(const std::string& path, int bits) { return isExrPath(path) ? 32 : bits; }
+
+// Float deliveries are about not clipping, so say out loud what was outside
+// 0..1 before saving (D055).
+void reportFloatRange(const sr::Image& image) {
+    if (image.pixels.empty()) return;
+    float low = image.pixels[0];
+    float high = image.pixels[0];
+    size_t below = 0;
+    size_t above = 0;
+    for (float value : image.pixels) {
+        low = std::min(low, value);
+        high = std::max(high, value);
+        if (value < 0.0f) ++below;
+        if (value > 1.0f) ++above;
+    }
+    const double total = static_cast<double>(image.pixels.size());
+    std::printf("range: %.4f .. %.4f (%.3f%% below 0, %.3f%% above 1, written unclipped)\n", low,
+                high, 100.0 * below / total, 100.0 * above / total);
 }
 
 int cmdGen(const Args& args) {
@@ -244,9 +283,10 @@ int cmdGen(const Args& args) {
 
     const sr::Image image = sr::makeTestChart(width, height);
     std::string error;
-    if (!sr::saveImage(out, image, error, bits)) return fail(error);
+    if (!sr::saveImage(out, image, error, bits, args.has("exr-half"))) return fail(error);
 
-    std::printf("wrote %s (%dx%d, %d-bit)\n", out.c_str(), image.width, image.height, bits);
+    std::printf("wrote %s (%dx%d, %d-bit)\n", out.c_str(), image.width, image.height,
+                outputBits(out, bits));
     return 0;
 }
 
@@ -622,12 +662,23 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
     std::vector<std::filesystem::path> files;
     for (const auto& entry : std::filesystem::directory_iterator(inDir, ec)) {
         if (!entry.is_regular_file()) continue;
-        const std::string ext = entry.path().extension().string();
-        if (ext == ".png" || ext == ".PNG") files.push_back(entry.path());
+        std::string ext = entry.path().extension().string();
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext == ".png" || ext == ".exr") files.push_back(entry.path());
     }
-    if (files.empty()) return fail("no PNG files in " + inDir);
+    if (files.empty()) return fail("no PNG or EXR files in " + inDir);
     std::sort(files.begin(), files.end());
     std::filesystem::create_directories(outDir, ec);
+
+    // `--out-ext` rewrites the extension, so a PNG sequence can be delivered
+    // as EXR frames (D055); without it the input extension is kept.
+    std::string outExt = args.get("out-ext", "");
+    for (char& c : outExt) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (!outExt.empty() && outExt[0] != '.') outExt = "." + outExt;
+    if (!outExt.empty() && outExt != ".png" && outExt != ".exr") {
+        return fail("--out-ext expects png or exr");
+    }
+    const bool exrOutput = outExt == ".exr";
 
     const auto started = std::chrono::steady_clock::now();
     size_t frames = 0;
@@ -657,9 +708,15 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
         });
         applyTextureFrame(image.pixels.data(), image.width, image.height, texture,
                           static_cast<int>(frames), &grainCache, &textureGpu);
-        bits = requestedBits(args, sourceBits);
-        const auto outPath = std::filesystem::path(outDir) / path.filename();
-        if (!sr::saveImage(outPath.string(), image, error, bits)) return fail(error);
+        // A 32-bit EXR source cannot go back into a PNG; 16 bits is the closest.
+        bits = requestedBits(args, std::min(sourceBits, 16));
+        std::filesystem::path outName = path.filename();
+        if (!outExt.empty()) outName.replace_extension(outExt);
+        const auto outPath = std::filesystem::path(outDir) / outName;
+        if (!sr::saveImage(outPath.string(), image, error, bits, args.has("exr-half"))) {
+            return fail(error);
+        }
+        if (isExrPath(outPath.string())) bits = 32;
         ++frames;
         pixels += count;
         if (frames % 10 == 0 || frames == files.size()) {
@@ -720,7 +777,7 @@ int cmdLutApply(const Args& args) {
     int sourceBits = 8;
     if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
 
-    const int bits = requestedBits(args, sourceBits);
+    const int bits = requestedBits(args, std::min(sourceBits, 16));
 
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
@@ -755,18 +812,23 @@ int cmdLutApply(const Args& args) {
                              std::chrono::steady_clock::now() - started)
                              .count();
 
-    if (!sr::saveImage(outPath, image, error, bits)) return fail(error);
+    if (!sr::saveImage(outPath, image, error, bits, args.has("exr-half"))) return fail(error);
+    const int outBits = outputBits(outPath, bits);
+
+    if (isExrPath(outPath)) {
+        reportFloatRange(image);
+    }
 
     if (spectral) {
         std::printf("engine: %s %s + %s\n", gpu ? "spectral-gpu" : "spectral",
                     recipe.film.info.name.c_str(), recipe.paper.info.name.c_str());
         std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
-                    outPath.c_str(), image.width, image.height, count, bits, sourceBits,
+                    outPath.c_str(), image.width, image.height, count, outBits, sourceBits,
                     elapsed);
     } else {
         std::printf("applied %s (%d^3) to %s\n", lutPath.c_str(), lut.size(), inPath.c_str());
         std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms, %s)\n",
-                    outPath.c_str(), image.width, image.height, count, bits, sourceBits,
+                    outPath.c_str(), image.width, image.height, count, outBits, sourceBits,
                     elapsed,
                     mode == sr::Interp::Trilinear ? "trilinear" : "tetrahedral");
     }
@@ -1863,7 +1925,8 @@ int cmdVideo(const Args& args) {
     return 0;
 }
 
-int cmdConvert(const Args& args) {    const std::string inPath = args.get("in");
+int cmdConvert(const Args& args) {
+    const std::string inPath = args.get("in");
     const std::string outPath = args.get("out");
     if (inPath.empty()) return fail("convert requires --in <image>");
     if (outPath.empty()) return fail("convert requires --out <image>");
@@ -1881,11 +1944,13 @@ int cmdConvert(const Args& args) {    const std::string inPath = args.get("in");
     int sourceBits = 8;
     std::string error;
     if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
-    const int bits = requestedBits(args, sourceBits);
+    const int bits = requestedBits(args, std::min(sourceBits, 16));
 
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
     const double gain = std::exp2(exposureEv);
+    // A float EXR keeps super-whites; PNG has to clamp them.
+    const bool floatOut = isExrPath(outPath);
     for (size_t i = 0; i < count; ++i) {
         float* px = &image.pixels[i * 3];
         double linear[3];
@@ -1899,19 +1964,23 @@ int cmdConvert(const Args& args) {    const std::string inPath = args.get("in");
             for (int c = 0; c < 3; ++c) linear[c] = sr::srgbDecode(px[c]);
         }
         for (int c = 0; c < 3; ++c) {
-            px[c] = static_cast<float>(sr::srgbEncode(std::min(1.0, std::max(0.0, linear[c] * gain))));
+            const double encoded = sr::srgbEncode(linear[c] * gain);
+            px[c] = static_cast<float>(floatOut ? encoded
+                                                : std::min(1.0, std::max(0.0, encoded)));
         }
     }
     const auto elapsed = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
 
-    if (!sr::saveImage(outPath, image, error, bits)) return fail(error);
+    if (!sr::saveImage(outPath, image, error, bits, args.has("exr-half"))) return fail(error);
+    if (isExrPath(outPath)) reportFloatRange(image);
 
     std::printf("converted %s (%s -> srgb, %+.2f EV) to %s\n", inPath.c_str(),
                 sr::inputTransferName(from), exposureEv, outPath.c_str());
     std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
-                outPath.c_str(), image.width, image.height, count, bits, sourceBits, elapsed);
+                outPath.c_str(), image.width, image.height, count, outputBits(outPath, bits),
+                sourceBits, elapsed);
     return 0;
 }
 
