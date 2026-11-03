@@ -14,7 +14,8 @@ namespace sr {
 // glare, diffusion and grain. The shaders are a pass-by-pass translation of
 // sr::applyTexture's helpers, including the separable box blurs and the
 // downsample/blur/upsample shortcut, so the CPU path stays the reference and the
-// fallback. Windows-only; elsewhere process() returns false.
+// fallback. D3D11 on Windows; macOS still runs this chain on the CPU until the
+// Metal port (D057), so available() is false there.
 class GpuTexture {
 public:
     GpuTexture();

@@ -917,8 +917,9 @@
 - **实测**：
   - macOS CI（run **80**）：`gpu_film` 从“3.1 s、NaN/偏差 1.0 失败”变成通过；`gpu_texture` / `gpu_chain` 按预期 skip；Windows 全绿。
   - 本机（Windows）不受影响：9/9 测试、GPU 测试仍真跑；`gpu-info` 输出 `D3D11 feature level 0xB000 / Intel Arc A750 / spectral-gpu: available`。
-  - 真机（MacBook Air M1）：第一次验收时 `MTLCreateSystemDefaultDevice()` 返回 nil，`gpu_film` / `gpu_texture` / `gpu_chain` 全部 skip，CLI 自动回退 CPU 光谱；已加 `MTLCopyAllDevices()` 兜底与 `gpu-info`，等待复测结果。
-  - **Mac 上的真实 ms/帧还没有数字**：CI 只跑 17 个像素的 parity。`scripts/verify-macos.command` 新增了 CPU vs Metal 的 PSNR 检查；实际速度要用 `video` 命令在 MacBook 上量。
+  - 真机（MacBook Air M1，macOS 14.7.5 arm64）：`MTLCreateSystemDefaultDevice()` 仍然返回 nil，但 `MTLCopyAllDevices()` 找到唯一一块 **Apple M1**，兜底生效——`gpu_film` 六组 parity 最差 **2.99e-4**（容差 2e-3），320×180 的 CPU vs Metal **PSNR 115.44 dB**；同尺寸单帧 10.8 → 7.1 ms（这个尺寸主要耗在 PNG 读写，不代表 2.6 MP 的速度）。
+  - `MTLCreateSystemDefaultDevice()` 在 macOS 上返回 nil 并不是“没有 Metal”：Metal 3 完全可用，只是默认设备 API 没给，必须再用设备列表兜底。
+  - **2.6 MP 的 Mac 速度还没有数字**：CI 只跑 17 个像素的 parity，真机验收也只跑了 320×180。要完整对比请在 Mac 上用 `video` 命令渲染一段真实素材。
 - **后果**：
   - macOS 的 `--engine spectral-gpu` 现在是真的 GPU 颜色；UI 里“光谱 GPU（物理，快）”在 Mac 上不再是 CPU 回退。
   - 质感仍在 CPU，所以 Mac 的整帧时间 ≈ Metal 颜色 + 160 ms 质感；D057 把质感搬上去之后才是完整对齐 Windows。

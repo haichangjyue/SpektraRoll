@@ -413,7 +413,7 @@ double GpuTexture::lastMilliseconds() const { return impl_->lastMs; }
 
 bool GpuTexture::available(std::string& error) {
 #if !SR_HAVE_D3D11
-    error = "the GPU texture backend is only available on Windows (D3D11)";
+    error = "the GPU texture backend is not available on this platform yet (Windows uses D3D11; the Metal texture backend is D057)";
     return false;
 #else
     Impl probe;
@@ -423,7 +423,7 @@ bool GpuTexture::available(std::string& error) {
 
 bool GpuTexture::prepare(std::string& error) {
 #if !SR_HAVE_D3D11
-    error = "the GPU texture backend is only available on Windows (D3D11)";
+    error = "the GPU texture backend is not available on this platform yet (Windows uses D3D11; the Metal texture backend is D057)";
     return false;
 #else
     return impl_->initialize(error);
@@ -433,7 +433,7 @@ bool GpuTexture::prepare(std::string& error) {
 bool GpuTexture::attach(void* device, std::string& error) {
 #if !SR_HAVE_D3D11
     (void)device;
-    error = "the GPU texture backend is only available on Windows (D3D11)";
+    error = "the GPU texture backend is not available on this platform yet (Windows uses D3D11; the Metal texture backend is D057)";
     return false;
 #else
     if (device == nullptr) {
@@ -457,7 +457,7 @@ bool GpuTexture::process(const float* rgb, int width, int height, const TextureP
     (void)params;
     (void)frame;
     (void)out;
-    error = "the GPU texture backend is only available on Windows (D3D11)";
+    error = "the GPU texture backend is not available on this platform yet (Windows uses D3D11; the Metal texture backend is D057)";
     return false;
 #else
     if (width <= 0 || height <= 0) {
@@ -497,7 +497,7 @@ bool GpuTexture::processBuffer(void* input, int width, int height, const Texture
     (void)params;
     (void)frame;
     (void)out;
-    error = "the GPU texture backend is only available on Windows (D3D11)";
+    error = "the GPU texture backend is not available on this platform yet (Windows uses D3D11; the Metal texture backend is D057)";
     return false;
 #else
     if (input == nullptr) {
