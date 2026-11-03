@@ -1178,6 +1178,8 @@
   - `test_film_model` 新增：片库 stage、印片曝光因子 **1.720784698861**、0.0 / 0.184 / 0.5 / 1.0 / 暖红 / 绿地的锚点；250D + 2393 中灰中性。
   - `test_gpu_film` 新增：Vision3 500T/2383 的 print 与 S-Log3 negative，worst **1e-6**；`ctest` **10/10**。
   - `spektra-roll-ui.exe --stocks-selftest`：**films=16 / papers=8**，Vision3 500T、Verita、2383、2393、Portra 400/Endura 全在。
+  - 4K50 真实素材（光谱 GPU，Vision3 500T + 2383）：4 帧 ProRes **764.6 ms/帧**（含 4K 上传/回读 + GPU 质感）。
+  - CI：run **104** Windows + macOS 双绿；macOS 真跑 Metal 光谱/质感/融合链与 OCIO。
   - 200T + 2393、250D + 2383、Verita + 2383 都能烘表。
 - **后果**：
   - 界面可用 profile 从 **17 → 24**（16 支负片 + 6 相纸 + 2 电影印片）；只剩 4 支反转片没接。

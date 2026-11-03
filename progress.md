@@ -56,6 +56,7 @@
 - CI：本轮 D061 的 run **93 / 95**、D062 的 run **97** Windows + macOS 全绿；macOS 从 run 97 起用 Homebrew 的 OpenColorIO 真跑 `test_ocio`，Windows 跑 stub 路径。
 - D063 是界面接 OCIO：UI 不链接库，靠 CLI 的 `ocio-info --json` 填下拉；`findCli` 优先用带 OCIO 的完整构建，`SPEKTRA_CLI` 可覆盖。
 - CI：D063 的 run **102** Windows + macOS 全绿；macOS 用 Homebrew 的 OCIO 真跑 `ocio-info --json`（Python 解析断言 52 个空间）+ LUT，Windows 跑 stub 并断言那句报错。
+- CI：D064/D065 的 run **104** Windows + macOS 全绿（11m32s）；macOS 真跑 Metal 光谱/质感/融合链和 OCIO，Windows 真跑 D3D11。
 - 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 **10/10** 测试。
 
 ### 关键决策（D056–D062）
@@ -141,6 +142,8 @@
 | `demo-cine` | Vision3 500T + 2383 / Vision3 负片 / Portra 400 三张正常出图 |
 | `demo-m4`（新素材） | 100 帧 / 2 段，续渲只补缺失段；timecode **00:13:37:46**、音频 PCM 正常 |
 | 范围 | `in_range=auto` 与 `in_range=pc` 逐位相同、与 `tv` 不同；无标签素材 auto == tv |
+| 4K50 光谱 GPU（Vision3） | 4 帧 ProRes，**764.6 ms/帧**（含 4K 上传/回读 + GPU 质感） |
+| CI | run **104** Windows + macOS 全绿（macOS 真跑 Metal + OCIO） |
 
 ### 四、怎么用
 
