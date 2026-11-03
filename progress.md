@@ -67,7 +67,7 @@
 |---|---|
 | macOS CI（run 85） | **9/9 全过**：`gpu_texture` **2.11 s**、`gpu_chain` **2.10 s**（之前 skip） |
 | Windows 本机 | 9/9 全过，D3D11 路径未受影响 |
-| 真机 M1 | 待跑 `test_gpu_texture` / `video` 记录 dB 与 ms/帧 |
+| 真机 M1 | `test_gpu_texture` 九组 **逐位相同**（worst 0.0）；融合 vs CPU **134.80 dB**；320×180 单帧 CPU 11.5 → Metal **5.6 ms** |
 
 ### 五、未完成的待办
 
@@ -730,7 +730,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **物理点扩散核（D054）** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB；parity 149–178 dB |
 | **浮点 EXR（D055）** | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读写耗时与 PNG 相当；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB（half 82.8）；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
 | **Metal 光谱（D056）** | macOS CI run 80 双绿；真机 M1（macOS 14.7.5）：`MTLCopyAllDevices` 找到 Apple M1、默认设备仍 nil；六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**；单帧 10.8 → **7.1 ms**（含 PNG I/O）；2.6 MP 速度待测 |
-| **Metal 质感（D057）** | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s（之前 skip）；Windows 9/9；真机 dB/ms 待测 |
+| **Metal 质感（D057）** | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1：九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms**；2.6 MP 待测 |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |

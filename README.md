@@ -118,7 +118,11 @@ including the separable convolution's summation order, so the two agree at
 **149–178 dB PSNR** (worst deviation 3e-7); `ctest` enforces that too, and a
 device failure falls back to the CPU chain instead of failing the render.
 This backend runs on D3D11 on Windows and on Metal on macOS (D057), so both
-platforms keep colour and texture on the GPU.
+platforms keep colour and texture on the GPU. On Metal the texture chain is
+**bit-identical** to the CPU reference (0.0 deviation) — it only adds, multiplies
+and compares, with the same summation order and fast math disabled; the fused
+colour+texture submit agrees at **134.8 dB**, limited by the film pass's
+transcendentals.
 
 Since D054 the three spatial effects are sized on the film instead of on the
 frame: `--halation-spread` / `--glare-spread` / `--diffusion-spread` are effective

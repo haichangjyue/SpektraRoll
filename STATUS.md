@@ -122,7 +122,7 @@
 | 物理点扩散核（D054） | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB |
 | 浮点 EXR（D055） | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB、half 82.8 dB；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
 | Metal 光谱（D056） | macOS CI run 80 双绿；真机 M1：设备走 `MTLCopyAllDevices`（默认设备 nil），六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**，单帧 10.8 → **7.1 ms**（含 PNG I/O） |
-| Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s（之前 skip）；Windows 9/9；真机 dB/ms 待测 |
+| Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1 九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms** |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |

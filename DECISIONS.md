@@ -947,7 +947,9 @@
 - **实测**：
   - macOS CI（run **85**）：9/9 全过，`gpu_texture` **2.11 s**、`gpu_chain` **2.10 s**（之前是 skip），说明 Metal 质感与融合提交都在真机上跑了。
   - Windows 本机：9/9 全过，D3D11 路径未受影响。
-  - 各 kernel 的逐像素 parity 门限仍是 ≥60 dB；D3D11 实测 149–178 dB，Metal 是同一套权重与累加顺序。真机 M1 的具体 dB / 速度待用 `test_gpu_texture` 与 `video` 量。
+  - 真机 M1（macOS 14.7.5）：`test_gpu_texture` 九组配置全部 **逐位相同**（worst 0.0，PSNR 999 = 无差异）——质感链只有加/乘/比较，没有超越函数，Metal 关掉 fast math 后与 CPU 完全一致。
+  - `test_gpu_chain`：融合 vs CPU **134.80 dB**（worst 3.67e-6），剩余差异来自 film 的超越函数，不是质感。
+  - 320×180 单帧：CPU 11.5 ms → Metal **5.6 ms**；CPU vs Metal 光谱 **115.44 dB**。2.6 MP 的 ms/帧待测。
 - **后果**：
   - macOS 现在颜色和质感都在 GPU，`--texture-engine auto` 在 `--engine spectral-gpu` 下自动用 Metal 质感，融合提交在 Mac 上重新生效。
   - Mac 的整帧时间不再固定多出约 160 ms 的 CPU 质感；实际收益要等 2.6 MP 实测。
