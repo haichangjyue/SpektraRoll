@@ -53,6 +53,7 @@
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
 - CI：本轮 D061 的 run **93 / 95**、D062 的 run **97** Windows + macOS 全绿；macOS 从 run 97 起用 Homebrew 的 OpenColorIO 真跑 `test_ocio`，Windows 跑 stub 路径。
 - D063 是界面接 OCIO：UI 不链接库，靠 CLI 的 `ocio-info --json` 填下拉；`findCli` 优先用带 OCIO 的完整构建，`SPEKTRA_CLI` 可覆盖。
+- CI：D063 的 run **102** Windows + macOS 全绿；macOS 用 Homebrew 的 OCIO 真跑 `ocio-info --json`（Python 解析断言 52 个空间）+ LUT，Windows 跑 stub 并断言那句报错。
 - 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 **10/10** 测试。
 
 ### 关键决策（D056–D062）
@@ -122,6 +123,7 @@
 | 光谱预览 + OCIO | `ok look spectral`；1600×898 一帧 **537 ms**，`raw` **95.8 ms** |
 | `spectral-gpu` + OCIO | `ok look spectral`（回退 CPU），一帧 **529.9 ms**；修复前 34 ms 但颜色错 21 dB |
 | 回归 | `ctest` **10/10**；`demo-ocio` 的 93.6 / 63.9 dB 不变 |
+| CI | run **102** Windows + macOS 全绿；macOS 真跑 `ocio-info --json` + OCIO LUT，Windows 跑 stub |
 | 双击验收 | `scripts\demo-ocio-ui.cmd` |
 
 ### 四、怎么用
@@ -208,7 +210,7 @@ $env:SPEKTRA_CLI = "X:\agent\SpektraRoll\build\spektra-roll-cli.exe"
 
 ### 五、未完成的待办
 
-- [ ] **UI 的下拉**：界面还没暴露 OCIO（构建也故意不链 OCIO）
+- [x] ~~**UI 的下拉**：界面还没暴露 OCIO（构建也故意不链 OCIO）~~ → D063 已完成（左栏“色彩管理（OCIO）”，用 `ocio-info --json` 填名字）
 - [ ] **光谱 GPU 的 OCIO**：现在回退 CPU 光谱
 - [ ] `--exr-linear` 还不认 OCIO 的显示变换
 

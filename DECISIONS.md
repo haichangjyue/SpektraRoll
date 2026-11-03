@@ -1107,7 +1107,7 @@
   - 有 OCIO 的构建可以用**任意**相机空间、ACES 空间、显示器变换；没有 OCIO 的构建行为与 D061 完全一致。
   - 仓库内置一份 **ACES 2.0 studio 配置**（Apache-2.0，`data/ocio/`），离线可用；也接受任意 `.ocio` 或 `$OCIO`。
   - Windows CI 不装 OCIO（自建一次 20 分钟，不划算）→ CI 跑的是 stub 路径；macOS CI 用 Homebrew 的 OCIO 真跑测试。
-  - 仍未做：UI 的 OCIO 下拉、光谱 GPU 的 OCIO、OCIO 输出的 EXR 线性标记（`--exr-linear` 目前只认 sRGB/PQ/HLG）。
+  - 仍未做：UI 的 OCIO 下拉（D063 已完成）、光谱 GPU 的 OCIO、OCIO 输出的 EXR 线性标记（`--exr-linear` 目前只认 sRGB/PQ/HLG）。
 
 ---
 
@@ -1131,6 +1131,7 @@
   - `spectral-gpu` + OCIO：`ok look spectral`（回退 CPU），一帧 **529.9 ms**，不再是 34 ms 的“假 GPU”。
   - `ctest` **10/10**。
   - 双击验收：`scripts\demo-ocio-ui.cmd`（界面自检 → CLI 对照 → 用 UI 的 LUT 渲一帧 → 打开图片）。
+  - CI：run **102** Windows + macOS 双绿；macOS 用 Homebrew 的 OCIO 真跑 `ocio-info --json`（Python 断言 52 个空间）+ LUT，Windows 跑 stub。
 - **后果**：
   - 界面可以用任意相机/ACES 空间当 LUT 输入，名字来自配置本身，加空间不用改代码。
   - UI 的 OCIO 能力取决于它调用的 CLI：完整构建（`build\`）有；只有 `build-ui\` 的便携包没有，会明确提示。
