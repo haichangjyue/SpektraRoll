@@ -128,11 +128,43 @@ float vLogDecode(float y) {
     return pow(10.0f, (y - 0.598206f) / 0.241514f) - 0.00873f;
 }
 
+// D061 camera logs; same constants as transfer.cpp. MSL has no implicit double
+// literals here, so every constant carries the f suffix like the D060 ones.
+float arriLogC3Decode(float t) {
+    if (t > 5.367655f * 0.010591f + 0.092809f) {
+        return (pow(10.0f, (t - 0.385537f) / 0.247190f) - 0.052272f) / 5.555556f;
+    }
+    return (t - 0.092809f) / 5.367655f;
+}
+
+float arriLogC4Decode(float ep) {
+    if (ep >= 0.0f) {
+        return (exp2(14.0f * ((ep - 0.09286412512218964f) / 0.9071358748778103f) + 6.0f) -
+                64.0f) /
+               2231.8263090676883f;
+    }
+    return ep * 0.1135972086105891f - 0.01805699611991131f;
+}
+
+float bmdFilmGen5Decode(float y) {
+    if (y < 8.283605932402494f * 0.005f + 0.09246575342465753f) {
+        return (y - 0.09246575342465753f) / 8.283605932402494f;
+    }
+    return exp((y - 0.5300133392291939f) / 0.08692876065491224f) - 0.005494072432257808f;
+}
+
+float daVinciIntermediateDecode(float v) {
+    if (v <= 0.02740668f) return v / 10.44426855f;
+    return exp2(v / 0.07329248f - 7.0f) - 0.0075f;
+}
+
 float3 camMatrix(float3 v, float3 r, float3 g, float3 b) {
     return float3(dot(r, v), dot(g, v), dot(b, v));
 }
 
-// inputMode: 0 sRGB, 1 Apple Log, 2 S-Log3, 3 C-Log3, 4 V-Log.
+// inputMode: 0 sRGB, 1 Apple Log, 2 S-Log3, 3 C-Log3, 4 V-Log,
+//            5 S-Log3 + S-Gamut3, 6 LogC3, 7 LogC4, 8 Blackmagic Gen 5,
+//            9 DaVinci Intermediate.
 float3 decodeInput(constant Params& p, float3 encoded) {
     if (p.inputMode == 0) {
         return float3(srgbDecode(encoded.x), srgbDecode(encoded.y), srgbDecode(encoded.z));
@@ -165,12 +197,78 @@ float3 decodeInput(constant Params& p, float3 encoded) {
                                     1.443812032000612f)),
                    float3(0.0f));
     }
-    camera = float3(vLogDecode(encoded.x), vLogDecode(encoded.y), vLogDecode(encoded.z));
-    return max(camMatrix(camera,
-                         float3(1.806573570346048f, -0.695698131346300f, -0.110878567820157f),
-                         float3(-0.170089035422901f, 1.305954766066613f, -0.135864821747590f),
-                         float3(-0.025205692416949f, -0.154467764144244f, 1.179673668428944f)),
-               float3(0.0f));
+    if (p.inputMode == 4) {
+        camera = float3(vLogDecode(encoded.x), vLogDecode(encoded.y), vLogDecode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.806573570346048f, -0.695698131346300f,
+                                    -0.110878567820157f),
+                             float3(-0.170089035422901f, 1.305954766066613f,
+                                    -0.135864821747590f),
+                             float3(-0.025205692416949f, -0.154467764144244f,
+                                    1.179673668428944f)),
+                   float3(0.0f));
+    }
+    if (p.inputMode == 5) {
+        camera = float3(slog3Decode(encoded.x), slog3Decode(encoded.y), slog3Decode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.877703304158600f, -0.794072272012260f,
+                                    -0.083787749334960f),
+                             float3(-0.176609064916940f, 1.350911870533990f,
+                                    -0.174203656726040f),
+                             float3(-0.026158248305760f, -0.148431249773440f,
+                                    1.174663935814270f)),
+                   float3(0.0f));
+    }
+    if (p.inputMode == 6) {
+        camera = float3(arriLogC3Decode(encoded.x), arriLogC3Decode(encoded.y),
+                        arriLogC3Decode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.617341953200000f, -0.537215450400000f,
+                                    -0.080283108000000f),
+                             float3(-0.070402521000000f, 1.334552331200000f,
+                                    -0.264050721600000f),
+                             float3(-0.021064084400000f, -0.226959489200000f,
+                                    1.248098278800000f)),
+                   float3(0.0f));
+    }
+    if (p.inputMode == 7) {
+        camera = float3(arriLogC4Decode(encoded.x), arriLogC4Decode(encoded.y),
+                        arriLogC4Decode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.892909309143406f, -0.780786358195487f,
+                                    -0.112279668273147f),
+                             float3(-0.205500776543893f, 1.340171181030512f,
+                                    -0.134571255550448f),
+                             float3(-0.012662323539739f, -0.152193809032254f,
+                                    1.164930570261962f)),
+                   float3(0.0f));
+    }
+    if (p.inputMode == 8) {
+        camera = float3(bmdFilmGen5Decode(encoded.x), bmdFilmGen5Decode(encoded.y),
+                        bmdFilmGen5Decode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.568229090933787f, -0.522604320339746f,
+                                    -0.045781487919271f),
+                             float3(-0.086193852150434f, 1.344854361752704f,
+                                    -0.258561360666100f),
+                             float3(-0.052011751203802f, -0.249161501129390f,
+                                    1.301247690023161f)),
+                   float3(0.0f));
+    }
+    if (p.inputMode == 9) {
+        camera = float3(daVinciIntermediateDecode(encoded.x), daVinciIntermediateDecode(encoded.y),
+                        daVinciIntermediateDecode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.898404857216630f, -0.792072675468742f,
+                                    -0.106488899073117f),
+                             float3(-0.168748493825520f, 1.488888136041571f,
+                                    -0.320040493279880f),
+                             float3(-0.121499307902914f, -0.315689508174336f,
+                                    1.437263253767220f)),
+                   float3(0.0f));
+    }
+    // Unknown mode: fall back to sRGB rather than guessing a camera log.
+    return float3(srgbDecode(encoded.x), srgbDecode(encoded.y), srgbDecode(encoded.z));
 }
 
 float pqEncode(float nits) {

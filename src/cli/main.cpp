@@ -59,7 +59,7 @@ void printUsage() {
         "      Write the built-in test chart (grey ramp + colour patches). An .exr\n"
         "      output is float (or half with --exr-half) and is not clamped.\n"
         "\n"
-        "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log|s-log3|c-log3|v-log]\n"
+        "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log|<camera log>]\n"
         "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
         "                           [--exr-half] [--exr-raw] [--exr-linear [--exr-trc srgb|pq|hlg]\n"
         "                           [--peak 1000]]\n"
@@ -67,9 +67,9 @@ void printUsage() {
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
-        "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|s-log3|c-log3|v-log]\n"
+        "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|<camera log>]\n"
         "                         [--film <json>] [--paper <json>]\n"
-        "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
+        "                         [--trc srgb|pq|hlg] [--in-matrix auto|bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
         "                         [--crf 16] [--preset medium] [--encoder sw|qsv]\n"
@@ -115,7 +115,7 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
-        "                            [--input srgb|apple-log|s-log3|c-log3|v-log] [--exposure EV]\n"
+        "                            [--input srgb|apple-log|<camera log>] [--exposure EV]\n"
         "                            [--scan print|negative] [--contrast 1.15]\n"
         "                            [--gamut oklch|off] [--couplers on|off]\n"
         "                            [--hdr pq|hlg] [--peak 1000]\n"
@@ -128,6 +128,18 @@ void printUsage() {
         "      --input s-log3 / c-log3 / v-log expect Sony S-Log3 (S-Gamut3.Cine),\n"
         "      Canon Log 3 v1.2 (Cinema Gamut) or Panasonic V-Log (V-Gamut) code\n"
         "      values; each decodes through its log curve and gamut matrix first.\n"
+        "      Every camera log, in one line each (D060/D061):\n"
+        "        s-log3              Sony S-Log3 in S-Gamut3.Cine\n"
+        "        s-log3-sgamut3      Sony S-Log3 in S-Gamut3 (also: s-gamut3)\n"
+        "        c-log3              Canon Log 3 v1.2 in Cinema Gamut\n"
+        "        v-log               Panasonic V-Log in V-Gamut\n"
+        "        logc3               ARRI LogC3 (SUP 3.x, EI 800) in Wide Gamut 3\n"
+        "        logc4               ARRI LogC4 in Wide Gamut 4\n"
+        "        bmd-film            Blackmagic Film Gen 5 in Blackmagic Wide Gamut\n"
+        "        davinci             DaVinci Intermediate in DaVinci Wide Gamut\n"
+        "      --in-matrix auto (the default) reads the clip's color_space tag for\n"
+        "      the YUV -> RGB step and falls back to bt2020; pass bt2020 or bt709 to\n"
+        "      override a badly tagged file.\n"
         "      --scan negative scans the negative itself (inverted against the film\n"
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
         "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
@@ -140,7 +152,7 @@ void printUsage() {
         "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
-        "                             [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|s-log3|c-log3|v-log]\n"
+        "                             [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|<camera log>]\n"
         "                             [--film <json>] [--paper <json>]\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
@@ -174,7 +186,7 @@ void printUsage() {
         "      Compare two LUTs entry by entry (PSNR and CIE76 delta E).\n"
         "      Exits non-zero when PSNR is below --min-psnr.\n"
         "\n"
-        "  spektra-roll-cli preview [--ffmpeg <path>] [--in-matrix bt2020|bt709]\n"
+        "  spektra-roll-cli preview [--ffmpeg <path>] [--in-matrix auto|bt2020|bt709]\n"
         "                           [--cache-mb 1024] [--max-side 1600]\n"
         "                           [--texture-engine auto|cpu|gpu]\n"
         "      Long-lived preview server for the UI (D048). Decodes the clip once\n"
@@ -451,7 +463,7 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
 
     if (args.has("input")) {
         if (!sr::parseInputTransfer(args.get("input"), recipe.options.input)) {
-            error = "--input expects 'srgb', 'apple-log', 's-log3', 'c-log3' or 'v-log'";
+            error = std::string("--input expects one of: ") + sr::inputTransferList();
             return false;
         }
     }
@@ -1069,6 +1081,26 @@ std::string probeTimecode(const std::string& ffprobe, const std::string& input) 
     return {};
 }
 
+// YUV -> RGB matrix for ffmpeg's scale filter. "auto" reads the stream's
+// color_space tag instead of guessing from the selected camera: Apple Log is
+// tagged bt2020nc, while several S-Log3 / C-Log3 / V-Log recipes are tagged
+// bt709 (D061). A wrong matrix shifts every saturated colour, so the container
+// wins over the look. Untagged clips keep the old bt2020 default.
+std::string resolveColorMatrix(const std::string& requested, const std::string& ffprobe,
+                               const std::string& input) {
+    if (!requested.empty() && requested != "auto") return requested;
+    const std::string tag = firstLine(runCapture(
+        shellQuote(ffprobe) +
+        " -v error -select_streams v:0 -show_entries stream=color_space"
+        " -of default=noprint_wrappers=1:nokey=1 " +
+        shellQuote(input)));
+    if (tag.rfind("bt2020", 0) == 0) return "bt2020";
+    for (const char* known : {"bt709", "smpte170m", "bt470bg", "smpte240m"}) {
+        if (tag == known) return tag;
+    }
+    return "bt2020";
+}
+
 // Frame count of the video stream; falls back to duration x fps when the
 // container does not count frames.
 long probeFrameCount(const std::string& ffprobe, const std::string& input, double fps) {
@@ -1175,6 +1207,8 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
     signature << std::setprecision(9) << "spektra-roll video v1\n"
               << "input " << job.inPath << "\n"
               << "size " << job.width << "x" << job.height << " fps " << job.fps << "\n"
+              << "input " << sr::inputTransferName(job.bake.input) << " matrix "
+              << job.inMatrix << "\n"
               << "lut " << fileHash(lutPath) << "\n"
               << "start " << startFrame << " total " << totalFrames << " segment "
               << segmentFrames << "\n"
@@ -1617,7 +1651,7 @@ int cmdVideo(const Args& args) {
 
     const std::string trc = args.get("trc", "srgb");
     const bool hdr = trc == "pq" || trc == "hlg";
-    const std::string inMatrix = args.get("in-matrix", "bt2020");
+    const std::string inMatrix = resolveColorMatrix(args.get("in-matrix", "auto"), ffprobe, inPath);
     if (spectral) {
         // The LUT path bakes PQ/HLG into the table; spectral output encodes it
         // at the end of the chain, using the same --trc.
@@ -2005,7 +2039,7 @@ int cmdConvert(const Args& args) {
 
     sr::InputTransfer from = sr::InputTransfer::Srgb;
     if (args.has("from") && !sr::parseInputTransfer(args.get("from"), from)) {
-        return fail("--from expects 'srgb', 'apple-log', 's-log3', 'c-log3' or 'v-log'");
+        return fail(std::string("--from expects one of: ") + sr::inputTransferList());
     }
     if (args.has("to") && args.get("to") != "srgb") {
         return fail("--to currently supports 'srgb' only (HDR output is M2 work)");
@@ -2175,7 +2209,9 @@ Args argsFromTokens(const std::vector<std::string>& tokens) {
 struct Server {
     std::string ffmpeg;
     std::string ffprobe;
-    std::string inMatrix = "bt2020";
+    std::string inMatrix = "auto";
+    // Resolved once per clip from the stream tag (D061).
+    std::string clipMatrix = "bt2020";
     std::string textureMode = "auto";
     int cacheMb = 1024;
     int maxSide = 1600;
@@ -2220,7 +2256,7 @@ bool configureLook(Server& server, const Args& look, std::string& error) {
     server.spectral = engine != "lut";
     server.gpuColor = engine == "spectral-gpu";
     if (!sr::parseInputTransfer(look.get("input", "srgb"), server.input)) {
-        error = "--input expects 'srgb', 'apple-log', 's-log3', 'c-log3' or 'v-log'";
+        error = std::string("--input expects one of: ") + sr::inputTransferList();
         return false;
     }
     if (!server.spectral) {
@@ -2301,7 +2337,7 @@ bool buildProxy(const Server& server, const std::string& clip, int width, int he
     const std::string command =
         shellQuote(server.ffmpeg) + " -v error -y -i " + shellQuote(clip) + " -an -vf " +
         shellQuote("scale=" + std::to_string(width) + ":" + std::to_string(height) +
-                   ":in_color_matrix=" + server.inMatrix + ":in_range=tv:out_range=full") +
+                   ":in_color_matrix=" + server.clipMatrix + ":in_range=tv:out_range=full") +
         " -c:v libx264 -preset veryfast -crf 18 -g 1 -pix_fmt yuv420p " + shellQuote(path);
     if (runCommand(command) != 0 || !std::filesystem::exists(path)) {
         error = "could not build the preview proxy for " + clip;
@@ -2340,6 +2376,7 @@ bool openClip(Server& server, const std::string& path, std::string& error) {
 
     Geometry info;
     if (!probeGeometry(server.ffprobe, path, info, error)) return false;
+    server.clipMatrix = resolveColorMatrix(server.inMatrix, server.ffprobe, path);
 
     double scale = 1.0;
     if (server.maxSide > 0) {
@@ -2409,7 +2446,7 @@ bool openClip(Server& server, const std::string& path, std::string& error) {
     const std::string decodeCmd =
         shellQuote(server.ffmpeg) + " -v error -i " + shellQuote(path) + " -vf " +
         shellQuote("scale=" + std::to_string(width) + ":" + std::to_string(height) +
-                   ":in_color_matrix=" + server.inMatrix + ":in_range=tv:out_range=full") +
+                   ":in_color_matrix=" + server.clipMatrix + ":in_range=tv:out_range=full") +
         " -pix_fmt rgb48le -f rawvideo -";
 
     FILE* pipe = openPipe(decodeCmd, "rb");
@@ -2616,7 +2653,7 @@ int run(const Args& startup) {
     Server server;
     server.ffmpeg = ffmpegPath(startup);
     server.ffprobe = siblingTool(server.ffmpeg);
-    server.inMatrix = startup.get("in-matrix", "bt2020");
+    server.inMatrix = startup.get("in-matrix", "auto");
     server.textureMode = startup.get("texture-engine", "auto");
     server.cacheMb = std::max(1, startup.getInt("cache-mb", 1024));
     server.maxSide = std::max(0, startup.getInt("max-side", 1600));

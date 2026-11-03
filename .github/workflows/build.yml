@@ -106,6 +106,24 @@ jobs:
           "$exe" lut bake --couplers on --out couplers.cube
           "$exe" lut bake --input apple-log --exposure 0.7 --scan negative --hdr pq --peak 1000 --out hdr.cube
 
+      - name: Bake every camera log input (D060/D061)
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          for input in s-log3 s-log3-sgamut3 c-log3 v-log logc3 logc4 bmd-film davinci; do
+            "$exe" lut bake --input "$input" --scan negative --out "log-$input.cube"
+            "$exe" lut info --lut "log-$input.cube"
+          done
+          # One decode through the physical engine, so the curve is exercised end to end.
+          "$exe" gen --out chart16.png --width 160 --height 90 --bits 16
+          "$exe" lut apply --engine spectral --input logc4 --scan negative \
+            --in chart16.png --out logc4.png
+          "$exe" lut apply --engine spectral --input bmd-film --scan negative \
+            --in chart16.png --out bmd.png
+          ls -l log-*.cube logc4.png bmd.png
+
       # Both platforms run the pipe path now: the macOS failure we blamed on a
       # missing ffmpeg was actually the popen("rb") bug (issue #1), and brew
       # installs ffmpeg from a bottle in well under a minute.

@@ -184,6 +184,9 @@ struct ClipInfo {
     double duration = 0.0;
     long frames = 0;
     QString timecode;
+    // YUV -> RGB matrix from the stream tag ("bt2020nc", "bt709", ...). Empty
+    // when the container does not say (D061).
+    QString colorMatrix;
     bool valid() const { return width > 0 && height > 0 && fps > 0.0; }
 };
 
@@ -760,6 +763,23 @@ private:
         selectFile(paperCombo_, QStringLiteral("kodak_portra_endura.json"));
     }
 
+    // YUV -> RGB matrix for ffmpeg, taken from the clip's own color_space tag
+    // (D061). Guessing from the selected source was wrong as soon as several
+    // cameras could be imported: some record their log inside a bt709
+    // container and some inside bt2020. Untagged clips keep the pre-D061
+    // guess (Apple Log bt2020, everything else bt709), so nothing regresses.
+    QString decodeMatrix() const {
+        const QString tag = clipInfo_.colorMatrix;
+        if (tag.startsWith(QStringLiteral("bt2020"))) return QStringLiteral("bt2020");
+        if (tag == QStringLiteral("bt709") || tag == QStringLiteral("smpte170m") ||
+            tag == QStringLiteral("bt470bg") || tag == QStringLiteral("smpte240m")) {
+            return tag;
+        }
+        const QString input = source_ != nullptr ? source_->currentData().toString() : QString();
+        return input == QStringLiteral("apple-log") ? QStringLiteral("bt2020")
+                                                    : QStringLiteral("bt709");
+    }
+
     QString ffprobePath() const {
         const QString ffmpeg = ffmpegEdit_ != nullptr ? ffmpegEdit_->text().trimmed() : QString();
         if (ffmpeg.isEmpty()) return QStringLiteral("ffprobe");
@@ -828,6 +848,7 @@ private:
                             .toObject()
                             .value(QStringLiteral("timecode"))
                             .toString();
+        info.colorMatrix = stream.value(QStringLiteral("color_space")).toString();
         const QJsonObject format = root.value(QStringLiteral("format")).toObject();
         const QJsonValue durationValue = format.value(QStringLiteral("duration"));
         info.duration = durationValue.isDouble() ? durationValue.toDouble()
@@ -993,9 +1014,17 @@ private:
                     QStringLiteral("视频 (*.mov *.mp4 *.mxf)"))));
         source_ = new QComboBox;
         source_->addItem(QStringLiteral("Apple Log（iPhone）"), QStringLiteral("apple-log"));
-        source_->addItem(QStringLiteral("Sony S-Log3"), QStringLiteral("s-log3"));
+        source_->addItem(QStringLiteral("Sony S-Log3（S-Gamut3.Cine）"), QStringLiteral("s-log3"));
+        source_->addItem(QStringLiteral("Sony S-Log3（S-Gamut3）"),
+                         QStringLiteral("s-log3-sgamut3"));
         source_->addItem(QStringLiteral("Canon C-Log3"), QStringLiteral("c-log3"));
         source_->addItem(QStringLiteral("Panasonic V-Log"), QStringLiteral("v-log"));
+        source_->addItem(QStringLiteral("ARRI LogC3"), QStringLiteral("logc3"));
+        source_->addItem(QStringLiteral("ARRI LogC4"), QStringLiteral("logc4"));
+        source_->addItem(QStringLiteral("Blackmagic Film Gen 5（BMPCC）"),
+                         QStringLiteral("bmd-film"));
+        source_->addItem(QStringLiteral("DaVinci Intermediate（DWG）"),
+                         QStringLiteral("davinci"));
         source_->addItem(QStringLiteral("普通 SDR 素材"), QStringLiteral("srgb"));
         materialSection->addWidget(labeledRow(QStringLiteral("画面类型"), source_));
         materialSection->addWidget(labeledRow(
@@ -1895,6 +1924,7 @@ private:
         }
         previewServer_->deleteLater();
         previewServer_ = nullptr;
+        previewMatrix_.clear();
         previewLook_.clear();
         previewClip_.clear();
         previewTexture_.clear();
@@ -1942,15 +1972,17 @@ private:
             std::fflush(stderr);
         };
 
+        // A different clip can carry a different container matrix, and the
+        // matrix is a startup option of the server: restart it (D061).
+        if (previewServer_ != nullptr && previewMatrix_ != decodeMatrix()) stopPreviewServer();
+
         if (previewServer_ == nullptr) {
             previewServer_ = new QProcess(this);
             previewServer_->setProcessChannelMode(QProcess::SeparateChannels);
             previewServer_->setProgram(cliPath_);
             previewServer_->setWorkingDirectory(repoRoot_);
-            const QString matrix =
-                source_->currentData().toString() == QStringLiteral("apple-log")
-                    ? QStringLiteral("bt2020")
-                    : QStringLiteral("bt709");
+            const QString matrix = decodeMatrix();
+            previewMatrix_ = matrix;
             previewServer_->setArguments(
                 QStringList{QStringLiteral("preview"), QStringLiteral("--ffmpeg"),
                             ffmpegEdit_->text(), QStringLiteral("--in-matrix"), matrix});
@@ -2106,10 +2138,7 @@ private:
             repoRoot_ + QStringLiteral("/out/ui-") + suffix + QStringLiteral("-src.png");
         const QString output =
             repoRoot_ + QStringLiteral("/out/ui-") + suffix + QStringLiteral(".png");
-        const QString matrix =
-            source_->currentData().toString() == QStringLiteral("apple-log")
-                ? QStringLiteral("bt2020")
-                : QStringLiteral("bt709");
+        const QString matrix = decodeMatrix();
         QStringList ffmpegArgs{
             QStringLiteral("-v"),           QStringLiteral("error"),
             QStringLiteral("-y"),           QStringLiteral("-ss"),
@@ -2140,8 +2169,9 @@ private:
         } else {
             args << QStringLiteral("convert") << QStringLiteral("--in") << source
                  << QStringLiteral("--out") << output;
-            if (source_->currentData().toString() == QStringLiteral("apple-log")) {
-                args << QStringLiteral("--from") << QStringLiteral("apple-log");
+            const QString from = source_->currentData().toString();
+            if (from != QStringLiteral("srgb")) {
+                args << QStringLiteral("--from") << from;
             }
         }
         if (!runSync(cliPath_, args, &outputText)) {
@@ -2987,6 +3017,9 @@ private:
     QProcess* previewServer_ = nullptr;
     QTimer* scrubTimer_ = nullptr;
     bool scrubbing_ = false;
+    // YUV -> RGB matrix the running server was started with (D061); the server
+    // is restarted when a clip with a different container tag is opened.
+    QString previewMatrix_;
     QString previewLook_;
     QString previewClip_;
     QString previewTexture_;

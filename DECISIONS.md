@@ -1037,6 +1037,45 @@
 
 ---
 
+## D061 · 更多相机 Log + 容器矩阵跟素材走
+
+- **日期**：2026-11-03
+- **背景**：
+  - D060 只覆盖了 Sony / Canon / Panasonic 各自的“标准搭配”，影视现场最常用的 **ARRI（LogC3/LogC4）** 和 **Blackmagic / DaVinci** 还进不来；Sony 也还有 **S-Gamut3（非 Cine）** 这一支。
+  - 另一件事在多相机之后变成真问题：YUV → RGB 的矩阵原来按输入类型猜（apple-log → bt2020，其它 → bt709）。同一种 Log 可能被不同机器装进 bt709 或 bt2020 容器，猜错会让所有饱和色偏移（实测同帧 bt2020 vs bt709 只有 **44 dB**）。
+- **实现**：
+  - `InputTransfer` 追加 `SLog3SGamut3 / ArriLogC3 / ArriLogC4 / BmdFilmGen5 / DaVinciIntermediate`，**追加在枚举末尾**，D060 的 0–4 号 `inputMode` 不变。
+  - 曲线（全部来自 colour-science 0.4.7，逐行照抄常数）：
+    - **LogC3**：SUP 3.x、EI 800、Linear Scene Exposure Factor，`cut 0.010591 / a 5.555556 / b 0.052272 / c 0.24719 / d 0.385537 / e 5.367655 / f 0.092809`；18% 灰 = **0.3910068320**。
+    - **LogC4**：`a 2231.8263090676883 / b 0.9071358748778103 / c 0.09286412512218964 / s 0.1135972086105891 / t -0.01805699611991131`；`E' >= 0` 走 `(2^(14*((E'-c)/b)+6) - 64)/a`，以下走线性延伸；18% 灰 = **0.2783958365**。
+    - **Blackmagic Film Gen 5**：`A 0.08692876065491224 / B 0.005494072432257808 / C 0.5300133392291939 / D 8.283605932402494 / E 0.09246575342465753`，分段点 `D*0.005+E = 0.1338837831`；18% 灰 = **0.3835616438**。
+    - **DaVinci Intermediate**：`M 10.44426855 / A 0.0075 / B 7 / C 0.07329248`，分段点 `0.02740668`；18% 灰 = **0.3360432724**。
+  - 色域矩阵（`colour.matrix_RGB_to_RGB` → 线性 Rec.709，均为 D65）：
+    - ARRI Wide Gamut 3、ARRI Wide Gamut 4、DaVinci Wide Gamut、S-Gamut3：不做色适应（白点就是 D65）。
+    - Blackmagic Wide Gamut 的白点在 colour 里是 `(0.312717, 0.3290312)`，比 D65 多几位小数，所以这一条用 **CAT02** 适应到 sRGB 的 D65——中性灰才会精确保持中立。
+  - `--input` 解析改成表驱动：大小写、连字符/下划线都可（`LogC3`、`arri_logc4`、`s_gamut3`），别名 `s-gamut3` / `bmd-film-gen5` / `blackmagic-film` / `davinci-intermediate`。错误信息统一用 `inputTransferList()`。
+  - GPU：HLSL 与 MSL 各加四条曲线 + `inputMode` 5–9；**未知 mode 回退 sRGB**（D060 时最后一段默认落到 V-Log，加输入后会误用）。
+  - `--in-matrix auto` 成为新默认：读素材的 `color_space` 标签（`bt2020nc` → bt2020，`bt709`/`smpte170m`/`bt470bg`/`smpte240m` 原样），标签缺失时回退 bt2020（与 CLI 以前一致）。`video` 与预览服务端都用它。
+  - UI 的矩阵也改成读 ffprobe 的 `color_space`；但**标签缺失时仍按旧猜测**（apple-log → bt2020，其它 → bt709），所以没有标签的老素材观感不变。预览服务端把矩阵当启动参数，换了素材（标签不同）会自动重启服务端。
+  - UI：“画面类型”下拉补齐 9 项；预览“按住看原片”对**任意** Log 输入都传 `--from <输入>`（以前只处理 apple-log）。
+  - 顺带修一个 D060 遗留：分段签名加入 `input` 与 `matrix` 两行。以前用 `--engine spectral` 换输入再 `--resume` 会混用旧分段。
+- **验证**：
+  - 0..1 **101 点扫描**（本机编译出的 `sr::*Decode` 对比 colour-science）：S-Log3 / LogC3 / BMD Gen5 **相对差 0**；LogC4 / DaVinci Intermediate **≤ 2.3e-16**（最后一位舍入，我们的写法用 `exp2` 与它的 `2**` 顺序不同）。
+  - `test_transfer`：四条曲线的码值参考点、五个输入到线性 sRGB 的混合值、18% 灰经矩阵后仍中立（≤3e-5，与既有 BT.2020 检查同量级）、解析名/别名/`isCameraLog`。
+  - `test_gpu_film`：五个新 parity 用例，**worst ≤ 1.0e-6**。
+  - 2.6 MP 单帧 CPU 光谱 vs D3D11（`--scan negative --couplers on --gamut oklch`）：**logc3 119.63 / logc4 118.06 / bmd-film 119.60 / davinci 119.64 / s-log3-sgamut3 119.97 dB**。
+  - 五种输入各 `lut bake` 一次全部正常出表（113–133 ms）。
+  - `--in-matrix auto` 与显式 `bt2020` 在 Apple Log 素材上 **逐位相同（inf）**；与 `bt709` 是 **44.02 dB**——证明矩阵确实在起作用，不是摆设。
+  - `scripts\demo-log-inputs.cmd`：9 种输入各烘一张负片 LUT、各出一张图，并打印每种输入的 GPU/CPU PSNR（118.1–119.5 dB）。
+- **后果**：
+  - 支持 9 种输入：sRGB、Apple Log、S-Log3（两种 gamut）、C-Log3、V-Log、LogC3、LogC4、BMD Gen5、DaVinci Intermediate。
+  - 仍然**手动选输入**，不做自动识别；曲线无法从像素可靠推断。
+  - LogC3 只做 EI 800（业界默认）；SUP 2.x、其他 EI、ACEScct 没做。
+  - 仍未引入 OCIO：这里是“官方曲线 + 固定 gamut 矩阵”，不是可配置的色彩管理。
+  - 容器矩阵认标签，不认“相机品牌 + 输入类型”的默认表；标签缺失时回退 bt2020（与之前一致）。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

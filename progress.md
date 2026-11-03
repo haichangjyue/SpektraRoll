@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-03（D049–D060 已整理成交接摘要）
-> **当前里程碑**：**M5 进行中 · 双平台 GPU + 多相机 Log + 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log，D041–D060）
+> **最后更新**：2026-11-03（D049–D061 已整理成交接摘要）
+> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci，D041–D061）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,7 @@
 
 ---
 
-## 零之一、本阶段交接摘要：D056–D060（Metal → 浮点 → Log）
+## 零之一、本阶段交接摘要：D056–D061（Metal → 浮点 → 相机 Log）
 
 > 新开对话只需要读这一节 + §三；按决策编号的详细记录从 D060 开始往下排。
 
@@ -46,6 +46,7 @@
 | **D058** | 线性 EXR | `--exr-linear [--exr-trc srgb\|pq\|hlg] [--peak]`；1.0 = 白/峰值；同帧 display 0.016..0.887 → linear 0.0012..0.762 |
 | **D059** | EXR ZIP | 默认 ZIP、`--exr-raw` 关闭；已调色帧 −28%、half −38%、带颗粒 ≈0%；ffmpeg 交叉验证 92.6 dB |
 | **D060** | 多相机 Log | S-Log3 / C-Log3 / V-Log；曲线 101 点 vs colour-science **完全一致**；CPU vs D3D11 **110.67 dB**；UI 下拉可选 |
+| **D061** | 更多相机 Log | LogC3 / LogC4 / BMD Gen5 / DaVinci / S-Gamut3；101 点曲线 **0 差**；CPU vs D3D11 **118.06–119.97 dB**；`--in-matrix auto` 按素材标签解码 |
 
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
 - 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 9/9 测试。
@@ -59,23 +60,86 @@
 | D058 | 线性浮点交付 | 可选 `--exr-linear`；1.0 = 白/峰值；sRGB 解码不钳制；不改默认 |
 | D059 | EXR 压缩 | 默认 ZIP、可 `--exr-raw`；压不动逐块回退；只用 stb zlib，无新依赖 |
 | D060 | 多相机 Log | 官方曲线 + 原生 gamut 矩阵；CPU/GPU 同一套 `inputMode`；手动选输入 |
+| D061 | 更多 Log + 容器矩阵 | 追加 5 种输入（枚举只能往末尾加）；未知 `inputMode` 回退 sRGB；`--in-matrix auto` 读素材 `color_space` |
 
 ### 未完成的待办（按建议顺序）
 
-1. **更多 Log / gamut**：ARRI LogC3/4、S-Gamut3（非 Cine）等
-2. **OCIO**：先定依赖策略（引入 OpenColorIO vs OCIO-lite）；线性 EXR 已有，但不是完整色彩管理
-3. **PIZ / DWA 压缩**：带颗粒的 float 用 ZIP 基本不省
-4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积
-5. **macOS Qt 打包**：Mac 目前只有 CLI
-6. **Mac 视频 ms/帧**：现在只有 2.6 MP 静帧数字，`video` 还没在 Mac 上量
+1. **OCIO**：先定依赖策略（引入 OpenColorIO vs OCIO-lite）；现在只有"官方曲线 + 固定矩阵"
+2. **PIZ / DWA 压缩**：带颗粒的 float 用 ZIP 基本不省
+3. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积
+4. **macOS Qt 打包**：Mac 目前只有 CLI
+5. **Mac 视频 ms/帧**：现在只有 2.6 MP 静帧数字，`video` 还没在 Mac 上量
+6. **Log 的细支**：LogC3 的其他 EI、SUP 2.x、ACEScct、自动识别（仍不可靠）
 
 ### 新对话的第一步
 
 1. `ctest --test-dir build --output-on-failure`（9/9；Mac 上三个 GPU 测试都应真跑）
 2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
 3. `scripts\demo-exr.cmd -NoOpen`（读回 PSNR = inf；linear 范围 0.0012..0.7619）
-4. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`（2.6 MP CPU vs Metal）
-5. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 110 dB）
+4. `scripts\demo-log-inputs.cmd -NoOpen`（9 种输入各自的烘焙耗时 + GPU/CPU 118–120 dB）
+5. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`（2.6 MP CPU vs Metal）
+6. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+
+---
+
+## 会话 D061 · 更多相机 Log + 容器矩阵
+
+会话目标：按产品负责人选择，**一次补齐主流机型**——ARRI LogC3/LogC4、Blackmagic Film Gen 5、DaVinci Intermediate、Sony S-Gamut3（非 Cine）。
+
+### 一、已完成的事项
+
+**D061 · 五种新输入**
+- `InputTransfer` 追加 `SLog3SGamut3 / ArriLogC3 / ArriLogC4 / BmdFilmGen5 / DaVinciIntermediate`；新值只往枚举末尾加，D060 的 `inputMode` 0–4 编号不变。
+- 曲线全部来自 colour-science 0.4.7：LogC3（SUP 3.x / EI 800）、LogC4、Blackmagic Film Gen 5、DaVinci Intermediate；S-Gamut3 复用 S-Log3 曲线。
+- 色域矩阵：ARRI Wide Gamut 3 / 4、Blackmagic Wide Gamut（CAT02 适应，因为它的白点数字比 D65 更精确）、DaVinci Wide Gamut、S-Gamut3。
+- `--input` 解析改成表驱动，大小写 / 连字符 / 下划线都接受（`LogC3`、`arri_logc4`、`s_gamut3`），别名 `s-gamut3`、`bmd-film-gen5`、`blackmagic-film`、`davinci-intermediate`。
+- HLSL 与 MSL 同步加 5 个 `inputMode` 分支；**未知 mode 回退 sRGB**（D060 的最后一段默认落到 V-Log，加输入后必须改）。
+- UI“画面类型”补齐 9 项；“按住看原片”对任意 Log 输入都传 `--from <输入>`。
+
+**顺带修掉的两件事**
+- `--in-matrix auto` 成为默认：读素材 `color_space` 标签决定 YUV→RGB（`bt2020nc` → bt2020，`bt709`/`smpte170m`/`bt470bg`/`smpte240m` 原样，未标注回退 bt2020）。UI 不再按输入类型猜。
+- 分段签名加入 `input` 与 `matrix`：以前 `--engine spectral` 下换输入再 `--resume` 会混用旧分段。
+
+### 二、一条关键决策（详见 DECISIONS D061）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D061 | 更多 Log + 容器矩阵 | 追加 5 种输入；未知 mode 回退 sRGB；容器矩阵跟素材标签走 |
+
+### 三、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| 101 点曲线扫描 vs colour-science | S-Log3 / LogC3 / BMD **相对差 0**；LogC4 / DaVinci **≤ 2.3e-16** |
+| 2.6 MP CPU vs D3D11 | logc3 **119.63** / logc4 **118.06** / bmd-film **119.60** / davinci **119.64** / s-log3-sgamut3 **119.97 dB** |
+| `test_gpu_film` 新用例 | worst ≤ **1.0e-6** |
+| `lut bake` 五种输入 | 113–133 ms 全部正常出表 |
+| `--in-matrix auto` vs 显式 bt2020 | **逐位相同（inf）**；vs bt709 **44.02 dB**（矩阵确实在起作用） |
+| `demo-log-inputs` 九种输入 | 烘表 112–133 ms；GPU/CPU **118.08–119.52 dB** |
+| 回归 | 9/9 测试、M1 parity **88.07 dB**、`demo-m3` 239.7 ms/帧、`demo-m4` 续渲正常、`demo-exr` 读回 inf、UI 第二次预览 **57 ms** |
+
+### 四、怎么用
+
+```powershell
+# 直接烘 ARRI / Blackmagic / DaVinci 的负片 LUT
+.\build\spektra-roll-cli.exe lut bake --input logc3 --scan negative --out out\logc3.cube
+.\build\spektra-roll-cli.exe lut bake --input bmd-film --scan negative --out out\bmd.cube
+.\build\spektra-roll-cli.exe lut bake --input davinci --scan negative --out out\dwg.cube
+
+# 视频（容器矩阵现在自动跟素材的 color_space 标签）
+.\build\spektra-roll-cli.exe video --engine spectral-gpu --input logc4 \
+  --scan negative --in clip.mov --out out\graded.mov
+
+# 标签写错了才手动覆盖
+.\build\spektra-roll-cli.exe video --input v-log --in-matrix bt709 ...
+```
+
+### 五、未完成的待办
+
+- [ ] **OCIO**：仍是"官方曲线 + 固定矩阵"，不是可配置的色彩管理
+- [ ] **LogC3 的其他 EI / SUP 2.x、ACEScct**：目前只 EI 800、SUP 3.x
+- [ ] **自动识别 Log 格式**：仍要手动选
+- [ ] **PIZ/DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 
 ---
 
@@ -930,6 +994,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **线性 EXR（D058）** | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
 | **EXR ZIP（D059）** | 已调色帧 31.49 → **22.73 MB（−28%）**；带颗粒 ≈0%；half **9.82 MB（−38%）**；合成图表 −98.6%；ffmpeg 解码 92.6 dB |
 | **多相机 Log（D060）** | 三条曲线 101 点扫描 vs colour-science **max diff = 0**；S-Log3 CPU vs D3D11 **110.67 dB**；`c-log3` LUT 烘焙正常 |
+| **更多 Log + 容器矩阵（D061）** | 五条新曲线 101 点：**0 差**（LogC4/DaVinci ≤ 2.3e-16）；2.6 MP CPU vs D3D11 **118.06–119.97 dB**；`--in-matrix auto` 与 bt2020 **逐位相同**、与 bt709 44.02 dB；九种输入烘表 112–133 ms |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -1057,6 +1122,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D058** | 线性浮点交付 | **`--exr-linear` + `--exr-trc srgb/pq/hlg` + `--peak`；1.0 = 白/峰值；不钳制；不改默认** | display 0.016..0.887 → linear 0.0012..0.762；+3 EV 线性最大 50.3 |
 | **D059** | EXR 压缩 | **默认 ZIP（16 行/chunk），`--exr-raw` 关闭；stb zlib；压不动回退原始块；读取器支持 NONE+ZIP** | 已调色帧 −28%、带颗粒 ≈0%、half −38%；ffmpeg 交叉验证 92.6 dB |
 | **D060** | 多相机 Log | **S-Log3 / C-Log3 / V-Log 官方曲线 + 原生 gamut 矩阵；CPU/GPU 同一套；UI 可选** | 曲线与 colour-science 完全一致；CPU vs D3D11 **110.67 dB** |
+| **D061** | 更多 Log + 容器矩阵 | **追加 LogC3 / LogC4 / BMD Gen5 / DaVinci / S-Gamut3；未知 `inputMode` 回退 sRGB；`--in-matrix auto` 读素材 `color_space`** | 101 点曲线 0 差；CPU vs D3D11 118–120 dB；错误矩阵实测只有 44 dB |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -1074,12 +1140,12 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. **更多 Log / gamut**：自动识别仍不可靠，可先补 ARRI LogC3、S-Gamut3（非 Cine）、LogC4 等常用组合。
-2. **OCIO（先定依赖策略）**：A) 引入 OpenColorIO B) OCIO-lite；线性 EXR 已有，但不是完整色彩管理。
-3. **PIZ / DWA 压缩**：颗粒重的素材 ZIP 收益接近 0。
-4. **代理清理 / 4K 预览**、**macOS Qt 打包**。
+1. **OCIO（先定依赖策略）**：A) 引入 OpenColorIO B) OCIO-lite；线性 EXR 已有，但不是完整色彩管理。
+2. **PIZ / DWA 压缩**：颗粒重的素材 ZIP 收益接近 0。
+3. **代理清理 / 4K 预览**、**macOS Qt 打包**。
+4. **Log 细支**：LogC3 其他 EI、SUP 2.x、ACEScct、自动识别。
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵。
 
 ### 🟡 中期路线（M4–M5）
 
@@ -1171,6 +1237,7 @@ scripts\demo-m4.cmd             分段渲染 + 模拟崩溃 + 断点续渲 + tim
 scripts\demo-gpu-texture.cmd     GPU 质感对比（CPU vs GPU 的 ms/帧与 PSNR）
 scripts\demo-spread.cmd          空间扩散对比（旧盒状模糊 vs 新物理核，并排图 + ms/帧）
 scripts\demo-exr.cmd             浮点交付（PNG16 / float EXR / half EXR + 读回比对）
+scripts\demo-log-inputs.cmd      九种相机 Log 输入（各烘一张 LUT + GPU/CPU 对照表）
 scripts\build-ui.cmd            编译 Qt 6 界面、部署 DLL 并启动（首次约 1–2 分钟）
 scripts\verify-m1.cmd           一键验收：编译 + 测试 + 烘 LUT + 和参考对比
 scripts\demo.cmd                M0 的合成 LUT 冒烟测试（不是胶片）
@@ -1258,7 +1325,7 @@ X:\agent\SpektraRoll\
 ├── README.md                对外介绍
 ├── RUN.md                   给非程序员的操作手册
 ├── STATUS.md                一页纸进度
-├── DECISIONS.md             决策台账 D001–D046
+├── DECISIONS.md             决策台账 D001–D061
 ├── progress.md              本文件
 └── LICENSE                  GPL-3.0
 ```
@@ -1267,7 +1334,7 @@ X:\agent\SpektraRoll\
 
 ## 六、下游 AI 的“别做的事”清单
 
-- ❌ **不要推翻 D001–D046**，那些是已经执行并验收/记录过的
+- ❌ **不要推翻 D001–D061**，那些是已经执行并验收/记录过的
 - ❌ **不要问用户技术细节问题**，只能问“选 A 还是 B”
 - ❌ **不要在没跑 `verify-m1.cmd` 的情况下改光谱链**，改完 PSNR 掉了要立刻知道
 - ❌ **不要把 display-encoded sRGB 的 LUT 说成线性/ACES LUT**（D013）
@@ -1310,6 +1377,10 @@ X:\agent\SpektraRoll\
 - ❌ **不要把光晕/眩光/扩散的尺寸改回"画幅比例"**：现在按底片微米算，`--frame-width-mm` 决定换算；改回比例会让 1080p 和 4K 观感不一致（D054）
 - ❌ **不要删掉 `--spread-model box`**：那是旧观感的回退路径，也是新旧核对比的唯一途径（D054）
 - ❌ **不要在物理核的测试里用 64 px 小图**：225 µm 在 64 px 宽上只有 0.4 px，等于没效果；按 `width / frameWidthMm` 选尺寸（640 px ≈ 4 px σ）（D054）
+- ❌ **不要往 `InputTransfer` 中间插新枚举值**：`inputMode` 是直接 cast 成 int 传给着色器的，新值只能追加在末尾，否则 0–4 的语义全乱（D061）
+- ❌ **不要让着色器里的未知 `inputMode` 落到最后一个分支**：D060 的最后一段默认是 V-Log，加输入后会静默用错曲线；现在显式回退 sRGB（D061）
+- ❌ **不要按"输入类型"猜 YUV → RGB 矩阵**：同一种 Log 可能在 bt709 或 bt2020 容器里，猜错同帧只有 44 dB；跟素材的 `color_space` 标签走（`--in-matrix auto`）（D061）
+- ❌ **不要在分段签名里漏掉 `input` 和 `matrix`**：`--engine spectral` 换输入后 `--resume` 会把两种观感混在一支片子里（D061）
 
 ---
 
@@ -1334,7 +1405,7 @@ AI 就应该：
 11. 视频管道改过就设 `SPEKTRA_VIDEO_DEBUG=1` 跑一次 2 秒渲染：应看到 `wait / convert / process / pack` 四项，总时长约 79–82 ms/帧
 12. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
 13. macOS / Metal 改过就在 Mac 上跑 `scripts/verify-macos.command`：`gpu_film` / `gpu_texture` / `gpu_chain` 都应真跑（不是 skip），第 5 步会打印设备信息、三组 parity 与 CPU vs Metal 的 PSNR；顺手跑 `scripts/bench-macos.command` 记录 2.6 MP 的 CPU vs Metal
-14. Log 输入改过就 `lut bake --input s-log3 --scan negative`，再用 `--engine spectral` 与 `--engine spectral-gpu` 出图比 PSNR（应 ≥60 dB，本机实测 110 dB）
-15. 看 §三 的"下一步"（当前最该做：更多 Log / gamut，然后 OCIO 依赖决策）
+14. Log 输入改过就 `lut bake --input s-log3 --scan negative`，再用 `--engine spectral` 与 `--engine spectral-gpu` 出图比 PSNR（应 ≥60 dB，本机实测 118–120 dB）；九种输入一次跑 `scripts\demo-log-inputs.cmd -NoOpen`
+15. 看 §三 的"下一步"（当前最该做：OCIO 依赖策略）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。

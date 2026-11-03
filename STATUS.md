@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。颜色和质感**合并成一次 GPU 提交**，管道也修掉了每帧 130 ms 的量化开销、并让解码/编码与处理重叠：2.6 MP 全质感视频 **79–82 ms/帧**（D046 时 379，累计约 4.7×），与旧路径逐位相同。三个空间效果自 D054 起是**按底片微米计的真实点扩散核**（窄芯 + 宽裙），1080p / 4K 观感一致。界面预览是**常驻进程 + 整段帧缓存**：短片拖动时间线 **38–64 ms/帧**（以前 1.7–2.2 s）；长片自动生成 960 px 代理，**100 ms/帧**。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。交付可以是 16-bit PNG，也可以是**不钳制的 float / half EXR**（D055，读回逐位一致）。macOS 的颜色和质感也都走 **Metal**（D056/D057），与 Windows 的 D3D11 路径对齐。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。输入现在覆盖 **九种**：sRGB、Apple Log、Sony S-Log3（S-Gamut3.Cine / S-Gamut3）、Canon C-Log3、Panasonic V-Log、ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate；YUV→RGB 矩阵跟素材自己的 `color_space` 标签走。颜色和质感**合并成一次 GPU 提交**，管道也修掉了每帧 130 ms 的量化开销、并让解码/编码与处理重叠：2.6 MP 全质感视频 **79–82 ms/帧**（D046 时 379，累计约 4.7×），与旧路径逐位相同。三个空间效果自 D054 起是**按底片微米计的真实点扩散核**（窄芯 + 宽裙），1080p / 4K 观感一致。界面预览是**常驻进程 + 整段帧缓存**：短片拖动时间线 **38–64 ms/帧**（以前 1.7–2.2 s）；长片自动生成 960 px 代理，**100 ms/帧**。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。交付可以是 16-bit PNG，也可以是**不钳制的 float / half EXR**（D055，读回逐位一致）。macOS 的颜色和质感也都走 **Metal**（D056/D057），与 Windows 的 D3D11 路径对齐。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -67,6 +67,8 @@
 - [x] **线性浮点交付**（D058）：`--exr-linear [--exr-trc srgb|pq|hlg] [--peak]`，1.0 = 白/峰值，sRGB 解码不钳制；`lut apply` / `convert` / `gen` / 序列都支持；同帧 display 0.016..0.887 → linear 0.0012..0.762
 - [x] **EXR ZIP 压缩**（D059）：默认 ZIP（16 行/chunk），`--exr-raw` 关闭；stb zlib、无新依赖；读取器支持 NONE+ZIP；已调色帧 −28%、带颗粒 ≈0%、half −38%，ffmpeg 交叉验证 92.6 dB
 - [x] **多相机 Log 输入**（D060）：S-Log3 / C-Log3 / V-Log 官方曲线 + S-Gamut3.Cine / Cinema Gamut / V-Gamut 矩阵；CPU/GPU 同一套；曲线与 colour-science 101 点完全一致；S-Log3 CPU vs D3D11 110.67 dB；UI 下拉可选
+- [x] **更多相机 Log**（D061）：ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate、S-Log3 + S-Gamut3；101 点曲线 **0 差**，2.6 MP CPU vs D3D11 **118–120 dB**；`--in-matrix auto` 按素材的 `color_space` 标签解码；UI 下拉 9 项
+- [x] `scripts\demo-log-inputs.cmd`：九种输入各烘一张 LUT + GPU/CPU 对照表
 - [x] `scripts\demo-spread.cmd`：同一帧 / 同一段视频各渲 box 与 physical 两遍，打印 PSNR 和 ms/帧，并排对比
 - [x] `scripts\demo-exr.cmd`：同一帧出 PNG16 / float EXR / half EXR，读回比对 + 超曝光对照
 - [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
@@ -129,6 +131,7 @@
 | 线性 EXR（D058） | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
 | EXR ZIP（D059） | 已调色帧 31.49 → **22.73 MB（−28%）**；带颗粒 ≈0%；half **9.82 MB（−38%）**；合成图表 −98.6%；ffmpeg 解码 92.6 dB |
 | 多相机 Log（D060） | S-Log3 / C-Log3 / V-Log 曲线 101 点 vs colour-science **max diff = 0**；S-Log3 CPU vs D3D11 **110.67 dB**；`c-log3` LUT 烘焙正常 |
+| 更多相机 Log（D061） | 五条新曲线 101 点 **0 差**（LogC4/DaVinci ≤2.3e-16）；2.6 MP CPU vs D3D11 **118.06–119.97 dB**；九种输入烘表 112–133 ms；`--in-matrix auto` 与 bt2020 逐位相同、与 bt709 44.02 dB |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
@@ -153,11 +156,11 @@
 
 ## 下一步（M5）
 
-1. **更多 Log / gamut**：ARRI LogC3/4、S-Gamut3（非 Cine）等常用组合
-2. **OCIO**：先定依赖策略（引入 OpenColorIO 还是 OCIO-lite）
-3. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+1. **OCIO**：先定依赖策略（引入 OpenColorIO 还是 OCIO-lite）
+2. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+3. **Log 细支**：LogC3 其他 EI、SUP 2.x、ACEScct、自动识别
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵。
 
 ## 需要你决定的事
 

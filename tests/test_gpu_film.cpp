@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "sr/film_model.hpp"
@@ -191,6 +192,20 @@ int main() {
     sr::BakeOptions vlog = negative;
     vlog.input = sr::InputTransfer::VLog;
     runCase(srgbModel, vlog, "v-log / negative", tolerance);
+
+    // D061: the remaining camera logs, one parity case each.
+    const std::pair<sr::InputTransfer, const char*> moreLogs[] = {
+        {sr::InputTransfer::SLog3SGamut3, "s-log3 + s-gamut3 / negative"},
+        {sr::InputTransfer::ArriLogC3, "logc3 / negative"},
+        {sr::InputTransfer::ArriLogC4, "logc4 / negative"},
+        {sr::InputTransfer::BmdFilmGen5, "bmd-film / negative"},
+        {sr::InputTransfer::DaVinciIntermediate, "davinci / negative"},
+    };
+    for (const auto& entry : moreLogs) {
+        sr::BakeOptions options = negative;
+        options.input = entry.first;
+        runCase(srgbModel, options, entry.second, tolerance);
+    }
 
     sr::FilmModelOptions couplerOptions;
     couplerOptions.couplers = true;

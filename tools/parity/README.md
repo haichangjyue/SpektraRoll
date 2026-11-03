@@ -54,3 +54,35 @@ so we do not.
 `tests/reference/portra400_endura_33.cube` is the frozen reference used by
 `scripts\verify-m1.cmd`; it lets the acceptance check run without Python.
 Regenerate it only when the model is intentionally changed.
+
+## Camera log curves (D060 / D061)
+
+Every input decode (`slog3Decode`, `arriLogC3Decode`, `arriLogC4Decode`,
+`bmdFilmGen5Decode`, `daVinciIntermediateDecode`) is compared with
+colour-science 0.4.7 over a 101-point sweep. `tests/test_transfer.cpp` keeps a
+subset of those points permanently (18% grey, both sides of every piecewise
+knot, white), so a regression fails `ctest` without Python.
+
+To re-run the full sweep after touching a curve, build a throwaway probe:
+
+```cpp
+// out/log-probe.cpp
+#include <cstdio>
+#include "sr/transfer.hpp"
+int main() {
+    for (int i = 0; i <= 100; ++i) {
+        const double x = i / 100.0;
+        std::printf("logc3 %.4f %.17g\n", x, sr::arriLogC3Decode(x));
+    }
+    return 0;
+}
+```
+
+```powershell
+X:\agent\tools\mingw64\bin\g++.exe -std=c++20 -O2 -I src\core\include `
+  out\log-probe.cpp build\libsr_core.a -o out\log-probe.exe -static
+```
+
+then compare those numbers with `colour.log_decoding_ARRILogC3` etc. The current
+result is a relative difference of 0 for S-Log3 / LogC3 / Blackmagic and
+`<= 2.3e-16` for LogC4 / DaVinci (last-bit rounding: `exp2` vs `2 **`).

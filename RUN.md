@@ -55,8 +55,15 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 ### 看 Apple Log 真实素材（M2）
 
 > 现在输入不止 Apple Log：CLI 的 `--input` 和界面左栏“画面类型”都可以选
-> **Sony S-Log3 / Canon C-Log3 / Panasonic V-Log**（D060）；选任何 Log 都会自动
-> 用对应曲线和色域解码。
+> **Sony S-Log3（S-Gamut3.Cine / S-Gamut3）、Canon C-Log3、Panasonic V-Log、
+> ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate**（D060/D061）；
+> 选任何 Log 都会自动用对应曲线和色域解码。
+>
+> 素材的 YUV→RGB 矩阵现在**跟着素材自己的标签走**（`--in-matrix auto`），
+> 不需要按相机去猜；标签写错时才用 `--in-matrix bt709` / `bt2020` 覆盖。
+>
+> 想一次看清九种输入：双击 `scripts\demo-log-inputs.cmd`，会给每种输入烘一张
+> LUT、出一张图，并打印 CPU 与 GPU 的 PSNR。
 
 双击：
 
@@ -218,6 +225,38 @@ X:\agent\SpektraRoll\scripts\demo-exr.cmd
 - EXR 也能当输入：`lut apply --lut x.cube --in frame.exr --out frame.png --bits 16`
 
 **要注意**：默认 EXR 存的是显示编码值（sRGB 或 PQ/HLG 码值），进 DaVinci / Nuke 要把输入变换设成对应的 sRGB 或 PQ；只有加了 `--exr-linear` 的 EXR 才是线性光，按线性解读、不要再套 sRGB 变换。演示脚本会同时生成两份，可以直接对比。
+
+## 九种相机 Log 输入
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-log-inputs.cmd
+```
+
+它给九种输入各烘一张扫描负片 LUT、各出一张图，然后打印一张表：
+
+| input | 说明 |
+|---|---|
+| apple-log | Apple Log（iPhone，BT.2020） |
+| s-log3 | Sony S-Log3（S-Gamut3.Cine） |
+| s-log3-sgamut3 | Sony S-Log3（S-Gamut3，宽的） |
+| c-log3 | Canon C-Log3（Cinema Gamut） |
+| v-log | Panasonic V-Log（V-Gamut） |
+| logc3 | ARRI LogC3（Wide Gamut 3） |
+| logc4 | ARRI LogC4（Wide Gamut 4） |
+| bmd-film | Blackmagic Film Gen 5 |
+| davinci | DaVinci Intermediate（DWG） |
+
+表里是"烘 LUT 用了多少毫秒"和"GPU 光谱与 CPU 光谱的 PSNR"（本机 118–120 dB）。
+
+**要注意**：演示用的这一帧是 iPhone 的 Apple Log，所以只有 apple-log 那行是"正确"的画面，其它几行是故意用错曲线解码的——它们只证明每种输入都能烘表、能出图、GPU 和 CPU 一致。真拿到 ARRI / Blackmagic / Sony 素材时，在界面左栏"画面类型"里选对应那一项就行。
+
+自己用的时候：
+
+- 曲线已经和 colour-science 0.4.7 的 101 点逐点对照过；18% 中灰的码值：logc3 0.3910、logc4 0.2784、bmd-film 0.3836、davinci 0.3360、s-log3 0.4106、c-log3 0.3434、v-log 0.4233、apple-log 0.4883
+- 容器的 YUV→RGB 矩阵**跟着素材标签走**（`--in-matrix auto`），不用按相机猜；标签写错才用 `--in-matrix bt709` / `bt2020` 覆盖
+- 还没做自动识别 Log 格式：曲线无法从像素可靠推断，仍然要手动选
 
 ## 用图形界面（Qt 6）
 

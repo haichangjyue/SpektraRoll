@@ -101,6 +101,29 @@ int main() {
     checkNear(sr::vLogDecode(0.423311449), 0.180000000432, 1e-9, "v-log 18% grey");
     checkNear(sr::vLogDecode(1.0), 46.085527956740, 1e-6, "v-log white");
 
+    // D061 camera logs. References: colour-science 0.4.7
+    // (log_decoding_ARRILogC3 EI 800 SUP 3.x, log_decoding_ARRILogC4,
+    // oetf_inverse_BlackmagicFilmGeneration5, oetf_inverse_DaVinciIntermediate).
+    checkNear(sr::arriLogC3Decode(0.0), -0.017290418255, 1e-9, "logc3 code 0");
+    checkNear(sr::arriLogC3Decode(0.391006832034), 0.18, 1e-9, "logc3 18% grey");
+    checkNear(sr::arriLogC3Decode(0.25), 0.041519607534, 1e-9, "logc3 mid");
+    checkNear(sr::arriLogC3Decode(1.0), 55.079576698813, 1e-6, "logc3 white");
+
+    checkNear(sr::arriLogC4Decode(0.0), -0.018056996120, 1e-9, "logc4 code 0");
+    checkNear(sr::arriLogC4Decode(0.278395836548), 0.18, 1e-9, "logc4 18% grey");
+    checkNear(sr::arriLogC4Decode(0.75), 32.366195818159, 1e-6, "logc4 high");
+    checkNear(sr::arriLogC4Decode(1.0), 469.8, 1e-6, "logc4 white");
+
+    checkNear(sr::bmdFilmGen5Decode(0.0), -0.011162500266, 1e-9, "bmd-film code 0");
+    checkNear(sr::bmdFilmGen5Decode(0.383561643836), 0.18, 1e-9, "bmd-film 18% grey");
+    checkNear(sr::bmdFilmGen5Decode(0.1), 0.000909537059, 1e-9, "bmd-film low");
+    checkNear(sr::bmdFilmGen5Decode(1.0), 222.860944203808, 1e-6, "bmd-film white");
+
+    checkNear(sr::daVinciIntermediateDecode(0.0), 0.0, 1e-12, "davinci code 0");
+    checkNear(sr::daVinciIntermediateDecode(0.336043272385), 0.18, 1e-9, "davinci 18% grey");
+    checkNear(sr::daVinciIntermediateDecode(0.02), 0.001914925866, 1e-9, "davinci low");
+    checkNear(sr::daVinciIntermediateDecode(1.0), 100.000012279423, 1e-6, "davinci white");
+
     // Full input decode to linear sRGB, including the gamut matrix and the
     // negative clamp. References: colour-science matrix_RGB_to_RGB.
     {
@@ -124,6 +147,42 @@ int main() {
         sr::decodeInputToLinearSrgb(sr::InputTransfer::SLog3, code, linear);
         checkRgb3(linear, expected, 1e-6, "s-log3 18% grey to linear sRGB");
     }
+    // D061: gamut matrices. A neutral 18% grey must stay neutral, and a mixed
+    // code triple must land on the colour colour-science computes.
+    {
+        const double code[3] = {0.5, 0.25, 0.75};
+        const sr::InputTransfer inputs[] = {
+            sr::InputTransfer::SLog3SGamut3, sr::InputTransfer::ArriLogC3,
+            sr::InputTransfer::ArriLogC4, sr::InputTransfer::BmdFilmGen5,
+            sr::InputTransfer::DaVinciIntermediate};
+        const double expected[][3] = {
+            {0.414270154, 0.0, 4.721026600},   {0.377921789, 0.0, 6.666029393},
+            {0.441870159, 0.0, 37.657375902},  {0.508915290, 0.0, 16.293651977},
+            {0.603499084, 0.0, 13.372073306},
+        };
+        const char* names[] = {"s-log3 + s-gamut3", "logc3", "logc4", "bmd-film", "davinci"};
+        for (size_t i = 0; i < 5; ++i) {
+            double linear[3];
+            sr::decodeInputToLinearSrgb(inputs[i], code, linear);
+            checkRgb3(linear, expected[i], 1e-6, names[i]);
+        }
+
+        const double greyCode[] = {0.391006832034, 0.278395836548, 0.383561643836,
+                                   0.336043272385};
+        const sr::InputTransfer greyInputs[] = {
+            sr::InputTransfer::ArriLogC3, sr::InputTransfer::ArriLogC4,
+            sr::InputTransfer::BmdFilmGen5, sr::InputTransfer::DaVinciIntermediate};
+        for (size_t i = 0; i < 4; ++i) {
+            const double grey[3] = {greyCode[i], greyCode[i], greyCode[i]};
+            double linear[3];
+            sr::decodeInputToLinearSrgb(greyInputs[i], grey, linear);
+            // The matrices come from colour-science with its own rounded D65
+            // white, so "neutral" lands within 3e-5 of 0.18, exactly like the
+            // BT.2020 check above (0.179971790881 ...).
+            const double neutral[3] = {0.18, 0.18, 0.18};
+            checkRgb3(linear, neutral, 1e-4, "18% grey stays neutral");
+        }
+    }
 
     // Parsing accepts the CLI spellings.
     {
@@ -137,6 +196,29 @@ int main() {
         check(sr::parseInputTransfer("apple-log", transfer) &&
                   transfer == sr::InputTransfer::AppleLog,
               "apple-log still parses");
+        // D061 spellings: case, dash and underscore variants, plus the aliases.
+        check(sr::parseInputTransfer("LogC3", transfer) &&
+                  transfer == sr::InputTransfer::ArriLogC3,
+              "LogC3 parses");
+        check(sr::parseInputTransfer("arri_logc4", transfer) &&
+                  transfer == sr::InputTransfer::ArriLogC4,
+              "arri_logc4 parses");
+        check(sr::parseInputTransfer("bmd-film-gen5", transfer) &&
+                  transfer == sr::InputTransfer::BmdFilmGen5,
+              "bmd-film-gen5 parses");
+        check(sr::parseInputTransfer("davinci-intermediate", transfer) &&
+                  transfer == sr::InputTransfer::DaVinciIntermediate,
+              "davinci-intermediate parses");
+        check(sr::parseInputTransfer("s_gamut3", transfer) &&
+                  transfer == sr::InputTransfer::SLog3SGamut3,
+              "s_gamut3 parses");
+        check(std::string(sr::inputTransferName(sr::InputTransfer::ArriLogC4)) == "logc4",
+              "logc4 name");
+        check(std::string(sr::inputTransferName(sr::InputTransfer::DaVinciIntermediate)) ==
+                  "davinci",
+              "davinci name");
+        check(sr::isCameraLog(sr::InputTransfer::BmdFilmGen5), "bmd-film is a camera log");
+        check(!sr::isCameraLog(sr::InputTransfer::Srgb), "srgb is not a camera log");
     }
 
     const double white[3] = {1.0, 1.0, 1.0};
