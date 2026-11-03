@@ -2498,6 +2498,11 @@ struct Server {
 };
 
 bool configureLook(Server& server, const Args& look, std::string& error) {
+    // A new look replaces the previous decode entirely (D063); otherwise the
+    // old OCIO processor would keep decoding `raw` after the user turns it off.
+    server.ocioConfig.reset();
+    server.ocioRaw.reset();
+    server.ocioSource.clear();
     const std::string engine = look.get("engine", "lut");
     if (engine != "lut" && engine != "spectral" && engine != "spectral-gpu") {
         error = "--engine expects 'lut', 'spectral' or 'spectral-gpu'";

@@ -1126,7 +1126,7 @@
 - **验证**（本机）：
   - UI 自检：**52 个色彩空间**，线性空间 `Linear Rec.709 (sRGB)`，Apple Log LUT 正常写出。
   - **UI 烘的 LUT vs CLI 同参数烘的 LUT：PSNR = inf，max |diff| = 0**（界面没有自己的第二条颜色管线）。
-  - OCIO 的 `raw` 解码 vs `convert --ocio-input "Apple Log"`：8-bit/缩放后 **49.58 dB**；不带 OCIO 的 raw 只有 **19.72 dB**，证明解码确实生效。
+  - OCIO 的 `raw` 解码 vs `convert --ocio-input "Apple Log"`：8-bit/缩放后 **49.58 dB**；不带 OCIO 的 raw 只有 **19.72 dB**，证明解码确实生效。同一个预览进程里把 OCIO 关掉后，`raw` 与基线**逐位相同**（`look` 会清掉旧的处理器）。
   - 光谱预览 + OCIO：`ok look spectral`，1600×898 一帧 **537 ms**，`raw` **95.8 ms**。
   - `spectral-gpu` + OCIO：`ok look spectral`（回退 CPU），一帧 **529.9 ms**，不再是 34 ms 的“假 GPU”。
   - `ctest` **10/10**。

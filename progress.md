@@ -118,6 +118,7 @@
 | UI 自检 | **52 个色彩空间**，线性空间 `Linear Rec.709 (sRGB)`，`out/ui-ocio-selftest.cube` 正常写出 |
 | UI LUT vs CLI LUT（同参数） | **PSNR = inf，max |diff| = 0**（35937 点） |
 | `raw` 的 OCIO 解码 vs `convert --ocio-input` | **49.58 dB**（8-bit + 缩放）；不带 OCIO 只有 **19.72 dB** |
+| 同一个预览进程里关掉 OCIO | 之后的 `raw` 与“从没开过 OCIO”的基线 **逐位相同（哈希一致）** |
 | 光谱预览 + OCIO | `ok look spectral`；1600×898 一帧 **537 ms**，`raw` **95.8 ms** |
 | `spectral-gpu` + OCIO | `ok look spectral`（回退 CPU），一帧 **529.9 ms**；修复前 34 ms 但颜色错 21 dB |
 | 回归 | `ctest` **10/10**；`demo-ocio` 的 93.6 / 63.9 dB 不变 |
