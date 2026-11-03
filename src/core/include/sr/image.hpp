@@ -37,6 +37,18 @@ bool loadImage(const std::string& path, Image& out, std::string& error,
 bool saveImage(const std::string& path, const Image& image, std::string& error, int bits = 8,
                bool exrHalf = false);
 
+// Transfer function of the values on hand, for float delivery (D058).
+enum class FloatTransfer { Srgb, Pq, Hlg };
+
+// "srgb" / "pq" / "hlg".
+bool parseFloatTransfer(const std::string& name, FloatTransfer& out);
+
+// Converts display-encoded samples to linear light in place. 1.0 maps to the
+// reference white: display white for sRGB and HLG, `peakNits` for PQ. Out of
+// range values are kept (super-whites are the point of a float delivery), and
+// the sRGB curve is evaluated unclamped.
+void linearizeImage(Image& image, FloatTransfer transfer, double peakNits);
+
 // Synthetic test chart: grey ramp on top, colour patches below. Used by the
 // `gen` command and by the demo, so there is always something to feed the LUT.
 Image makeTestChart(int width, int height);

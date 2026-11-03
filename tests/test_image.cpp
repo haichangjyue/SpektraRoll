@@ -10,6 +10,7 @@
 #include <string>
 
 #include "sr/image.hpp"
+#include "sr/transfer.hpp"
 
 namespace {
 
@@ -104,6 +105,40 @@ int main() {
 
     check(!sr::saveImage((base / "spektra_roll_test32.png").string(), chart, error, 32),
           "32-bit float PNG output is rejected");
+
+    // Linear float delivery (D058): decode the output transfer without clipping.
+    {
+        sr::FloatTransfer transfer = sr::FloatTransfer::Srgb;
+        check(sr::parseFloatTransfer("pq", transfer) && transfer == sr::FloatTransfer::Pq,
+              "pq parses as a float transfer");
+        check(sr::parseFloatTransfer("hlg", transfer) && transfer == sr::FloatTransfer::Hlg,
+              "hlg parses as a float transfer");
+        check(!sr::parseFloatTransfer("linear", transfer), "unknown transfers are rejected");
+
+        sr::Image linear;
+        linear.width = 2;
+        linear.height = 1;
+        linear.pixels = {0.5f, 1.5f, 0.0f, 1.0f, 0.0f, 0.0f};
+        sr::linearizeImage(linear, sr::FloatTransfer::Srgb, 1000.0);
+        check(std::fabs(linear.pixels[0] - 0.2140411f) < 1e-6f, "sRGB mid-grey decodes");
+        check(linear.pixels[1] > 2.2f, "sRGB super-white survives linearisation");
+        check(linear.pixels[3] == 1.0f, "sRGB white stays white");
+
+        sr::Image pqImage;
+        pqImage.width = 1;
+        pqImage.height = 1;
+        pqImage.pixels = {static_cast<float>(sr::pqEncode(1000.0)), 0.0f, 0.0f};
+        sr::linearizeImage(pqImage, sr::FloatTransfer::Pq, 1000.0);
+        check(std::fabs(pqImage.pixels[0] - 1.0f) < 1e-5f,
+              "PQ white at 1000 nits maps to 1.0");
+
+        sr::Image hlgImage;
+        hlgImage.width = 1;
+        hlgImage.height = 1;
+        hlgImage.pixels = {static_cast<float>(sr::hlgEncode(0.25)), 0.0f, 0.0f};
+        sr::linearizeImage(hlgImage, sr::FloatTransfer::Hlg, 1000.0);
+        check(std::fabs(hlgImage.pixels[0] - 0.25f) < 1e-5f, "HLG round trips to 0.25");
+    }
 
     std::remove(path16.c_str());
     std::remove(path8.c_str());

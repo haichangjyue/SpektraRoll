@@ -55,13 +55,14 @@ void printUsage() {
         "\n"
         "Usage:\n"
         "  spektra-roll-cli gen --out <file.png|file.exr> [--width N] [--height N]\n"
-        "                       [--bits 8|16] [--exr-half]\n"
+        "                       [--bits 8|16] [--exr-half] [--exr-linear]\n"
         "      Write the built-in test chart (grey ramp + colour patches). An .exr\n"
         "      output is float (or half with --exr-half) and is not clamped.\n"
         "\n"
         "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log]\n"
         "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
-        "                           [--exr-half]\n"
+        "                           [--exr-half] [--exr-linear [--exr-trc srgb|pq|hlg]\n"
+        "                           [--peak 1000]]\n"
         "      Decode an image to display-encoded sRGB without the film model. Used\n"
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "\n"
@@ -143,17 +144,21 @@ void printUsage() {
         "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
         "                             [--spread-model physical|box] [--frame-width-mm 36]\n"
         "                             [--texture-engine auto|cpu|gpu] [--exr-half]\n"
+        "                             [--exr-linear [--exr-trc srgb|pq|hlg] [--peak 1000]]\n"
         "      Apply a 3D LUT to an image. Output bit depth defaults to the input's.\n"
         "      --engine spectral runs the per-pixel physical chain instead of a LUT\n"
         "      (no --lut needed; --film/--paper/--input choose the materials).\n"
         "      An --out path ending in .exr writes OpenEXR instead: 32-bit float by\n"
         "      default, 16-bit half with --exr-half, and nothing is clamped. EXR\n"
         "      input is read back too (uncompressed scanline files, FLOAT or HALF).\n"
+        "      --exr-linear converts the display-encoded result to linear light\n"
+        "      first (1.0 = white; for PQ, 1.0 = --peak nits). --exr-trc names the\n"
+        "      transfer the LUT output is in (bake with --hdr pq/hlg to match).\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in-dir <dir> --out-dir <dir>\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--texture-engine auto|cpu|gpu] [--out-ext png|exr]\n"
-        "                             [--exr-half]\n"
+        "                             [--exr-half] [--exr-linear [--exr-trc srgb|pq|hlg]]\n"
         "      Apply the LUT to every PNG or EXR in --in-dir (sorted by name). Used to\n"
         "      grade image sequences without starting the process once per frame.\n"
         "      --out-ext exr turns a PNG sequence into float EXR frames (D055).\n"
@@ -280,6 +285,44 @@ void reportFloatRange(const sr::Image& image) {
                 high, 100.0 * below / total, 100.0 * above / total);
 }
 
+// D058: float EXR can carry linear light instead of display-encoded code values.
+struct ExrOptions {
+    bool linear = false;
+    sr::FloatTransfer transfer = sr::FloatTransfer::Srgb;
+    double peakNits = 1000.0;
+};
+
+bool parseExrOptions(const Args& args, ExrOptions& out, std::string& error) {
+    out.linear = args.has("exr-linear");
+    out.peakNits = args.getDouble("peak", 1000.0);
+    const std::string trc = args.get("exr-trc", "srgb");
+    if (!sr::parseFloatTransfer(trc, out.transfer)) {
+        error = "--exr-trc expects 'srgb', 'pq' or 'hlg'";
+        return false;
+    }
+    return true;
+}
+
+bool prepareExr(sr::Image& image, const std::string& outPath, const ExrOptions& options,
+                std::string& error) {
+    if (!options.linear) return true;
+    if (!isExrPath(outPath)) {
+        error = "--exr-linear needs an .exr output";
+        return false;
+    }
+    sr::linearizeImage(image, options.transfer, options.peakNits);
+    return true;
+}
+
+const char* floatTransferName(sr::FloatTransfer transfer) {
+    switch (transfer) {
+        case sr::FloatTransfer::Pq: return "pq";
+        case sr::FloatTransfer::Hlg: return "hlg";
+        case sr::FloatTransfer::Srgb: break;
+    }
+    return "srgb";
+}
+
 int cmdGen(const Args& args) {
     const std::string out = args.get("out");
     if (out.empty()) return fail("gen requires --out <file.png>");
@@ -288,9 +331,15 @@ int cmdGen(const Args& args) {
     const int height = std::atoi(args.get("height", "1080").c_str());
     const int bits = requestedBits(args, 8);
 
-    const sr::Image image = sr::makeTestChart(width, height);
+    sr::Image image = sr::makeTestChart(width, height);
     std::string error;
+    ExrOptions exr;
+    if (!parseExrOptions(args, exr, error)) return fail(error);
+    if (!prepareExr(image, out, exr, error)) return fail(error);
     if (!sr::saveImage(out, image, error, bits, args.has("exr-half"))) return fail(error);
+    if (exr.linear) {
+        std::printf("EXR: linear light (1.0 = white)\n");
+    }
 
     std::printf("wrote %s (%dx%d, %d-bit)\n", out.c_str(), image.width, image.height,
                 outputBits(out, bits));
@@ -692,6 +741,8 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
     size_t pixels = 0;
     std::string error;
     int bits = 16;
+    ExrOptions exr;
+    if (!parseExrOptions(args, exr, error)) return fail(error);
     const int threads = sr::resolveThreadCount(args.getInt("threads", 0));
     const sr::TextureParams texture = parseTexture(args);
     sr::GrainFieldCache grainCache;
@@ -720,6 +771,7 @@ int applyDirectory(const sr::Lut3D& lut, sr::Interp mode, float strength,
         std::filesystem::path outName = path.filename();
         if (!outExt.empty()) outName.replace_extension(outExt);
         const auto outPath = std::filesystem::path(outDir) / outName;
+        if (!prepareExr(image, outPath.string(), exr, error)) return fail(error);
         if (!sr::saveImage(outPath.string(), image, error, bits, args.has("exr-half"))) {
             return fail(error);
         }
@@ -819,9 +871,16 @@ int cmdLutApply(const Args& args) {
                              std::chrono::steady_clock::now() - started)
                              .count();
 
+    ExrOptions exr;
+    if (!parseExrOptions(args, exr, error)) return fail(error);
+    if (!prepareExr(image, outPath, exr, error)) return fail(error);
     if (!sr::saveImage(outPath, image, error, bits, args.has("exr-half"))) return fail(error);
     const int outBits = outputBits(outPath, bits);
 
+    if (isExrPath(outPath) && exr.linear) {
+        std::printf("EXR: linear light (%s decode, 1.0 = %s)\n", floatTransferName(exr.transfer),
+                    exr.transfer == sr::FloatTransfer::Pq ? "peak nits" : "white");
+    }
     if (isExrPath(outPath)) {
         reportFloatRange(image);
     }
@@ -1980,7 +2039,14 @@ int cmdConvert(const Args& args) {
                              std::chrono::steady_clock::now() - started)
                              .count();
 
+    ExrOptions exr;
+    if (!parseExrOptions(args, exr, error)) return fail(error);
+    if (!prepareExr(image, outPath, exr, error)) return fail(error);
     if (!sr::saveImage(outPath, image, error, bits, args.has("exr-half"))) return fail(error);
+    if (isExrPath(outPath) && exr.linear) {
+        std::printf("EXR: linear light (%s decode, 1.0 = white)\n",
+                    floatTransferName(exr.transfer));
+    }
     if (isExrPath(outPath)) reportFloatRange(image);
 
     std::printf("converted %s (%s -> srgb, %+.2f EV) to %s\n", inPath.c_str(),

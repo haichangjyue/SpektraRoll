@@ -79,11 +79,16 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     --out "out\exr-frame-half.exr" --exr-half `
     --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $exe lut apply --lut "out\exr-lut.cube" --in "out\exr-frame-src.png" `
+    --out "out\exr-frame-linear.exr" --exr-linear `
+    --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "     16-bit PNG: $(Size-Mb 'out\exr-frame.png')" -ForegroundColor Green
 Write-Host "     float EXR : $(Size-Mb 'out\exr-frame.exr')" -ForegroundColor Green
 Write-Host "     half EXR  : $(Size-Mb 'out\exr-frame-half.exr')" -ForegroundColor Green
+Write-Host "     linear EXR: $(Size-Mb 'out\exr-frame-linear.exr')" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "4/5  读回 EXR (同一套 CLI), 和 16-bit PNG 比较..." -ForegroundColor Cyan
@@ -114,13 +119,16 @@ Write-Host "     (EXR 那一行会打印范围: 超过 1 的部分没有丢, PNG
 Write-Host ""
 Write-Host "要怎么看:" -ForegroundColor Green
 Write-Host "  * 正常曝光这一帧, EXR 和 16-bit PNG 读回来应该几乎逐位相同"
+Write-Host "  * linear EXR 是同一帧的线性光: 0.5 灰会变成约 0.21, 1.0 仍是最白"
 Write-Host "  * +3 EV 的 EXR 里约 1/3 的像素大于 1 (最亮约 5.3), 在 Resolve/Nuke 里还能拉回来"
-Write-Host "  * 把 out\exr-frame.exr 拖进 DaVinci Resolve: 它按 sRGB 原色解读, 值域是浮点"
+Write-Host "  * 把 linear EXR 拖进 DaVinci Resolve: 它按线性解读, 不要再套 sRGB 输入变换"
+Write-Host "  * 普通 EXR 是显示编码值, 进调色软件要设 sRGB (或 PQ) 输入变换"
 Write-Host "  * EXR 目前是不压缩 scanline; half 体积约为 float 的一半"
 Write-Host ""
 Write-Host "生成的文件:" -ForegroundColor Green
 Write-Host "  $root\out\exr-frame.exr        (float, 带质感)"
 Write-Host "  $root\out\exr-frame-half.exr   (half)"
+Write-Host "  $root\out\exr-frame-linear.exr (float, 线性光)"
 Write-Host "  $root\out\exr-frame.png        (16-bit 对照)"
 Write-Host "  $root\out\exr-roundtrip.png    (EXR 读回后的图)"
 Write-Host "  $root\out\exr-over.exr         (+3 EV, 未切高光)"

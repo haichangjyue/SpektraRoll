@@ -3,6 +3,7 @@
 #include "sr/image.hpp"
 
 #include "sr/lut3d.hpp"
+#include "sr/transfer.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -613,8 +614,45 @@ bool saveImage(const std::string& path, const Image& image, std::string& error, 
     return true;
 }
 
-Image makeTestChart(int width, int height) {
-    width = std::max(64, width);
+bool parseFloatTransfer(const std::string& name, FloatTransfer& out) {
+    if (name == "srgb" || name == "sRGB" || name == "Srgb") {
+        out = FloatTransfer::Srgb;
+        return true;
+    }
+    if (name == "pq" || name == "PQ") {
+        out = FloatTransfer::Pq;
+        return true;
+    }
+    if (name == "hlg" || name == "HLG") {
+        out = FloatTransfer::Hlg;
+        return true;
+    }
+    return false;
+}
+
+void linearizeImage(Image& image, FloatTransfer transfer, double peakNits) {
+    const double peak = peakNits > 0.0 ? peakNits : 1000.0;
+    for (float& sample : image.pixels) {
+        const double code = sample;
+        double linear = 0.0;
+        switch (transfer) {
+            case FloatTransfer::Srgb:
+                // Unclamped on purpose: a float delivery keeps super-whites.
+                linear = code <= 0.04045 ? code / 12.92
+                                         : std::pow((code + 0.055) / 1.055, 2.4);
+                break;
+            case FloatTransfer::Pq:
+                linear = pqDecode(code) / peak;
+                break;
+            case FloatTransfer::Hlg:
+                linear = hlgDecode(code);
+                break;
+        }
+        sample = static_cast<float>(linear);
+    }
+}
+
+Image makeTestChart(int width, int height) {    width = std::max(64, width);
     height = std::max(64, height);
 
     Image image;

@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-03（D049–D057 已整理成交接摘要）
-> **当前里程碑**：**M5 进行中 · Windows 与 macOS 的颜色/质感都在 GPU**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half EXR + Metal 颜色与质感，D041–D057）
+> **最后更新**：2026-11-03（D049–D058 已整理成交接摘要）
+> **当前里程碑**：**M5 进行中 · Windows 与 macOS 的颜色/质感都在 GPU，交付支持线性浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half EXR + 线性 EXR + Metal 颜色与质感，D041–D058）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,59 @@
 
 ---
 
-## 零之一、最近一次会话：D057（macOS Metal 质感）
+## 会话 D058 · 线性 EXR
+
+会话目标：D057 之后按产品负责人的选择做 **A · 线性 EXR**。上一版 EXR 是 display-encoded，进调色软件容易多套一次传输函数。
+
+### 一、已完成的事项
+
+**D058 · `--exr-linear`**
+- `--exr-linear` + `--exr-trc srgb|pq|hlg` + `--peak`：写 EXR 前把显示编码值反解成线性光，**1.0 = 参考白**（sRGB/HLG 是显示白，PQ 是 `--peak` 尼特）。
+- 核心 `sr::linearizeImage`：sRGB 解码**不钳制**（超白保留）；PQ 用 `pqDecode/peak`；HLG 用 `hlgDecode`。
+- 接入 `lut apply`（单帧 + `--in-dir` 序列）、`convert`、`gen`；输出不是 `.exr` 时直接报错。
+- 写盘前打印 `EXR: linear light (...)`，范围统计随之变成线性值。
+- 测试：sRGB 0.5 → 0.214、1.5 的码值 → 2.53（超白保留）、PQ 1000 nits → 1.0、HLG 0.25 往返、非法 transfer 报错。
+- `scripts\demo-exr.cmd` 新增 `out\exr-frame-linear.exr` 与对应说明。
+
+### 二、一条关键决策（详见 DECISIONS D058）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D058 | 线性浮点交付 | 可选 `--exr-linear`；1.0 = 白/峰值；不钳制；不改默认 |
+
+### 三、实测（2160×1214）
+
+| 项 | 结果 |
+|---|---|
+| 同一帧 range | display 0.0160..0.8870 → linear **0.0012..0.7619** |
+| `convert --exposure 3` | display max 5.34 → linear max **50.3**，仍不钳制 |
+| 体积 / 耗时 | 与普通 EXR 相同（float 30 MB / half 15 MB） |
+
+### 四、怎么用
+
+```powershell
+# 线性 sRGB EXR
+.\build\spektra-roll-cli.exe lut apply --lut out\m3-applelog-sdr.cube `
+  --in out\exr-frame.png --out out\frame-linear.exr --exr-linear
+
+# HDR PQ（LUT 用 --hdr pq 烘的）：1.0 = 1000 nits
+.\build\spektra-roll-cli.exe lut apply --lut out\hdr.cube `
+  --in out\frame.png --out out\frame-linear-pq.exr --exr-linear --exr-trc pq --peak 1000
+
+# 序列
+.\build\spektra-roll-cli.exe lut apply --lut out\x.cube --in-dir frames `
+  --out-dir frames_linear --out-ext exr --exr-linear
+```
+
+### 五、未完成的待办
+
+- [ ] **OCIO**：线性 EXR 只是“按线性解读”，还没有 ACES/相机矩阵/显示变换
+- [ ] **EXR 压缩**（ZIP/PIZ）
+- [ ] **代理清理 / 4K 预览**、**macOS Qt 打包**
+
+---
+
+## 会话 D057 · macOS Metal 质感
 
 会话目标：D056 让 macOS 的颜色上了 Metal，但质感还在 CPU（约 160 ms/帧），融合提交在 Mac 上用不了。这一轮把质感链也搬到 Metal。
 
@@ -95,7 +147,7 @@ SPEKTRA_VIDEO_DEBUG=1 ./build/spektra-roll-cli video --engine spectral-gpu \
 
 ---
 
-## 零之二、上一次会话：D056（macOS Metal 光谱）
+## 会话 D056 · macOS Metal 光谱
 
 会话目标：产品负责人指出 macOS 的 GPU 进度落后，要求先做 Metal。macOS 目前只有 CPU 光谱（2.6 MP 约 1.08 s/帧），Windows 已经是 50 ms。
 
@@ -154,7 +206,7 @@ SPEKTRA_VIDEO_DEBUG=1 ./build/spektra-roll-cli video --engine spectral-gpu \
 
 ---
 
-## 零之三、上一次会话：D055（浮点 / EXR）
+## 会话 D055 · 浮点 / EXR
 
 会话目标：D054 之后按清单做 **浮点 / EXR**（D017 欠账）。动手前先确认 CI：run **75**（D054 代码）和 **76**（文档）在 Windows + macOS 都绿。
 
@@ -221,7 +273,7 @@ scripts\demo-exr.cmd            # PNG16 / float EXR / half EXR + 读回比对 + 
 
 ---
 
-## 零之四、上一次会话：D054（真实点扩散核）
+## 会话 D054 · 真实点扩散核
 
 会话目标：按建议做 **A（真实点扩散核）**。动手前先跑完健康检查：9/9 测试、M1 parity 88.07 dB、`demo-m3` 220.8 ms/帧、`demo-m4` 续渲正常、Qt 界面能编译、预览第二次 45 ms。
 
@@ -289,7 +341,7 @@ scripts\demo-spread.cmd            # 左旧 / 右新，打印 PSNR 与 ms/帧
 
 ---
 
-## 零之五、上一次会话：D049–D053（融合提交 → 管道 → 并行 → 预览代理）
+## 会话 D049–D053 · 融合提交 → 管道 → 并行 → 预览代理
 
 会话目标：产品负责人依次选了 **B（融合提交）→ B2（视频管道）→ 并行分段 → 预览代理**。下面按交付编号整理，所有数字都是本机（i5-10600KF / Arc A750 / 32 GB）实测。
 
@@ -370,7 +422,7 @@ $env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
 
 ---
 
-## 零之六、上一次会话：预览实时化（D048）
+## 会话 D048 · 预览实时化
 
 会话目标：按建议先做 **A（预览实时化）**。先把旧预览链拆开量，再决定改法。
 
@@ -440,7 +492,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之七、上一次会话：空间质感上 GPU（D047）
+## 会话 D047 · 空间质感上 GPU
 
 会话目标：D046 之后颜色只剩约 50 ms/帧，视频却仍要约 380 ms/帧。先把时间花在哪量清楚，再决定要不要移植。
 
@@ -513,7 +565,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之八、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
+## 会话 D044–D046 · 颜色改成物理计算并上 GPU
 
 会话目标：按你的要求，**能物理算的地方不要再靠 LUT 采样**，并且用满本机（i5-10600KF / 32 GB / Arc A750）。
 
@@ -568,7 +620,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之九、更早的一次会话（M3 阶段）做了什么
+## M3 阶段（早期）
 
 一次会话把项目从"M2 尾声"推到"M3 完成"，按时间顺序：
 
@@ -731,6 +783,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **浮点 EXR（D055）** | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读写耗时与 PNG 相当；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB（half 82.8）；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
 | **Metal 光谱（D056）** | macOS CI run 80 双绿；真机 M1（macOS 14.7.5）：`MTLCopyAllDevices` 找到 Apple M1、默认设备仍 nil；六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**；单帧 10.8 → **7.1 ms**（含 PNG I/O）；2.6 MP 速度待测 |
 | **Metal 质感（D057）** | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1：九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms**；2.6 MP 待测 |
+| **线性 EXR（D058）** | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -854,7 +907,8 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D054** | 真实点扩散核 | **光晕/眩光/扩散改用底片微米 + 双高斯重尾核（窄芯 + 宽裙），按 `--frame-width-mm` 换算；CPU 生成权重、GPU structured buffer 上传；`--spread-model box` 保留旧盒状模糊** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**；LUT+CPU 质感 +8.5%；parity **149–178 dB**；`test_texture` 新增物理核检查 |
 | **D055** | 浮点交付 | **自带最小 OpenEXR（scanline、NONE、RGB、float/half）；`.exr` 即浮点且不钳制；支持 EXR 读入与 `--out-ext exr` 序列；`--bits 32` 配 PNG 报错** | float 30 MB / half 15 MB（2.6 MP）；读回 **PSNR = inf**；+3 EV 时 33% 像素 >1 保留；CI 双平台 EXR 冒烟 |
 | **D056** | macOS GPU 颜色 | **Metal 移植光谱链（运行时编译，shared buffer）；无设备回退 CPU；质感留到 D057** | macOS CI `gpu_film` 真跑并通过；**fast math 必须关**，否则 NaN 保护被优化掉、整帧 NaN |
-| **D057** | macOS GPU 质感 | **14 个 pass 翻成 MSL；一个 command buffer + `setBytes` 内联参数/taps；融合路径借用 film 的 MTLBuffer** | macOS CI 9/9（`gpu_texture` 2.11 s、`gpu_chain` 2.10 s）；Windows 不受影响 |
+| **D057** | macOS GPU 质感 | **14 个 pass 翻成 MSL；一个 command buffer + `setBytes` 内联参数/taps；融合路径借用 film 的 MTLBuffer** | macOS CI 9/9（`gpu_texture` 2.11 s、`gpu_chain` 2.10 s）；真机逐位相同、融合 134.8 dB |
+| **D058** | 线性浮点交付 | **`--exr-linear` + `--exr-trc srgb/pq/hlg` + `--peak`；1.0 = 白/峰值；不钳制；不改默认** | display 0.016..0.887 → linear 0.0012..0.762；+3 EV 线性最大 50.3 |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -872,12 +926,12 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. **Mac 2.6 MP 实测**：现在颜色 + 质感都在 GPU，用 `test_gpu_texture` 记录逐组 dB，用 `video` 记录 ms/帧；`verify-macos.command` 会把两条链都跑一遍。
-2. **线性 / OCIO 交付**：EXR 现在是 display-encoded（sRGB / PQ 码值），不是场景线性。
+1. **Mac 2.6 MP 实测**：用 `test_gpu_texture` 记录逐组 dB，用 `video` 记录 ms/帧。
+2. **OCIO**：线性 EXR 只能“按线性解读”，还没有 ACES / 相机矩阵 / 显示变换。
 3. **EXR 压缩**：NONE 在 2.6 MP 是 30 MB/帧，ZIP/PIZ 能小 3–5 倍。
 4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积；4K 素材可考虑 1280 px 代理。
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR。
 
 ### 🟡 中期路线（M4–M5）
 

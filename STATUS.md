@@ -63,7 +63,8 @@
 - [x] **真实点扩散核**（D054）：光晕 / 眩光 / 扩散改成“底片微米 + 双高斯重尾核”，按 `--frame-width-mm` 换算，1080p/4K 物理尺寸一致；`--spread-model box` 保留旧盒状模糊；CPU/GPU 用同一组核权重，parity **149–178 dB**；GPU 视频 82.2 ms/帧，`demo-gpu-texture` 2.87×
 - [x] **浮点 / EXR**（D055）：自带最小 OpenEXR 读写（NONE 压缩、float/half、RGB），`.exr` 输出不钳制；`lut apply` / `convert` / `gen` / 序列 `--out-ext exr` 全支持；正常帧读回 **PSNR = inf**，+3 EV 时 33% 像素 >1 被保留；CI 双平台跑 EXR 冒烟
 - [x] **macOS Metal 光谱**（D056）：`gpu_film_metal.mm`，运行时编译 MSL、shared buffer、无设备回退 CPU；macOS CI `gpu_film` 真跑通过；**必须 `fastMathEnabled = NO`**（否则 NaN 保护被优化掉，整帧 NaN）；真机 M1 用 `MTLCopyAllDevices` 兜底（默认设备返回 nil），parity 最差 2.99e-4、CPU vs Metal 115.44 dB
-- [x] **macOS Metal 质感**（D057）：14 个 pass 全部翻成 MSL；整条链一个 command buffer、参数/taps 用 `setBytes` 内联；融合路径借用 film 的 `MTLBuffer`；macOS CI 9/9（`gpu_texture` 2.11 s、`gpu_chain` 2.10 s，之前 skip）
+- [x] **macOS Metal 质感**（D057）：14 个 pass 全部翻成 MSL；整条链一个 command buffer、参数/taps 用 `setBytes` 内联；融合路径借用 film 的 `MTLBuffer`；macOS CI 9/9（`gpu_texture` 2.11 s、`gpu_chain` 2.10 s，之前 skip）；真机九组逐位相同、融合 134.8 dB
+- [x] **线性浮点交付**（D058）：`--exr-linear [--exr-trc srgb|pq|hlg] [--peak]`，1.0 = 白/峰值，sRGB 解码不钳制；`lut apply` / `convert` / `gen` / 序列都支持；同帧 display 0.016..0.887 → linear 0.0012..0.762
 - [x] `scripts\demo-spread.cmd`：同一帧 / 同一段视频各渲 box 与 physical 两遍，打印 PSNR 和 ms/帧，并排对比
 - [x] `scripts\demo-exr.cmd`：同一帧出 PNG16 / float EXR / half EXR，读回比对 + 超曝光对照
 - [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
@@ -123,6 +124,7 @@
 | 浮点 EXR（D055） | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB、half 82.8 dB；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
 | Metal 光谱（D056） | macOS CI run 80 双绿；真机 M1：设备走 `MTLCopyAllDevices`（默认设备 nil），六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**，单帧 10.8 → **7.1 ms**（含 PNG I/O） |
 | Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1 九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms** |
+| 线性 EXR（D058） | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
@@ -148,10 +150,10 @@
 ## 下一步（M5）
 
 1. **Mac 2.6 MP 实测**：颜色 + 质感都在 GPU 后，用 `test_gpu_texture` / `video` 记录 dB 与 ms/帧
-2. **线性 / OCIO 交付**：EXR 现在是 display-encoded，不是场景线性
+2. **OCIO**：线性 EXR 只能按线性解读，还没有 ACES / 相机矩阵 / 显示变换
 3. **EXR 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR。
 
 ## 需要你决定的事
 

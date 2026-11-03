@@ -208,10 +208,11 @@ X:\agent\SpektraRoll\scripts\demo-exr.cmd
 自己用的时候：
 
 - `--out 名字.exr` 就是浮点输出；加 `--exr-half` 写 half
-- 一整段序列：`lut apply --lut x.cube --in-dir frames --out-dir frames_exr --out-ext exr`
+- 加 `--exr-linear` 写**线性光**（1.0 = 白；PQ 素材配 `--exr-trc pq --peak 1000`，1.0 = 峰值尼特）
+- 一整段序列：`lut apply --lut x.cube --in-dir frames --out-dir frames_exr --out-ext exr [--exr-linear]`
 - EXR 也能当输入：`lut apply --lut x.cube --in frame.exr --out frame.png --bits 16`
 
-**要注意**：EXR 里存的是显示编码值（sRGB 或 PQ/HLG 码值），不是线性光。进 DaVinci / Nuke 时要把输入变换设成对应的 sRGB 或 PQ，不要当线性素材拉。
+**要注意**：默认 EXR 存的是显示编码值（sRGB 或 PQ/HLG 码值），进 DaVinci / Nuke 要把输入变换设成对应的 sRGB 或 PQ；只有加了 `--exr-linear` 的 EXR 才是线性光，按线性解读、不要再套 sRGB 变换。演示脚本会同时生成两份，可以直接对比。
 
 ## 用图形界面（Qt 6）
 

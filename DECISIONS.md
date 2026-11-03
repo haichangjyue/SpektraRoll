@@ -957,6 +957,27 @@
 
 ---
 
+## D058 · 线性浮点交付（`--exr-linear`）
+
+- **日期**：2026-11-03
+- **背景**：D055 的 EXR 是 **display-encoded**（sRGB 或 PQ/HLG 码值）只是不钳制。调色/合成软件默认把 EXR 当线性读，直接用就会多套一次传输函数；上一版只能在文档里提醒“别当线性用”。这一轮让浮点交付可以选择真正的线性光。
+- **实现**：
+  - 新增 `--exr-linear`，配合 `--exr-trc srgb|pq|hlg`（默认 srgb）和 `--peak N`（默认 1000，仅 PQ 用）。
+  - 核心函数 `sr::linearizeImage(Image&, FloatTransfer, peakNits)`：把显示编码样本反解成线性光，**1.0 = 参考白**——sRGB/HLG 是显示白，PQ 是 `--peak` 尼特。sRGB 解码**不钳制**，所以超白（>1 的码值）保留成更大的线性值。
+  - 接到 `lut apply`（单帧和 `--in-dir` 序列）、`convert`、`gen`；输出不是 `.exr` 时直接报错（不静默忽略）。
+  - 写盘前打印 `EXR: linear light (...)`，读取范围也随之变成线性值的范围。
+  - 测试：sRGB 0.5 → 0.21404、1.5 的码值 → 2.53（超白保留）、PQ 1000 nits 的码值 → 1.0、HLG 0.25 往返；未知 transfer 名报错。
+- **实测（2160×1214）**：
+  - 同一帧 display-encoded 范围 0.0160 .. 0.8870 → linear 范围 **0.0012 .. 0.7619**（1.0 = 白）。
+  - `convert --exposure 3`：display 最大 5.34 → linear 最大 **50.3**，仍然不钳制。
+  - 体积、写盘耗时与普通 EXR 相同（float 30 MB / half 15 MB）。
+- **后果**：
+  - 交付有两种明确选择：默认 display-encoded（进 Resolve 设 sRGB/PQ 输入变换），或 `--exr-linear`（按线性解读）。
+  - 仍然不是 OCIO：没有 ACES/相机矩阵/显示变换配置；要完整色彩管理还得接 OCIO。
+  - 线性 EXR 的 `chromaticities` 仍是 sRGB/Rec.709 原色；HLG/PQ 的“1.0 = 白/峰值”是项目约定，已写进 `--help` 和 RUN。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
