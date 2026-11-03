@@ -1206,8 +1206,8 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
     signature << std::setprecision(9) << "spektra-roll video v1\n"
               << "input " << job.inPath << "\n"
               << "size " << job.width << "x" << job.height << " fps " << job.fps << "\n"
-              << "input " << sr::inputTransferName(job.bake.input) << " matrix "
-              << job.inMatrix << "\n"
+              << "decode " << sr::inputTransferName(job.bake.input) << " " << job.inMatrix
+              << "\n"
               << "lut " << fileHash(lutPath) << "\n"
               << "start " << startFrame << " total " << totalFrames << " segment "
               << segmentFrames << "\n"
