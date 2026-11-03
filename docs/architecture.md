@@ -105,8 +105,14 @@ The Metal kernel is compiled from source at runtime and uses shared buffers, so
 a frame never leaves unified memory; it must be built with `fastMathEnabled =
 NO`, because the spectral tables contain NaN densities that the CPU chain skips
 with `density != density` and fast math would delete that guard. Both backends
-fall back to the CPU spectral engine when no device exists. Spatial texture is
-still CPU on macOS (D057).
+fall back to the CPU spectral engine when no device exists.
+
+The spatial chain has the same split: D3D11 (D047) and Metal (D057). The Metal
+version encodes all 14 passes into one command buffer and passes parameters and
+PSF taps inline with `setBytes:`, so nothing in a chain can race the CPU on a
+shared constant buffer. The fused submit (D049) is available on both: the
+texture backend reads the film pass's buffer as its first input instead of
+copying it.
 
 Video (D022) is a child-process integration: `spektra-roll-cli video` runs
 ffprobe once for geometry and rotation, then pipes raw RGB48 frames from an

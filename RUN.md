@@ -162,7 +162,7 @@ X:\agent\SpektraRoll\scripts\demo-m4.cmd
 X:\agent\SpektraRoll\scripts\demo-gpu-texture.cmd
 ```
 
-它会用同一条命令把 2 秒素材渲染两遍：一遍质感在 CPU（参考），一遍在显卡（D3D11）。跑完会打印：
+它会用同一条命令把 2 秒素材渲染两遍：一遍质感在 CPU（参考），一遍在显卡（D3D11 / Metal）。跑完会打印：
 
 - `CPU texture: xxx ms/frame`
 - `GPU texture: xxx ms/frame`
@@ -173,7 +173,7 @@ X:\agent\SpektraRoll\scripts\demo-gpu-texture.cmd
 
 没有 D3D11 显卡（比如 Mac）时，命令会自动退回 CPU，不会失败。
 
-macOS 上现在颜色走 **Metal**（D056），但质感（颗粒 / 光晕 / 眩光 / 扩散）还在 CPU；在这一块补上之前，Mac 的“GPU 质感”勾选框会自动用 CPU 链，不会报错。Mac 上的验证请双击 `scripts\verify-macos.command`，它会额外跑一次 CPU 光谱 vs Metal 光谱的 PSNR。
+macOS 上颜色和质感现在都走 **Metal**（D056/D057），和 Windows 的 D3D11 路径一致；没有可用 GPU 时会自动用 CPU 链，不会报错。Mac 上的验证请双击 `scripts\verify-macos.command`，它会打印设备信息、三组 GPU parity 和 CPU vs Metal 的 PSNR。
 
 ## 看空间扩散（旧盒状模糊 vs 新物理核）
 

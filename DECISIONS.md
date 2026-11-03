@@ -927,6 +927,34 @@
 
 ---
 
+## D057 · macOS 的 GPU 质感（Metal）
+
+- **日期**：2026-11-03
+- **背景**：D056 让 macOS 的颜色走 Metal，但颗粒 / 光晕 / 眩光 / 扩散还在 CPU（约 160 ms/帧），融合提交在 Mac 上也用不了。这一轮把 `gpu_texture.cpp` 的 14 个 compute pass 全部翻成 MSL，并重新打开融合路径。
+- **实现**：
+  - 新增 `src/cli/gpu_texture_metal.mm`（Objective-C++，仅 Apple 编译），实现同一个 `GpuTexture` 接口；CMake 在 Apple 上用它替换 `gpu_texture.cpp`。
+  - 14 个 kernel 是 HLSL 的逐行翻译：光晕阈值、亮度、盒子模糊（一行/一列一个线程，累加顺序不变）、物理 PSF 卷积、降采样/升采样、颗粒场与叠加、三个 composite 和 copy。
+  - **整条链编码进一个 command buffer**，只在最后 `waitUntilCompleted` 一次；参数用 `setBytes` 内联，PSF 的 taps 也内联（最大 241 个 float ≈ 964 B，在 4 KB 限制内）。这样不会出现“共享常量缓冲被下一帧/下一个效果覆盖”的竞态。
+  - 融合路径（D049）：`processBuffer()` 直接借用 film 后端的 `MTLBuffer` 作为第一遍输入，**不拷贝 42 MB**；第一遍之后把 ping-pong 的另一块重新指向自己拥有的缓冲，绝不写回 film 的结果。
+  - 输入/输出/scratch 都是 `MTLResourceStorageModeShared`；kernel 与 film 一样用 `fastMathEnabled = NO` 编译，保证与 CPU 参考的浮点顺序一致。
+  - 没有 Metal 设备时 `available()` 返回 false，调用方回退 CPU 质感。
+- **踩到的坑**：
+  1. **`dispatchThreads` 收的是“总线程数”，不是 D3D 的 group 数**。照搬 D3D 的 `(count+63)/64` 会把线程数缩小 64 倍；改用 `dispatchThreadgroups:` 并显式给 threadgroup 尺寸，行/列 pass 分别为 `(1,64)` 和 `(64,1)`。
+  2. PSF taps 一开始放在共享 `MTLBuffer` 里，一个 command buffer 内的多个效果会互相覆盖；改成 `setBytes` 内联。
+  3. 融合路径第一遍读 film 的缓冲，交换后不能把它当成写入目标；否则会把 film 结果覆盖掉。
+  4. ARC 下不能对 `id` 数组用非 const 引用遍历（编译错误），改成索引循环。
+  5. `fastMathEnabled` 在 macOS 15 SDK 里标记弃用（建议 `mathMode`），目前只是警告；为了兼容旧系统继续使用。
+- **实测**：
+  - macOS CI（run **85**）：9/9 全过，`gpu_texture` **2.11 s**、`gpu_chain` **2.10 s**（之前是 skip），说明 Metal 质感与融合提交都在真机上跑了。
+  - Windows 本机：9/9 全过，D3D11 路径未受影响。
+  - 各 kernel 的逐像素 parity 门限仍是 ≥60 dB；D3D11 实测 149–178 dB，Metal 是同一套权重与累加顺序。真机 M1 的具体 dB / 速度待用 `test_gpu_texture` 与 `video` 量。
+- **后果**：
+  - macOS 现在颜色和质感都在 GPU，`--texture-engine auto` 在 `--engine spectral-gpu` 下自动用 Metal 质感，融合提交在 Mac 上重新生效。
+  - Mac 的整帧时间不再固定多出约 160 ms 的 CPU 质感；实际收益要等 2.6 MP 实测。
+  - `gpu-info` 在 Mac 上现在会显示 `texture-gpu: available`。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

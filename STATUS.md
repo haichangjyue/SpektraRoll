@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。颜色和质感**合并成一次 GPU 提交**，管道也修掉了每帧 130 ms 的量化开销、并让解码/编码与处理重叠：2.6 MP 全质感视频 **79–82 ms/帧**（D046 时 379，累计约 4.7×），与旧路径逐位相同。三个空间效果自 D054 起是**按底片微米计的真实点扩散核**（窄芯 + 宽裙），1080p / 4K 观感一致。界面预览是**常驻进程 + 整段帧缓存**：短片拖动时间线 **38–64 ms/帧**（以前 1.7–2.2 s）；长片自动生成 960 px 代理，**100 ms/帧**。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。交付可以是 16-bit PNG，也可以是**不钳制的 float / half EXR**（D055，读回逐位一致）。macOS 的颜色已经走 **Metal**（D056；质感还在 CPU，D057 补）。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。颜色和质感**合并成一次 GPU 提交**，管道也修掉了每帧 130 ms 的量化开销、并让解码/编码与处理重叠：2.6 MP 全质感视频 **79–82 ms/帧**（D046 时 379，累计约 4.7×），与旧路径逐位相同。三个空间效果自 D054 起是**按底片微米计的真实点扩散核**（窄芯 + 宽裙），1080p / 4K 观感一致。界面预览是**常驻进程 + 整段帧缓存**：短片拖动时间线 **38–64 ms/帧**（以前 1.7–2.2 s）；长片自动生成 960 px 代理，**100 ms/帧**。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。交付可以是 16-bit PNG，也可以是**不钳制的 float / half EXR**（D055，读回逐位一致）。macOS 的颜色和质感也都走 **Metal**（D056/D057），与 Windows 的 D3D11 路径对齐。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -62,7 +62,8 @@
 - [x] **长片预览代理**（D053）：整段进内存会把最长边压到 960 px 以下时生成 960 px 全 I 帧代理（`out/ui-proxy/`）；30 秒素材预览 **960×540 · 100 ms/帧**，重开 48 ms；4 秒素材仍走内存缓存 1600×898 · 47 ms
 - [x] **真实点扩散核**（D054）：光晕 / 眩光 / 扩散改成“底片微米 + 双高斯重尾核”，按 `--frame-width-mm` 换算，1080p/4K 物理尺寸一致；`--spread-model box` 保留旧盒状模糊；CPU/GPU 用同一组核权重，parity **149–178 dB**；GPU 视频 82.2 ms/帧，`demo-gpu-texture` 2.87×
 - [x] **浮点 / EXR**（D055）：自带最小 OpenEXR 读写（NONE 压缩、float/half、RGB），`.exr` 输出不钳制；`lut apply` / `convert` / `gen` / 序列 `--out-ext exr` 全支持；正常帧读回 **PSNR = inf**，+3 EV 时 33% 像素 >1 被保留；CI 双平台跑 EXR 冒烟
-- [x] **macOS Metal 光谱**（D056）：`gpu_film_metal.mm`，运行时编译 MSL、shared buffer、无设备回退 CPU；macOS CI `gpu_film` 真跑通过；**必须 `fastMathEnabled = NO`**（否则 NaN 保护被优化掉，整帧 NaN）；真机 M1 首次出现 `MTLCreateSystemDefaultDevice` 返回 nil，已加 `MTLCopyAllDevices` 兜底与 `gpu-info`；质感仍 CPU（D057）
+- [x] **macOS Metal 光谱**（D056）：`gpu_film_metal.mm`，运行时编译 MSL、shared buffer、无设备回退 CPU；macOS CI `gpu_film` 真跑通过；**必须 `fastMathEnabled = NO`**（否则 NaN 保护被优化掉，整帧 NaN）；真机 M1 用 `MTLCopyAllDevices` 兜底（默认设备返回 nil），parity 最差 2.99e-4、CPU vs Metal 115.44 dB
+- [x] **macOS Metal 质感**（D057）：14 个 pass 全部翻成 MSL；整条链一个 command buffer、参数/taps 用 `setBytes` 内联；融合路径借用 film 的 `MTLBuffer`；macOS CI 9/9（`gpu_texture` 2.11 s、`gpu_chain` 2.10 s，之前 skip）
 - [x] `scripts\demo-spread.cmd`：同一帧 / 同一段视频各渲 box 与 physical 两遍，打印 PSNR 和 ms/帧，并排对比
 - [x] `scripts\demo-exr.cmd`：同一帧出 PNG16 / float EXR / half EXR，读回比对 + 超曝光对照
 - [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
@@ -121,6 +122,7 @@
 | 物理点扩散核（D054） | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB |
 | 浮点 EXR（D055） | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB、half 82.8 dB；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
 | Metal 光谱（D056） | macOS CI run 80 双绿；真机 M1：设备走 `MTLCopyAllDevices`（默认设备 nil），六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**，单帧 10.8 → **7.1 ms**（含 PNG I/O） |
+| Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s（之前 skip）；Windows 9/9；真机 dB/ms 待测 |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
@@ -145,12 +147,11 @@
 
 ## 下一步（M5）
 
-1. **D057：macOS 质感上 Metal**（颗粒 / 光晕 / 眩光 / 扩散），融合提交在 Mac 上重新打开
-2. **Mac 实测**：`verify-macos.command` 记录 Metal 光谱的 ms/帧与 PSNR
-3. **线性 / OCIO 交付**：EXR 现在是 display-encoded，不是场景线性
-4. **EXR 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+1. **Mac 2.6 MP 实测**：颜色 + 质感都在 GPU 后，用 `test_gpu_texture` / `video` 记录 dB 与 ms/帧
+2. **线性 / OCIO 交付**：EXR 现在是 display-encoded，不是场景线性
+3. **EXR 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感。
 
 ## 需要你决定的事
 

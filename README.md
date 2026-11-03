@@ -117,8 +117,8 @@ from about 160 to **38 ms/frame**, which took a full-frame render from 382 to
 including the separable convolution's summation order, so the two agree at
 **149–178 dB PSNR** (worst deviation 3e-7); `ctest` enforces that too, and a
 device failure falls back to the CPU chain instead of failing the render.
-This backend is still D3D11-only: macOS runs colour on Metal but texture on the
-CPU until the Metal port lands (D057).
+This backend runs on D3D11 on Windows and on Metal on macOS (D057), so both
+platforms keep colour and texture on the GPU.
 
 Since D054 the three spatial effects are sized on the film instead of on the
 frame: `--halation-spread` / `--glare-spread` / `--diffusion-spread` are effective
@@ -287,8 +287,8 @@ docs/           architecture and licensing notes
   offset in nominal frames, so they can drift by a few frames per hour.
 - EXR is uncompressed scanline RGB (float or half) and carries display-encoded
   values, not scene-linear light; there is no OpenImageIO and no zip/PIZ yet.
-- macOS runs the spectral colour chain on Metal (D056) but grain/halation/glare/
-  diffusion still on the CPU until the Metal texture port (D057).
+- Both GPU backends compile their shaders at runtime; macOS keeps IEEE semantics
+  (`fastMathEnabled = NO`) because the spectral tables contain NaN densities.
 - Mallett 2019 spectral upsampling only; hanatos2025 is a later option.
 - `.cube` only; `.3dl` and OCIO configs come later.
 - Windows UI does not exist; the CLI is the first deliverable.
