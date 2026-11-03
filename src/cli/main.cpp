@@ -181,6 +181,11 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli version\n"
         "\n"
+        "  spektra-roll-cli gpu-info\n"
+        "      Report the GPU backend, every device it can see, and whether the\n"
+        "      spectral and texture GPU chains are available. Use this when a\n"
+        "      render unexpectedly falls back to the CPU.\n"
+        "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
         "  * The film model is a pure per-pixel function (no grain, halation,\n"
@@ -2679,6 +2684,22 @@ int main(int argc, char** argv) {
     if (command == "convert") return cmdConvert(args);
     if (command == "video") return cmdVideo(args);
     if (command == "preview") return cmdPreview(args);
+
+    if (command == "gpu-info") {
+        std::printf("%s", sr::GpuFilm::deviceInfo().c_str());
+        std::string reason;
+        if (sr::GpuFilm::available(reason)) {
+            std::printf("spectral-gpu: available\n");
+        } else {
+            std::printf("spectral-gpu: unavailable (%s)\n", reason.c_str());
+        }
+        if (sr::GpuTexture::available(reason)) {
+            std::printf("texture-gpu: available\n");
+        } else {
+            std::printf("texture-gpu: unavailable (%s)\n", reason.c_str());
+        }
+        return 0;
+    }
 
     if (command == "lut" && args.positional.size() >= 2) {
         const std::string& sub = args.positional[1];

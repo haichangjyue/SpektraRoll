@@ -23,6 +23,11 @@ public:
 
     static bool available(std::string& error);
 
+    // Human-readable backend/device report for `spektra-roll-cli gpu-info`.
+    // Includes every Metal device, not just the system default, so a support
+    // report shows why a machine fell back to the CPU.
+    static std::string deviceInfo();
+
     bool configure(const FilmModel& model, const BakeOptions& options, std::string& error);
 
     // Share a GPU device owned by someone else (D049). `device` is an

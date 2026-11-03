@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #if SR_HAVE_D3D11
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <dxgi.h>
 #endif
 
 namespace sr {
@@ -432,11 +434,49 @@ double GpuFilm::lastMilliseconds() const { return impl_->lastMs; }
 
 bool GpuFilm::available(std::string& error) {
 #if !SR_HAVE_D3D11
-    error = "the GPU spectral engine is only available on Windows (D3D11)";
+    error = "the GPU spectral engine is only available on Windows (D3D11) and macOS (Metal)";
     return false;
 #else
     Impl probe;
     return probe.initialize(error);
+#endif
+}
+
+std::string GpuFilm::deviceInfo() {
+#if !SR_HAVE_D3D11
+    return "no GPU backend on this platform\n";
+#else
+    ID3D11Device* device = nullptr;
+    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
+                                 D3D11_SDK_VERSION, &device, &level, nullptr))) {
+        return "D3D11: could not create a device\n";
+    }
+    char header[80] = {};
+    std::snprintf(header, sizeof(header), "D3D11 feature level 0x%X\n",
+                  static_cast<unsigned>(level));
+    std::string info = header;
+
+    IDXGIDevice* dxgi = nullptr;
+    if (SUCCEEDED(device->QueryInterface(__uuidof(IDXGIDevice),
+                                         reinterpret_cast<void**>(&dxgi)))) {
+        IDXGIAdapter* adapter = nullptr;
+        if (SUCCEEDED(dxgi->GetAdapter(&adapter))) {
+            DXGI_ADAPTER_DESC desc{};
+            if (SUCCEEDED(adapter->GetDesc(&desc))) {
+                char name[256] = {};
+                WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name,
+                                    static_cast<int>(sizeof(name)) - 1, nullptr, nullptr);
+                info += "adapter: ";
+                info += name;
+                info += "\n";
+            }
+            adapter->Release();
+        }
+        dxgi->Release();
+    }
+    device->Release();
+    return info;
 #endif
 }
 

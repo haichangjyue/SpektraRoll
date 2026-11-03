@@ -54,6 +54,10 @@ fi
 
 echo
 echo "5/5  光谱 GPU (Metal) 对比 CPU 参考..."
+echo "     GPU 设备信息:"
+./build/spektra-roll-cli gpu-info
+echo "     光谱 GPU parity:"
+./build/test_gpu_film || true
 ./build/spektra-roll-cli gen --out out/mac-frame.png --width 320 --height 180 --bits 16
 ./build/spektra-roll-cli lut apply --engine spectral --scan negative --couplers on \
     --gamut oklch --in out/mac-frame.png --out out/mac-cpu.png

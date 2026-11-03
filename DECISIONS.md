@@ -905,15 +905,19 @@
   - 着色器是 `gpu_film.cpp` 里 HLSL 的逐行 MSL 翻译；**运行时用 `newLibraryWithSource:` 编译**，不做 `.metallib` 构建步骤、不加第三方依赖。
   - 常量缓冲用与 C++ `Params` 完全相同的**标量数组**布局（`float x[4]` 而不是 `float4`），避免 16 字节对齐带来的悄悄错位；`static_assert` 之外靠 parity 测试守住。
   - 输入/输出/常量都用 `MTLResourceStorageModeShared`（Apple silicon 统一内存），`dispatchThreads` 一次提交，`waitUntilCompleted` 后直接 memcpy 读回，不需要 staging。
+  - **`MTLCreateSystemDefaultDevice()` 可能返回 nil**（GUI 会话/多 GPU/虚拟机/后台会话都会遇到），所以先取默认设备，失败再用 `MTLCopyAllDevices()` 取列表里的第一块；两者都没有才回退 CPU。
+  - 新增 `spektra-roll-cli gpu-info`：打印 macOS 版本、架构、`MTLCopyAllDevices` 的每块设备（名称 / low power / headless）、默认设备是否为 nil，以及光谱/质感两条 GPU 链是否可用。排障时先看这一条。
   - CMake：Apple 上 `enable_language(OBJCXX)`、按平台选择 `gpu_film_metal.mm` / `gpu_film.cpp`、链接 Metal + Foundation、给 `.mm` 加 `-fobjc-arc`。
   - 没有 Metal 设备时 `available()` 返回 false，调用方照旧回退 CPU 光谱，不硬失败。
 - **踩到的坑（重点）**：
   - **Metal 默认开 fast math**，编译器会假设没有 NaN，把光谱求和里 `density != density` 的 NaN 保护直接优化掉。光谱表里有几条波长的密度本来就是 NaN（CPU 和 D3D11 都靠这个判断跳过），结果**整帧变 NaN**：普通输出是 NaN，负片路径被 `clamp` 变成全 0。修法是编译 Metal 库时 `MTLCompileOptions.fastMathEnabled = NO`。
-  - 这个坑在 Windows 上完全复现不了，只能靠 macOS CI 的 `gpu_film` 失败输出定位；测试现在会在失败时打印逐像素 GPU/CPU 值并显式检测 NaN。
+  - **真机上的 `MTLCreateSystemDefaultDevice()` 返回 nil**：产品负责人的 MacBook Air M1（Metal 3）上 `verify-macos.command` 报 “no Metal device”，三个 GPU 测试全 skip。默认设备 API 在 macOS 上不是“有 GPU 就一定给”，所以加了 `MTLCopyAllDevices()` 兜底，并用 `gpu-info` 把设备列表打出来；如果两台都用不了，至少能一眼看出是“没枚举到”还是“枚举到但没选上”。
+  - 这个 fast-math 坑在 Windows 上完全复现不了，只能靠 macOS CI 的 `gpu_film` 失败输出定位；测试现在会在失败时打印逐像素 GPU/CPU 值并显式检测 NaN。
   - `test_gpu_chain`（融合提交）在没有 Metal 质感后端时会 attach 失败；现在先查 `GpuTexture::available()`，没有就 skip（D057 之后会自动开始跑）。
 - **实测**：
   - macOS CI（run **80**）：`gpu_film` 从“3.1 s、NaN/偏差 1.0 失败”变成通过；`gpu_texture` / `gpu_chain` 按预期 skip；Windows 全绿。
-  - 本机（Windows）不受影响：9/9 测试、GPU 测试仍真跑。
+  - 本机（Windows）不受影响：9/9 测试、GPU 测试仍真跑；`gpu-info` 输出 `D3D11 feature level 0xB000 / Intel Arc A750 / spectral-gpu: available`。
+  - 真机（MacBook Air M1）：第一次验收时 `MTLCreateSystemDefaultDevice()` 返回 nil，`gpu_film` / `gpu_texture` / `gpu_chain` 全部 skip，CLI 自动回退 CPU 光谱；已加 `MTLCopyAllDevices()` 兜底与 `gpu-info`，等待复测结果。
   - **Mac 上的真实 ms/帧还没有数字**：CI 只跑 17 个像素的 parity。`scripts/verify-macos.command` 新增了 CPU vs Metal 的 PSNR 检查；实际速度要用 `video` 命令在 MacBook 上量。
 - **后果**：
   - macOS 的 `--engine spectral-gpu` 现在是真的 GPU 颜色；UI 里“光谱 GPU（物理，快）”在 Mac 上不再是 CPU 回退。

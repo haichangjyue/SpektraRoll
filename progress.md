@@ -45,8 +45,9 @@
 - 常量缓冲用和 C++ 完全相同的标量数组布局；输入/输出/常量都是 `MTLResourceStorageModeShared`，`dispatchThreads` + `waitUntilCompleted` 后直接 memcpy。
 - CMake：Apple 上启用 OBJCXX、按平台选源文件、链接 Metal + Foundation、`.mm` 用 ARC。
 - 无 Metal 设备时 `available()` 返回 false，自动回退 CPU 光谱。
+- **`MTLCreateSystemDefaultDevice()` 返回 nil 时**用 `MTLCopyAllDevices()` 兜底取第一块设备；两者都没有才回退。新增 `spektra-roll-cli gpu-info`（macOS 版本/架构、设备列表、默认设备、两条 GPU 链是否可用）。
 - 测试：`gpu_film` 在 macOS CI 上**真跑**（17 个样本 vs CPU 参考）；`gpu_chain` 先查 `GpuTexture::available()`，没有 Metal 质感就 skip。
-- `scripts/verify-macos.command` 新增第 5 步：CPU 光谱 vs Metal 光谱出图并打 PSNR。
+- `scripts/verify-macos.command` 新增第 5 步：先打 `gpu-info` 和 `test_gpu_film` 的输出，再做 CPU 光谱 vs Metal 光谱出图并打 PSNR。
 
 ### 二、一条关键决策（详见 DECISIONS D056）
 
@@ -59,6 +60,7 @@
 1. **Metal 默认开 fast math**，编译器按“没有 NaN”优化，把 `density != density` 的保护删掉。光谱表里有几条波长密度是 NaN，于是整帧 NaN：普通路径直接把 NaN 输出，负片路径被 `clamp` 成 0。修法：`MTLCompileOptions.fastMathEnabled = NO`。
 2. 这个坑 Windows 复现不了，只能靠 macOS CI 的失败输出定位；`test_gpu_film` 现在失败时会打印逐样本 GPU/CPU 值并显式检查 NaN。
 3. 融合提交测试在没有 Metal 质感后端时会 attach 失败；先探测 `GpuTexture::available()` 再决定 skip。
+4. **真机 M1 上 `MTLCreateSystemDefaultDevice()` 返回 nil**（Metal 3 明明可用）：默认设备 API 在 macOS 上不是“有 GPU 就给”。加 `MTLCopyAllDevices()` 兜底 + `gpu-info` 诊断；如果仍拿不到，`gpu-info` 会说明是没枚举到、还是枚举到但没选上。
 
 ### 四、实测 / 状态
 
@@ -664,7 +666,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **长片预览代理（D053）** | 30 秒素材代理 8.7 s / 30.6 MB；预览 **960×540 · 100 ms/帧**（原先约 640 px）；重开 48 ms；4 秒素材不变 |
 | **物理点扩散核（D054）** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB；parity 149–178 dB |
 | **浮点 EXR（D055）** | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读写耗时与 PNG 相当；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB（half 82.8）；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
-| **Metal 光谱（D056）** | macOS CI run 80 双绿，`gpu_film` 真跑；`gpu_texture` / `gpu_chain` 按预期 skip；Mac 实际 ms/帧待测 |
+| **Metal 光谱（D056）** | macOS CI run 80 双绿，`gpu_film` 真跑；`gpu_texture` / `gpu_chain` 按预期 skip；真机 M1 首测默认设备返回 nil，已加 `MTLCopyAllDevices` 兜底 + `gpu-info`，待复测；Mac ms/帧待测 |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |

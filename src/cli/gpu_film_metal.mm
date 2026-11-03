@@ -454,9 +454,16 @@ double GpuFilm::lastMilliseconds() const { return impl_->lastMs; }
 
 bool GpuFilm::Impl::initialize(std::string& error) {
     if (device == nil) {
+        // On macOS MTLCreateSystemDefaultDevice() can return nil even when the
+        // machine has a Metal GPU (headless sessions, VMs, some multi-GPU
+        // setups). Fall back to the full device list before giving up.
         device = MTLCreateSystemDefaultDevice();
         if (device == nil) {
-            error = "no Metal device is available";
+            NSArray<id<MTLDevice>>* all = MTLCopyAllDevices();
+            if (all.count > 0) device = all.firstObject;
+        }
+        if (device == nil) {
+            error = "no Metal device is available (MTLCreateSystemDefaultDevice returned nil)";
             return false;
         }
         queue = [device newCommandQueue];
@@ -537,6 +544,35 @@ bool GpuFilm::Impl::ensureCapacity(std::size_t pixels, std::string& error) {
 bool GpuFilm::available(std::string& error) {
     Impl probe;
     return probe.initialize(error);
+}
+
+std::string GpuFilm::deviceInfo() {
+    std::string info;
+    NSOperatingSystemVersion version = [[NSProcessInfo processInfo] operatingSystemVersion];
+    info += "macOS " + std::to_string(version.majorVersion) + "." +
+            std::to_string(version.minorVersion) + "." + std::to_string(version.patchVersion);
+#if defined(__arm64__)
+    info += " (arm64)";
+#else
+    info += " (x86_64)";
+#endif
+    info += "\n";
+
+    NSArray<id<MTLDevice>>* devices = MTLCopyAllDevices();
+    info += "MTLCopyAllDevices: " + std::to_string(devices.count) + "\n";
+    for (id<MTLDevice> candidate in devices) {
+        info += "  - ";
+        info += [candidate.name UTF8String];
+        if (candidate.isLowPower) info += " [low power]";
+        if (candidate.isHeadless) info += " [headless]";
+        info += "\n";
+    }
+
+    id<MTLDevice> fallback = MTLCreateSystemDefaultDevice();
+    info += "MTLCreateSystemDefaultDevice: ";
+    info += fallback != nil ? [fallback.name UTF8String] : "nil";
+    info += "\n";
+    return info;
 }
 
 bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std::string& error) {

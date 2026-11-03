@@ -62,7 +62,7 @@
 - [x] **长片预览代理**（D053）：整段进内存会把最长边压到 960 px 以下时生成 960 px 全 I 帧代理（`out/ui-proxy/`）；30 秒素材预览 **960×540 · 100 ms/帧**，重开 48 ms；4 秒素材仍走内存缓存 1600×898 · 47 ms
 - [x] **真实点扩散核**（D054）：光晕 / 眩光 / 扩散改成“底片微米 + 双高斯重尾核”，按 `--frame-width-mm` 换算，1080p/4K 物理尺寸一致；`--spread-model box` 保留旧盒状模糊；CPU/GPU 用同一组核权重，parity **149–178 dB**；GPU 视频 82.2 ms/帧，`demo-gpu-texture` 2.87×
 - [x] **浮点 / EXR**（D055）：自带最小 OpenEXR 读写（NONE 压缩、float/half、RGB），`.exr` 输出不钳制；`lut apply` / `convert` / `gen` / 序列 `--out-ext exr` 全支持；正常帧读回 **PSNR = inf**，+3 EV 时 33% 像素 >1 被保留；CI 双平台跑 EXR 冒烟
-- [x] **macOS Metal 光谱**（D056）：`gpu_film_metal.mm`，运行时编译 MSL、shared buffer、无设备回退 CPU；macOS CI `gpu_film` 真跑通过；**必须 `fastMathEnabled = NO`**（否则 NaN 保护被优化掉，整帧 NaN）；质感仍 CPU（D057）
+- [x] **macOS Metal 光谱**（D056）：`gpu_film_metal.mm`，运行时编译 MSL、shared buffer、无设备回退 CPU；macOS CI `gpu_film` 真跑通过；**必须 `fastMathEnabled = NO`**（否则 NaN 保护被优化掉，整帧 NaN）；真机 M1 首次出现 `MTLCreateSystemDefaultDevice` 返回 nil，已加 `MTLCopyAllDevices` 兜底与 `gpu-info`；质感仍 CPU（D057）
 - [x] `scripts\demo-spread.cmd`：同一帧 / 同一段视频各渲 box 与 physical 两遍，打印 PSNR 和 ms/帧，并排对比
 - [x] `scripts\demo-exr.cmd`：同一帧出 PNG16 / float EXR / half EXR，读回比对 + 超曝光对照
 - [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
