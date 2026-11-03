@@ -77,11 +77,6 @@ void putU32(std::vector<unsigned char>& out, uint32_t value) {
 // predictor / zip block layout; uncompressed files open everywhere and the
 // float path is about not clamping, not about disk size.
 
-void putU16le(std::vector<unsigned char>& out, uint16_t value) {
-    out.push_back(static_cast<unsigned char>(value));
-    out.push_back(static_cast<unsigned char>(value >> 8));
-}
-
 void putU32le(std::vector<unsigned char>& out, uint32_t value) {
     out.push_back(static_cast<unsigned char>(value));
     out.push_back(static_cast<unsigned char>(value >> 8));
@@ -124,8 +119,11 @@ uint64_t readU64le(const std::vector<unsigned char>& data, size_t pos) {
            (static_cast<uint64_t>(readU32le(data, pos + 4)) << 32);
 }
 
-float readFloatLe(const std::vector<unsigned char>& data, size_t pos) {
-    const uint32_t bits = readU32le(data, pos);
+float readFloatLeAt(const unsigned char* data, size_t pos) {
+    const uint32_t bits = static_cast<uint32_t>(data[pos]) |
+                          (static_cast<uint32_t>(data[pos + 1]) << 8) |
+                          (static_cast<uint32_t>(data[pos + 2]) << 16) |
+                          (static_cast<uint32_t>(data[pos + 3]) << 24);
     float value = 0.0f;
     std::memcpy(&value, &bits, sizeof(value));
     return value;
@@ -194,11 +192,55 @@ float halfToFloat(uint16_t value) {
     return result;
 }
 
-bool writeExr(const std::string& path, const Image& image, bool half, std::string& error) {
+// EXR ZIP pre/post-processing, matching ImfZip: split the block into its even
+// bytes (first half) and odd bytes (second half), then apply a delta predictor.
+// Decompression reverses both steps in the opposite order.
+void exrZipSplit(std::vector<unsigned char>& data) {
+    const std::vector<unsigned char> copy(data);
+    const size_t half = (data.size() + 1) / 2;
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (i % 2 == 0) {
+            data[i / 2] = copy[i];
+        } else {
+            data[half + i / 2] = copy[i];
+        }
+    }
+}
+
+void exrZipMerge(std::vector<unsigned char>& data) {
+    const std::vector<unsigned char> copy(data);
+    const size_t half = (data.size() + 1) / 2;
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = (i % 2 == 0) ? copy[i / 2] : copy[half + i / 2];
+    }
+}
+
+void exrZipPredict(std::vector<unsigned char>& data) {
+    if (data.empty()) return;
+    int previous = data[0];
+    for (size_t i = 1; i < data.size(); ++i) {
+        const int current = data[i];
+        data[i] = static_cast<unsigned char>(current - previous + 384);
+        previous = current;
+    }
+}
+
+void exrZipUnpredict(std::vector<unsigned char>& data) {
+    for (size_t i = 1; i < data.size(); ++i) {
+        data[i] = static_cast<unsigned char>(static_cast<int>(data[i - 1]) +
+                                             static_cast<int>(data[i]) - 128);
+    }
+}
+
+bool writeExr(const std::string& path, const Image& image, bool half, bool zip,
+              std::string& error) {
     const int width = image.width;
     const int height = image.height;
     const int sampleBytes = half ? 2 : 4;
     const size_t rowBytes = static_cast<size_t>(width) * 3 * static_cast<size_t>(sampleBytes);
+    // ZIP stores 16 scanlines per chunk; NONE stores one per scanline (D059).
+    const int chunkRows = zip ? 16 : 1;
+    const int chunkCount = (height + chunkRows - 1) / chunkRows;
 
     std::vector<unsigned char> header;
     putU32le(header, 20000630u);  // magic
@@ -219,7 +261,8 @@ bool writeExr(const std::string& path, const Image& image, bool half, std::strin
     channels.push_back(0);
     putAttribute(header, "channels", "chlist", channels);
 
-    putAttribute(header, "compression", "compression", std::vector<unsigned char>{0});
+    putAttribute(header, "compression", "compression",
+                 std::vector<unsigned char>{static_cast<unsigned char>(zip ? 3 : 0)});
 
     std::vector<unsigned char> window;
     putU32le(window, 0);
@@ -255,10 +298,63 @@ bool writeExr(const std::string& path, const Image& image, bool half, std::strin
 
     header.push_back(0);  // end of attributes
 
+    // Build the chunks first: the offset table needs every packed size, and it
+    // is written before the data.
+    std::vector<std::vector<unsigned char>> chunks;
+    chunks.reserve(static_cast<size_t>(chunkCount));
+    for (int chunk = 0; chunk < chunkCount; ++chunk) {
+        const int y0 = chunk * chunkRows;
+        const int rows = std::min(chunkRows, height - y0);
+        std::vector<unsigned char> raw(static_cast<size_t>(rows) * rowBytes);
+        size_t p = 0;
+        for (int r = 0; r < rows; ++r) {
+            const int y = y0 + r;
+            for (int channel = 2; channel >= 0; --channel) {  // stored B, G, R
+                for (int x = 0; x < width; ++x) {
+                    const float value = image.at(x, y)[channel];
+                    if (half) {
+                        const uint16_t sample = floatToHalf(value);
+                        raw[p++] = static_cast<unsigned char>(sample);
+                        raw[p++] = static_cast<unsigned char>(sample >> 8);
+                    } else {
+                        uint32_t bits = 0;
+                        std::memcpy(&bits, &value, sizeof(bits));
+                        raw[p++] = static_cast<unsigned char>(bits);
+                        raw[p++] = static_cast<unsigned char>(bits >> 8);
+                        raw[p++] = static_cast<unsigned char>(bits >> 16);
+                        raw[p++] = static_cast<unsigned char>(bits >> 24);
+                    }
+                }
+            }
+        }
+
+        if (zip) {
+            // Prepare a copy: when compression does not help we must store the
+            // original bytes, not the predictor/interleaved ones (the reader
+            // treats packedSize == rawSize as uncompressed).
+            std::vector<unsigned char> prepared(raw);
+            exrZipSplit(prepared);
+            exrZipPredict(prepared);
+            int compressedLength = 0;
+            unsigned char* compressed = stbi_zlib_compress(
+                prepared.data(), static_cast<int>(prepared.size()), &compressedLength, 8);
+            if (compressed != nullptr && compressedLength > 0 &&
+                static_cast<size_t>(compressedLength) < raw.size()) {
+                chunks.emplace_back(compressed, compressed + compressedLength);
+            } else {
+                chunks.push_back(std::move(raw));
+            }
+            std::free(compressed);
+        } else {
+            chunks.push_back(std::move(raw));
+        }
+    }
+
     std::vector<unsigned char> offsets;
-    const uint64_t firstOffset = header.size() + static_cast<uint64_t>(8 * height);
-    for (int y = 0; y < height; ++y) {
-        putU64le(offsets, firstOffset + static_cast<uint64_t>(y) * (8 + rowBytes));
+    uint64_t offset = header.size() + static_cast<uint64_t>(chunkCount) * 8;
+    for (const auto& chunk : chunks) {
+        putU64le(offsets, offset);
+        offset += 8 + chunk.size();
     }
 
     std::FILE* file = std::fopen(path.c_str(), "wb");
@@ -269,23 +365,14 @@ bool writeExr(const std::string& path, const Image& image, bool half, std::strin
     bool ok = std::fwrite(header.data(), 1, header.size(), file) == header.size();
     ok = ok && std::fwrite(offsets.data(), 1, offsets.size(), file) == offsets.size();
 
-    std::vector<unsigned char> row;
-    row.reserve(8 + rowBytes);
-    for (int y = 0; y < height && ok; ++y) {
-        row.clear();
-        putU32le(row, static_cast<uint32_t>(y));
-        putU32le(row, static_cast<uint32_t>(rowBytes));
-        for (int channel = 2; channel >= 0; --channel) {  // stored B, G, R
-            for (int x = 0; x < width; ++x) {
-                const float* px = image.at(x, y);
-                if (half) {
-                    putU16le(row, floatToHalf(px[channel]));
-                } else {
-                    putFloatLe(row, px[channel]);
-                }
-            }
-        }
-        ok = std::fwrite(row.data(), 1, row.size(), file) == row.size();
+    std::vector<unsigned char> block;
+    for (int chunk = 0; chunk < chunkCount && ok; ++chunk) {
+        block.clear();
+        block.reserve(8 + chunks[chunk].size());
+        putU32le(block, static_cast<uint32_t>(chunk * chunkRows));
+        putU32le(block, static_cast<uint32_t>(chunks[chunk].size()));
+        block.insert(block.end(), chunks[chunk].begin(), chunks[chunk].end());
+        ok = std::fwrite(block.data(), 1, block.size(), file) == block.size();
     }
 
     if (std::fclose(file) != 0) ok = false;
@@ -381,8 +468,8 @@ bool readExr(const std::string& path, Image& out, std::string& error) {
         pos = end;
     }
 
-    if (compression != 0) {
-        error = "only uncompressed OpenEXR files are supported";
+    if (compression != 0 && compression != 3) {
+        error = "only NONE and ZIP compressed OpenEXR files are supported";
         return false;
     }
     const int width = xMax - xMin + 1;
@@ -409,7 +496,9 @@ bool readExr(const std::string& path, Image& out, std::string& error) {
         return false;
     }
 
-    if (pos + static_cast<size_t>(height) * 8 > data.size()) {
+    const int chunkRows = compression == 3 ? 16 : 1;
+    const int chunkCount = (height + chunkRows - 1) / chunkRows;
+    if (pos + static_cast<size_t>(chunkCount) * 8 > data.size()) {
         error = "damaged OpenEXR offset table: " + path;
         return false;
     }
@@ -417,40 +506,80 @@ bool readExr(const std::string& path, Image& out, std::string& error) {
     out.height = height;
     out.pixels.assign(static_cast<size_t>(width) * height * 3, 0.0f);
 
-    for (int row = 0; row < height; ++row) {
-        const uint64_t offset = readU64le(data, pos + static_cast<size_t>(row) * 8);
+    size_t rowBytesTotal = 0;
+    for (const Channel& channel : channels) {
+        rowBytesTotal += static_cast<size_t>(width) * (channel.type == 1 ? 2 : 4);
+    }
+
+    for (int chunk = 0; chunk < chunkCount; ++chunk) {
+        const uint64_t offset = readU64le(data, pos + static_cast<size_t>(chunk) * 8);
         if (offset + 8 > data.size()) {
-            error = "damaged OpenEXR scanline: " + path;
+            error = "damaged OpenEXR chunk: " + path;
             return false;
         }
-        const int y = static_cast<int>(readU32le(data, static_cast<size_t>(offset)));
-        if (y < 0 || y >= height) {
-            error = "damaged OpenEXR scanline row: " + path;
+        const int y0 = static_cast<int>(readU32le(data, static_cast<size_t>(offset)));
+        const uint32_t packedSize = readU32le(data, static_cast<size_t>(offset) + 4);
+        if (y0 < 0 || y0 >= height) {
+            error = "damaged OpenEXR chunk row: " + path;
             return false;
         }
-        size_t p = static_cast<size_t>(offset) + 8;
-        for (size_t c = 0; c < channels.size(); ++c) {
-            const int bytes = channels[c].type == 1 ? 2 : 4;
-            const size_t channelBytes = static_cast<size_t>(width) * static_cast<size_t>(bytes);
-            if (p + channelBytes > data.size()) {
-                error = "damaged OpenEXR pixel data: " + path;
+        const size_t chunkStart = static_cast<size_t>(offset) + 8;
+        if (chunkStart + packedSize > data.size()) {
+            error = "damaged OpenEXR pixel data: " + path;
+            return false;
+        }
+
+        const int rows = std::min(chunkRows, height - y0);
+        const size_t rawSize = static_cast<size_t>(rows) * rowBytesTotal;
+        std::vector<unsigned char> inflated;
+        const unsigned char* raw = &data[chunkStart];
+        if (compression == 3 && packedSize != rawSize) {
+            int decodedLength = 0;
+            char* decoded = stbi_zlib_decode_malloc_guesssize_headerflag(
+                reinterpret_cast<const char*>(raw), static_cast<int>(packedSize),
+                static_cast<int>(rawSize), &decodedLength, 1);
+            if (decoded == nullptr || decodedLength < 0 ||
+                static_cast<size_t>(decodedLength) < rawSize) {
+                std::free(decoded);
+                error = "damaged OpenEXR ZIP block: " + path;
                 return false;
             }
-            int target = -1;
-            if (static_cast<int>(c) == indexR) target = 0;
-            if (static_cast<int>(c) == indexG) target = 1;
-            if (static_cast<int>(c) == indexB) target = 2;
-            if (target >= 0) {
-                for (int x = 0; x < width; ++x) {
-                    const float value = channels[c].type == 1
-                                            ? halfToFloat(static_cast<uint16_t>(
-                                                  data[p + static_cast<size_t>(x) * 2] |
-                                                  (data[p + static_cast<size_t>(x) * 2 + 1] << 8)))
-                                            : readFloatLe(data, p + static_cast<size_t>(x) * 4);
-                    out.pixels[(static_cast<size_t>(y) * width + x) * 3 + target] = value;
+            inflated.assign(decoded, decoded + decodedLength);
+            std::free(decoded);
+            exrZipUnpredict(inflated);
+            exrZipMerge(inflated);
+            raw = inflated.data();
+        }
+
+        size_t rowOffset = 0;
+        for (int r = 0; r < rows; ++r) {
+            const int y = y0 + r;
+            size_t channelOffset = rowOffset;
+            for (size_t c = 0; c < channels.size(); ++c) {
+                const int bytes = channels[c].type == 1 ? 2 : 4;
+                const size_t channelBytes = static_cast<size_t>(width) * bytes;
+                if (channelOffset + channelBytes > rawSize) {
+                    error = "damaged OpenEXR pixel data: " + path;
+                    return false;
                 }
+                int target = -1;
+                if (static_cast<int>(c) == indexR) target = 0;
+                if (static_cast<int>(c) == indexG) target = 1;
+                if (static_cast<int>(c) == indexB) target = 2;
+                if (target >= 0) {
+                    for (int x = 0; x < width; ++x) {
+                        const float value =
+                            bytes == 2
+                                ? halfToFloat(static_cast<uint16_t>(
+                                      raw[channelOffset + static_cast<size_t>(x) * 2] |
+                                      (raw[channelOffset + static_cast<size_t>(x) * 2 + 1] << 8)))
+                                : readFloatLeAt(raw, channelOffset + static_cast<size_t>(x) * 4);
+                        out.pixels[(static_cast<size_t>(y) * width + x) * 3 + target] = value;
+                    }
+                }
+                channelOffset += channelBytes;
             }
-            p += channelBytes;
+            rowOffset += rowBytesTotal;
         }
     }
     return true;
@@ -580,13 +709,13 @@ bool loadImage(const std::string& path, Image& out, std::string& error, int* sou
 }
 
 bool saveImage(const std::string& path, const Image& image, std::string& error, int bits,
-               bool exrHalf) {
+               bool exrHalf, bool exrZip) {
     if (!image.valid()) {
         error = "refusing to write an empty image";
         return false;
     }
     if (extensionOf(path) == ".exr") {
-        return writeExr(path, image, exrHalf, error);
+        return writeExr(path, image, exrHalf, exrZip, error);
     }
     if (bits != 8 && bits != 16) {
         error = "PNG output supports 8 or 16 bits; use a .exr path for 32-bit float";

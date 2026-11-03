@@ -33,9 +33,10 @@ bool loadImage(const std::string& path, Image& out, std::string& error,
                int* sourceBits = nullptr);
 // `bits` is 8 or 16 for PNG. A path ending in `.exr` is always written as
 // OpenEXR: 32-bit float by default, 16-bit half with `exrHalf`. Unlike PNG the
-// EXR path does not clamp, so out-of-range values survive (D055).
+// EXR path does not clamp, so out-of-range values survive (D055). EXR is
+// ZIP-compressed by default; `exrZip = false` writes uncompressed scanlines.
 bool saveImage(const std::string& path, const Image& image, std::string& error, int bits = 8,
-               bool exrHalf = false);
+               bool exrHalf = false, bool exrZip = true);
 
 // Transfer function of the values on hand, for float delivery (D058).
 enum class FloatTransfer { Srgb, Pq, Hlg };

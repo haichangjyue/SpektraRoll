@@ -208,6 +208,7 @@ X:\agent\SpektraRoll\scripts\demo-exr.cmd
 自己用的时候：
 
 - `--out 名字.exr` 就是浮点输出；加 `--exr-half` 写 half
+- EXR 默认 **ZIP 压缩**（实拍素材小 20–30%，合成图表几乎不值钱）；`--exr-raw` 关闭
 - 加 `--exr-linear` 写**线性光**（1.0 = 白；PQ 素材配 `--exr-trc pq --peak 1000`，1.0 = 峰值尼特）
 - 一整段序列：`lut apply --lut x.cube --in-dir frames --out-dir frames_exr --out-ext exr [--exr-linear]`
 - EXR 也能当输入：`lut apply --lut x.cube --in frame.exr --out frame.png --bits 16`
@@ -284,6 +285,7 @@ build-ui\spektra-roll-ui.exe --preview-selftest
 
 ```
 SpektraRoll/scripts/verify-macos.command
+SpektraRoll/scripts/bench-macos.command     # 可选：2.6 MP 的 CPU vs Metal 计时
 ```
 
 它会编译、跑单元测试、烘一张 Portra 400 LUT 并和参考对比；如果装了 `ffmpeg`，

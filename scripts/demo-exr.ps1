@@ -123,7 +123,8 @@ Write-Host "  * linear EXR 是同一帧的线性光: 0.5 灰会变成约 0.21, 1
 Write-Host "  * +3 EV 的 EXR 里约 1/3 的像素大于 1 (最亮约 5.3), 在 Resolve/Nuke 里还能拉回来"
 Write-Host "  * 把 linear EXR 拖进 DaVinci Resolve: 它按线性解读, 不要再套 sRGB 输入变换"
 Write-Host "  * 普通 EXR 是显示编码值, 进调色软件要设 sRGB (或 PQ) 输入变换"
-Write-Host "  * EXR 目前是不压缩 scanline; half 体积约为 float 的一半"
+Write-Host "  * EXR 目前默认 ZIP 压缩（见体积对比）；half 体积约为 float 的一半"
+Write-Host "  * ZIP 对平滑画面收益大，对颗粒重的 float 收益有限；想更小可以用 --exr-half"
 Write-Host ""
 Write-Host "生成的文件:" -ForegroundColor Green
 Write-Host "  $root\out\exr-frame.exr        (float, 带质感)"

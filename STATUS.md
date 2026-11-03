@@ -65,6 +65,7 @@
 - [x] **macOS Metal 光谱**（D056）：`gpu_film_metal.mm`，运行时编译 MSL、shared buffer、无设备回退 CPU；macOS CI `gpu_film` 真跑通过；**必须 `fastMathEnabled = NO`**（否则 NaN 保护被优化掉，整帧 NaN）；真机 M1 用 `MTLCopyAllDevices` 兜底（默认设备返回 nil），parity 最差 2.99e-4、CPU vs Metal 115.44 dB
 - [x] **macOS Metal 质感**（D057）：14 个 pass 全部翻成 MSL；整条链一个 command buffer、参数/taps 用 `setBytes` 内联；融合路径借用 film 的 `MTLBuffer`；macOS CI 9/9（`gpu_texture` 2.11 s、`gpu_chain` 2.10 s，之前 skip）；真机九组逐位相同、融合 134.8 dB
 - [x] **线性浮点交付**（D058）：`--exr-linear [--exr-trc srgb|pq|hlg] [--peak]`，1.0 = 白/峰值，sRGB 解码不钳制；`lut apply` / `convert` / `gen` / 序列都支持；同帧 display 0.016..0.887 → linear 0.0012..0.762
+- [x] **EXR ZIP 压缩**（D059）：默认 ZIP（16 行/chunk），`--exr-raw` 关闭；stb zlib、无新依赖；读取器支持 NONE+ZIP；实拍 −28%、带颗粒 −21%、half+zip 9.81 MB，ffmpeg 交叉验证 91.5/92.6 dB
 - [x] `scripts\demo-spread.cmd`：同一帧 / 同一段视频各渲 box 与 physical 两遍，打印 PSNR 和 ms/帧，并排对比
 - [x] `scripts\demo-exr.cmd`：同一帧出 PNG16 / float EXR / half EXR，读回比对 + 超曝光对照
 - [x] `scripts\demo-gpu-texture.cmd`：同一条命令跑 CPU / GPU 两遍，打印 ms/帧、加速比和编码后 PSNR
@@ -125,6 +126,7 @@
 | Metal 光谱（D056） | macOS CI run 80 双绿；真机 M1：设备走 `MTLCopyAllDevices`（默认设备 nil），六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**，单帧 10.8 → **7.1 ms**（含 PNG I/O） |
 | Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1 九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms** |
 | 线性 EXR（D058） | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
+| EXR ZIP（D059） | 已调色帧 31.49 → **22.73 MB（−28%）**；带颗粒 ≈0%；half **9.82 MB（−38%）**；合成图表 −98.6%；ffmpeg 解码 92.6 dB |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
@@ -149,11 +151,11 @@
 
 ## 下一步（M5）
 
-1. **Mac 2.6 MP 实测**：颜色 + 质感都在 GPU 后，用 `test_gpu_texture` / `video` 记录 dB 与 ms/帧
-2. **OCIO**：线性 EXR 只能按线性解读，还没有 ACES / 相机矩阵 / 显示变换
-3. **EXR 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+1. **Mac 2.6 MP 实测**：双击 `scripts\bench-macos.command`，把四组 ms 发回来
+2. **OCIO**：先定依赖策略（引入 OpenColorIO 还是 OCIO-lite）
+3. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP。
 
 ## 需要你决定的事
 

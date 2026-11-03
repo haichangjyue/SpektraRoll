@@ -97,6 +97,18 @@ int main() {
     check(loadedHalf.pixels[0] < 0.0f && loadedHalf.pixels[1] > 1.0f,
           "half EXR keeps values outside 0..1");
 
+    // ZIP is the default; uncompressed scanlines must still round trip (D059).
+    const std::string pathExrRaw = (base / "spektra_roll_test_raw.exr").string();
+    check(sr::saveImage(pathExrRaw, wide, error, 8, false, false), "uncompressed EXR writes");
+    sr::Image loadedRaw;
+    int bitsRaw = 0;
+    check(sr::loadImage(pathExrRaw, loadedRaw, error, &bitsRaw), "uncompressed EXR reads");
+    bool rawExact = loadedRaw.pixels.size() == wide.pixels.size();
+    for (size_t i = 0; rawExact && i < wide.pixels.size(); ++i) {
+        rawExact = wide.pixels[i] == loadedRaw.pixels[i];
+    }
+    check(rawExact, "uncompressed EXR round trip is exact");
+
     check(sr::saveImage(pathClamp, wide, error, 16), "16-bit PNG still writes");
     sr::Image clamped;
     check(sr::loadImage(pathClamp, clamped, error), "16-bit PNG reads back");
@@ -140,10 +152,33 @@ int main() {
         check(std::fabs(hlgImage.pixels[0] - 0.25f) < 1e-5f, "HLG round trips to 0.25");
     }
 
+    // Random samples defeat ZIP, which exercises the "store the raw block"
+    // fallback: it must store the original bytes, not the predictor output.
+    const std::string pathExrNoise = (base / "spektra_roll_test_noise.exr").string();
+    sr::Image noise;
+    noise.width = 64;
+    noise.height = 64;
+    noise.pixels.resize(static_cast<size_t>(noise.width) * noise.height * 3);
+    unsigned int state = 12345u;
+    for (float& value : noise.pixels) {
+        state = state * 1664525u + 1013904223u;
+        value = static_cast<float>(state >> 8) / 16777216.0f;
+    }
+    check(sr::saveImage(pathExrNoise, noise, error), "incompressible EXR writes");
+    sr::Image loadedNoise;
+    check(sr::loadImage(pathExrNoise, loadedNoise, error), "incompressible EXR reads");
+    bool noiseExact = loadedNoise.pixels.size() == noise.pixels.size();
+    for (size_t i = 0; noiseExact && i < noise.pixels.size(); ++i) {
+        noiseExact = noise.pixels[i] == loadedNoise.pixels[i];
+    }
+    check(noiseExact, "uncompressed fallback blocks round trip exactly");
+
     std::remove(path16.c_str());
     std::remove(path8.c_str());
     std::remove(pathExr.c_str());
     std::remove(pathExrHalf.c_str());
+    std::remove(pathExrRaw.c_str());
+    std::remove(pathExrNoise.c_str());
     std::remove(pathClamp.c_str());
 
     if (g_failures == 0) {

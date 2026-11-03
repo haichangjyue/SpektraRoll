@@ -186,8 +186,9 @@ spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out grad
 spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded.exr
 spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded_half.exr --exr-half
 spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded_linear.exr --exr-linear
+spektra-roll-cli lut apply --lut portra400_endura.cube --in chart.png --out graded_raw.exr --exr-raw
 spektra-roll-cli lut apply --lut portra400_endura.cube --in-dir frames --out-dir frames_exr --out-ext exr
-# EXR input works too (uncompressed scanline, FLOAT or HALF)
+# EXR input works too (FLOAT or HALF, NONE or ZIP)
 spektra-roll-cli lut apply --lut portra400_endura.cube --in graded.exr --out back.png --bits 16
 
 # compare against a reference bake
@@ -254,7 +255,7 @@ to the M2 colour work (D021).
 ```
 src/core/       C++20 library, no UI, no I/O policy
   lut3d         .cube parse / write + tetrahedral/trilinear interpolation
-  image         stb decode + 8/16-bit PNG + uncompressed float/half EXR + test chart
+  image         stb decode + 8/16-bit PNG + float/half EXR (ZIP) + test chart
   profile       spektrafilm profile JSON -> spectral data
   film_model    M1 spectral chain: upsampling, curves, print, scan
   metrics       PSNR and CIE76 delta E for parity checks
@@ -290,9 +291,10 @@ docs/           architecture and licensing notes
   when writing EXR.
 - Source timecode is copied and offset by `--start`; drop-frame sources are
   offset in nominal frames, so they can drift by a few frames per hour.
-- EXR is uncompressed scanline RGB (float or half). It carries display-encoded
-  values by default; `--exr-linear` writes linear light instead (1.0 = white, or
-  `--peak` nits for PQ). There is no OpenImageIO and no zip/PIZ yet.
+- EXR is scanline RGB (float or half), ZIP-compressed by default (`--exr-raw`
+  disables it). It carries display-encoded values by default; `--exr-linear`
+  writes linear light instead (1.0 = white, or `--peak` nits for PQ). There is
+  no OpenImageIO and no PIZ/DWA yet.
 - Both GPU backends compile their shaders at runtime; macOS keeps IEEE semantics
   (`fastMathEnabled = NO`) because the spectral tables contain NaN densities.
 - Mallett 2019 spectral upsampling only; hanatos2025 is a later option.

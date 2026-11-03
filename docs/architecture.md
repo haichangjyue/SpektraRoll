@@ -92,13 +92,13 @@ image's white to `--peak` nits (default 1000) and writes ST 2084 code values,
 `--hdr hlg` writes BT.2100 HLG. The film model is untouched, so SDR and HDR
 renders share every earlier stage.
 
-Delivery (D055) is 8/16-bit PNG or OpenEXR. The EXR writer emits uncompressed
-scanline RGB with FLOAT or HALF samples, so nothing is clamped to 0..1 and a
-super-white HDR frame survives. By default it carries display-encoded values
-(sRGB or PQ/HLG code values); `--exr-linear` (D058) converts them to linear
-light first, with 1.0 mapped to white (`--peak` nits for PQ) and the sRGB curve
-evaluated unclamped. The reader accepts the same subset. Compression (ZIP/PIZ)
-is still open.
+Delivery (D055) is 8/16-bit PNG or OpenEXR. The EXR writer emits scanline RGB
+with FLOAT or HALF samples, so nothing is clamped to 0..1 and a super-white HDR
+frame survives. EXR is ZIP-compressed by default (D059; `--exr-raw` disables
+it), and the reader accepts NONE and ZIP. By default the samples stay
+display-encoded (sRGB or PQ/HLG code values); `--exr-linear` (D058) converts
+them to linear light first, with 1.0 mapped to white (`--peak` nits for PQ) and
+the sRGB curve evaluated unclamped. PIZ / DWA compression is still open.
 
 The per-pixel chain has two GPU implementations behind one `GpuFilm` interface:
 a D3D11 compute shader on Windows (D046) and a Metal kernel on macOS (D056).
