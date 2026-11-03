@@ -50,9 +50,10 @@
 | **D062** | OpenColorIO | 可选依赖（`SR_WITH_OCIO`）；MinGW 自建静态 OCIO 2.4.2；`ocio-info` / `lut bake --ocio-input` / `convert --ocio-*`；OCIO sRGB vs 内置 **118.24 dB**、Apple Log **93.60 dB** |
 
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
-- 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 9/9 测试。
+- CI：本轮 D061 的 run **93 / 95**、D062 的 run **97** Windows + macOS 全绿；macOS 从 run 97 起用 Homebrew 的 OpenColorIO 真跑 `test_ocio`，Windows 跑 stub 路径。
+- 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 **10/10** 测试。
 
-### 关键决策（D056–D060）
+### 关键决策（D056–D062）
 
 | 编号 | 决策 | 结论 |
 |---|---|---|
@@ -116,7 +117,8 @@
 | OCIO `Apple Log` vs 内置 Apple Log | **93.60 dB**（两条独立实现互证） |
 | OCIO `ARRI LogC3 (EI800)` LUT vs 内置 `--input logc3` | **63.89 dB**，max 1.1e-2（ACES 的 D60→D65 适应） |
 | ACES 2.0 显示器变换 | `sRGB - Display` / `ACES 2.0 - SDR 100 nits (Rec.709)` 正常出图 |
-| `ocio-info` | 自动选中 `Linear Rec.709 (sRGB)`；列出 60+ 颜色空间与 8 个显示器 |
+| `ocio-info` | 自动选中 `Linear Rec.709 (sRGB)`；内置配置列出 **52 个颜色空间 / 8 个显示器** |
+| CI | run **97** Windows + macOS 双绿；macOS 用 Homebrew 的 OCIO 真跑 `test_ocio`，Windows 跑 stub 并断言那句报错 |
 | 回归 | M1 parity 88.07 dB、9 个原测试全过、UI 第二次预览 48 ms |
 
 ### 四、怎么用
@@ -144,7 +146,8 @@
 - [ ] **UI 的下拉**：界面还没暴露 OCIO（构建也故意不链 OCIO）
 - [ ] **光谱 GPU 的 OCIO**：现在回退 CPU 光谱
 - [ ] `--exr-linear` 还不认 OCIO 的显示变换
-- [ ] Windows CI 不装 OCIO（跑 stub 路径）；macOS CI 用 Homebrew 的 OCIO 真跑
+
+> 现状：Windows CI 不装 OCIO（跑 stub 路径并断言那句报错），macOS CI 用 Homebrew 的 OCIO 真跑 `test_ocio`——两边都覆盖到了。
 
 ---
 
@@ -1220,8 +1223,8 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 | 阶段 | 内容 |
 |---|---|
-| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色/质感、✅ 融合提交、✅ 并行分段、✅ 预览代理、✅ 真实点扩散核、✅ 浮点/线性 EXR、✅ EXR ZIP；待做：OCIO、PIZ/DWA |
-| **M5** | ✅ Qt 6 桌面界面主体、✅ 预览实时化、✅ macOS Metal 光谱、✅ macOS Metal 质感；待做：OFX 插件、渲染农场命令行、macOS Qt 打包 |
+| **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色/质感、✅ 融合提交、✅ 并行分段、✅ 预览代理、✅ 真实点扩散核、✅ 浮点/线性 EXR、✅ EXR ZIP、✅ OpenColorIO（D062）；待做：PIZ/DWA |
+| **M5** | ✅ Qt 6 桌面界面主体、✅ 预览实时化、✅ macOS Metal 光谱、✅ macOS Metal 质感；待做：UI 的 OCIO 下拉、OFX 插件、渲染农场命令行、macOS Qt 打包 |
 
 ### 🟢 还没开始、但必须记住的欠账
 
@@ -1235,7 +1238,8 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 - [x] ~~颜色与质感仍是两次 GPU 提交~~ → D049 融合提交，207.1 ms/帧；D050/D051 修完管道到 **79.2 ms/帧**
 - [ ] **CI 上没有真实 GPU** → `gpu_film` / `gpu_texture` / `gpu_chain` 在公有 runner 上会 skip，着色器退化只能在本机或真机 CI 发现
 - [x] ~~**macOS 没有 GPU 物理路径**~~ → D056 Metal 光谱、D057 Metal 质感，两条链都在 GPU
-- [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；Apple Log 是手写解码，不是 OCIO 配置
+- [x] ~~**没有色彩管理**~~ → D062 可选 OpenColorIO：任意相机/ACES 空间当 LUT 输入域、ACES 2.0 显示器变换；没有 OCIO 的构建行为不变
+- [ ] **OCIO 还没进 UI / GPU** → 界面下拉与 `spectral-gpu` 的 OCIO 都还没有（GPU 会回退 CPU 光谱）
 - [x] ~~**浮点 / EXR**~~ → D055 已完成（float / half EXR，读回逐位一致，不钳制）
 - [x] ~~**空间效果不是物理核**~~ → D054 微米 + 双高斯重尾核；box 模型保留对照
 - [x] ~~没有视频解码的硬件加速~~ → 实测 QSV 解码+下载 21.8 ms/帧 vs 软解 19.5 ms/帧，**不值得做**；QSV 编码在管道修好后有意义（H.264 77 vs 104 ms/帧）
@@ -1283,6 +1287,11 @@ OCIO    X:\agent\tools\ocio                      OpenColorIO 2.4.2 静态前缀�
 7. **调试开关与环境**
    → `SPEKTRA_VIDEO_DEBUG=1` 打印视频分段耗时；`SPEKTRA_PREVIEW_DEBUG=1` 打印预览服务端的 look/open/frame 耗时；预览代理在 `out/ui-proxy/`（可随时删，会按素材重建）。
 
+8. **OpenColorIO 只在这台机器是自建的**（D062）
+   → 前缀 `X:\agent\tools\ocio`（静态、自包含），用 `tools\ocio\build-ocio.cmd` 重建；两个 MinGW 补丁在 `tools/ocio/mingw.patch` + 构建时给 yaml-cpp 补 `<cstdint>`。CI 的 Windows 不装 OCIO（跑 stub），macOS 用 Homebrew 的包。
+   → **UI 的构建参数是 `-DSR_WITH_OCIO=OFF`**：Qt 的 GCC 13.1 连不上 GCC 16.2 编的 OCIO 静态库。别"顺手"打开。
+   → 改 OCIO 相关代码后至少跑一次 `.\build\spektra-roll-cli.exe ocio-info`，确认自动选中的是 `Linear Rec.709 (sRGB)`。
+
 ### 标准构建命令（脚本已经封装，这是底层等价写法）
 
 ```powershell
@@ -1291,6 +1300,8 @@ cmake -S . -B build -G Ninja `
   -DCMAKE_MAKE_PROGRAM=X:\agent\tools\ninja\ninja.exe `
   -DCMAKE_CXX_COMPILER=X:\agent\tools\mingw64\bin\g++.exe `
   -DCMAKE_BUILD_TYPE=Release
+# OpenColorIO: cmake 自动找 find_package 或 X:/agent/tools/ocio；
+# 想强制关掉就加 -DSR_WITH_OCIO=OFF（会编 stub，功能不变）
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
@@ -1322,10 +1333,13 @@ macOS 上双击 `scripts\verify-macos.command`（需要 `xcode-select --install`
 ```powershell
 cd X:\agent\SpektraRoll
 .\build\spektra-roll-cli.exe version        # 应输出 spektra-roll-cli 0.1.0
-ctest --test-dir build --output-on-failure # 应 9/9 通过（gpu_film / gpu_texture / gpu_chain 无显卡时 skip）
+ctest --test-dir build --output-on-failure # 应 10/10 通过（gpu_* 无显卡时 skip；ocio 无库时 skip）
 .\build\spektra-roll-cli.exe lut bake --out out\check.cube
 .\build\spektra-roll-cli.exe lut compare --a tests\reference\portra400_endura_33.cube --b out\check.cube
 # 应输出 PSNR ≈ 88 dB, PASS
+.\build\spektra-roll-cli.exe ocio-info --ocio-config data\ocio\studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio
+# 有 OCIO 时应打印 "OpenColorIO: 2.4.2" 和 "linear space: Linear Rec.709 (sRGB)"；
+# 没有 OCIO 时应只报 "this build was compiled without OpenColorIO"
 .\build-ui\spektra-roll-ui.exe --preview-selftest   # 第二次预览应 < 100 ms
 ```
 
