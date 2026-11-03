@@ -1006,17 +1006,27 @@ int cmdLutApply(const Args& args) {
         if (!lut.loadCube(lutPath, error)) return fail(error);
     } else {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+        bool gpuFellBackForOcio = false;
         if (recipe.options.ocio != nullptr && gpu) {
             // The shaders have no OCIO; the CPU spectral engine does (D062).
             std::fprintf(stderr,
                          "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
                          "engine\n");
             gpu = false;
+            gpuFellBackForOcio = true;
         }
         if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
-        if (!gpu && engine == "spectral-gpu") {
-            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
-                         error.c_str());
+        // The OCIO branch already explained the fallback; do not follow it with
+        // an empty "warning: ;" (D066).
+        if (!gpu && engine == "spectral-gpu" && !gpuFellBackForOcio) {
+            if (error.empty()) {
+                std::fprintf(stderr,
+                             "warning: the GPU spectral engine is unavailable; using the CPU "
+                             "spectral engine\n");
+            } else {
+                std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                             error.c_str());
+            }
         }
     }
     if (!spectral && hasOcioFlags(args)) {
@@ -1786,17 +1796,27 @@ int cmdVideo(const Args& args) {
     std::string error;
     if (spectral) {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
+        bool gpuFellBackForOcio = false;
         if (recipe.options.ocio != nullptr && gpu) {
             // The shaders have no OCIO; the CPU spectral engine does (D062).
             std::fprintf(stderr,
                          "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
                          "engine\n");
             gpu = false;
+            gpuFellBackForOcio = true;
         }
         if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
-        if (!gpu && engine == "spectral-gpu") {
-            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
-                         error.c_str());
+        // The OCIO branch already explained the fallback; do not follow it with
+        // an empty "warning: ;" (D066).
+        if (!gpu && engine == "spectral-gpu" && !gpuFellBackForOcio) {
+            if (error.empty()) {
+                std::fprintf(stderr,
+                             "warning: the GPU spectral engine is unavailable; using the CPU "
+                             "spectral engine\n");
+            } else {
+                std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                             error.c_str());
+            }
         }
     } else if (!lut.loadCube(lutPath, error)) {
         return fail(error);

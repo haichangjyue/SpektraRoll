@@ -72,6 +72,7 @@
 - [x] **界面里的 OCIO**（D063）：左栏“色彩管理（OCIO）”，配置文件 + 色彩空间下拉（名字来自 `ocio-info --json`）；烘焙 / 光谱预览 / 渲染都走 `--ocio-input`；“按住看原片”也走 OCIO；UI 烘的 LUT 与 CLI **逐位相同**；顺手修掉 preview 的 spectral-gpu 静默忽略 OCIO（21.34 dB）
 - [x] **测试素材换成 FX30 S-Log3**（D064）：默认素材 `X:\agent\footage\C0113.MP4`（4K50、10-bit、无标签）；UI 与 9 个 demo 都改用 `s-log3` + `--in-matrix bt709`；视频文件不进仓库
 - [x] **电影片库**（D065）：Vision3 50D/250D/200T/500T + Verita + 2383/2393 印片；T 参考光、K75P 观看光、CAT02 适应；与上游 **88.85 dB**；界面可用 profile **17 → 24**；`test_gpu_film` 新增电影链路，worst 1e-6
+- [x] **回退提示**（D066）：OCIO + 光谱 GPU 只打一条明确 warning（不再有 `warning: ;`）；UI 状态栏显示“提示：”，日志保留原文；队列开始先说明会回退 CPU
 - [x] `scripts\demo-log-inputs.cmd`：九种输入各烘一张 LUT + GPU/CPU 对照表
 - [x] `scripts\demo-ocio.cmd`：配置信息 / Apple Log 双实现 / ACES 显示器变换 / LUT 对比
 - [x] `scripts\demo-ocio-ui.cmd`：界面自检（52 个空间）/ UI LUT vs CLI / 用 UI 的 LUT 渲一帧
@@ -173,7 +174,7 @@
 4. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB / PQ / HLG
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵、D062 OpenColorIO、D063 界面 OCIO、D064 FX30 S-Log3 素材、D065 电影片库。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵、D062 OpenColorIO、D063 界面 OCIO、D064 FX30 S-Log3 素材、D065 电影片库、D066 回退提示。
 
 ## 需要你决定的事
 
@@ -188,4 +189,5 @@
 - M1 的 LUT 是 display-encoded sRGB，不是线性/ACES；调色软件里要放在正确的色彩空间节点。
 - 极端饱和输入会产生负的 LUT 值；Apple Log 路径已开 OkLCh 压缩，sRGB 路径仍靠钳制（保 parity）。
 - 视频速度瓶颈在质感计算与管道，不在编码器；颗粒场缓存已做（D039），分段/续渲/时间码已做（D040）。
+- **OCIO 输入 + 光谱 GPU 会自动回退 CPU 光谱**（D062/D066）：这是设计限制，不是渲染失败；用户看到的是“提示：OCIO 输入只能用 CPU 光谱…”。想全速就用 LUT 引擎或关掉 OCIO。
 - Qt 界面不能只拷 exe：`build-ui` 里由 `windeployqt` 放好的 Qt DLL 和 `platforms\` 要一起带走（D009）。

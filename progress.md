@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D064–D065：测试素材换成 FX30 S-Log3 + 电影片库）
+> **最后更新**：2026-11-04（D064–D066：FX30 素材 + 电影片库 + 状态栏提示）
 > **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 电影片库（Vision3/2383）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393，D041–D065）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
@@ -33,9 +33,9 @@
 
 ---
 
-## 零之一、本阶段交接摘要：D056–D065（Metal → 浮点 → 相机 Log → OCIO → 电影片库）
+## 零之一、本阶段交接摘要：D056–D066（Metal → 浮点 → 相机 Log → OCIO → 电影片库）
 
-> 新开对话只需要读这一节 + §三；详细记录按决策编号**从 D065 往下**（最新在前）。
+> 新开对话只需要读这一节 + §三；详细记录按决策编号**从 D066 往下**（最新在前）。
 
 ### 已完成（按交付）
 
@@ -51,6 +51,7 @@
 | **D063** | UI 的 OCIO 输入 | 左栏新增 OCIO 组（配置 + 色彩空间下拉，名字来自 `ocio-info --json`）；烘焙 / 光谱 / 渲染都走 `--ocio-input`；UI 烘的 LUT 与 CLI **逐位相同（inf）**；顺手修掉 `preview` 的 spectral-gpu 静默忽略 OCIO（21.34 dB 差异） |
 | **D064** | 测试素材 | 换成 Sony FX30 `C0113.MP4`（S-Log3 / S-Gamut3.Cine，4K50，10-bit，全范围、无颜色标签；有 PCM 音频与 00:13:37:46 timecode）；UI 默认与 9 个 demo 全部迁到 `s-log3` + `--in-matrix bt709` + `in_range=auto`；旧素材从未进 git |
 | **D065** | 电影片库 | Vision3 50D/250D/200T/500T + Verita + 2383/2393 印片；T 参考光、K75P 观看光、CAT02 适应；CPU/D3D11/Metal 同步；与上游 **88.85 dB（max 4.48e-4）**；界面可用 profile 17 → 24 |
+| **D066** | 回退提示 | OCIO + 光谱 GPU 只打一条明确 warning（不再有 `warning: ;`）；UI 把 warning 显示成“提示：”，日志保留原文；队列开始先提示会回退 CPU |
 
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
 - CI：本轮 D061 的 run **93 / 95**、D062 的 run **97** Windows + macOS 全绿；macOS 从 run 97 起用 Homebrew 的 OpenColorIO 真跑 `test_ocio`，Windows 跑 stub 路径。
@@ -94,6 +95,34 @@
 7. `scripts\demo-cine.cmd -NoOpen`（Vision3 500T + 2383 / 负片 / Portra 400 三张）
 8. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`
 9. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+
+---
+
+## 会话 D066 · 状态栏的“warning: ;”
+
+会话目标：产品负责人截图，UI 渲染队列（偶尔预览一帧）状态栏出现 `warning: ; falling back to the CPU spectral engine`，看起来像报错。
+
+### 一、原因
+
+- 选 **OCIO 输入 + 光谱 GPU** 时，CLI 先打 `warning: OpenColorIO input is CPU-only ...`，把 `gpu` 置 false；通用回退分支又用**空的 `error`** 打了一条 `warning: %s; ...`。
+- UI 的队列/渲染输出处理把**每一行 stderr** 都写进状态栏，所以最后留下的是那条空 warning。
+- 任务本身没有失败：它按设计退回 CPU 光谱（D062 的限制），只是慢。
+
+### 二、修复
+
+- CLI：OCIO 分支不再触发第二条警告；`error` 为空时用明确文字。
+- UI：`warning:` → “提示：”；OCIO 那句翻译成“OCIO 输入只能用 CPU 光谱，已自动回退（渲染会变慢）”；日志保留英文原文。
+- 队列/渲染开始：参数里同时有 `--ocio-input` 和 `--engine spectral-gpu` 时，先写一条中文提示。
+- CI：macOS 的 OCIO 步骤加断言，输出里不能再出现 `warning: ;`。
+
+### 三、验证
+
+| 项 | 结果 |
+|---|---|
+| `lut apply --engine spectral-gpu --ocio-*` | 只剩一条明确的 OCIO 回退 warning |
+| `ctest` | 10/10 |
+| UI 构建 / `--stocks-selftest` | 正常（16 films / 8 papers） |
+| 实际速度 | OCIO + CPU 光谱在 4K 上约 **3.5 s/帧**；想快就用 LUT 引擎或关掉 OCIO |
 
 ---
 

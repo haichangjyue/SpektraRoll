@@ -120,6 +120,13 @@ jobs:
           PY
             "$exe" convert --ocio-config "$cfg" --ocio-input "Apple Log" \
               --in chart16.png --out ocio-apple.png --bits 16
+            # D066: OCIO + spectral-gpu must emit one clear fallback warning,
+            # never the old empty "warning: ;".
+            "$exe" lut apply --engine spectral-gpu --ocio-config "$cfg" \
+              --ocio-input "S-Log3 S-Gamut3.Cine" --scan negative \
+              --in chart16.png --out ocio-gpu.png 2> ocio-gpu.log
+            cat ocio-gpu.log
+            if grep -q "warning: ;" ocio-gpu.log; then exit 1; fi
             "$exe" lut bake --ocio-config "$cfg" --ocio-input "ARRI LogC3 (EI800)" \
               --scan negative --out ocio-logc3.cube
             ls -l ocio-apple.png ocio-logc3.cube

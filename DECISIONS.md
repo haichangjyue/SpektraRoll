@@ -1187,6 +1187,28 @@
 
 ---
 
+## D066 · OCIO + 光谱 GPU 的回退提示
+
+- **日期**：2026-11-04
+- **背景**：产品负责人在 UI 的渲染队列（偶尔预览一帧）看到状态栏写着 **`warning: ; falling back to the CPU spectral engine`**，看起来像渲染报错。
+- **原因**：
+  - 选 OCIO 输入 + `--engine spectral-gpu` 时，CLI 先打一条 `warning: OpenColorIO input is CPU-only for now; ...`，把 `gpu` 置 false；紧接着通用回退分支又用**空的 `error`** 打了一条 `warning: %s; falling back ...`。
+  - UI 的 `drainRenderOutput` / `drainQueueOutput` 把**每一行 stderr** 都塞进状态栏，所以最后看到的就是那条空 warning。
+  - 这不是渲染失败：任务照常跑，只是退回 CPU 光谱（D062 的已知限制），速度会慢很多。
+- **修复**：
+  - CLI 的 `lut apply` / `video`：OCIO 分支已经解释过回退，不再打第二条；如果 `error` 为空，用明确的文字“GPU spectral engine is unavailable”而不是空的 `%s`。
+  - UI：`warning:` 行显示为 **“提示：”**；OCIO 那句翻成“OCIO 输入只能用 CPU 光谱，已自动回退（渲染会变慢）”。日志里仍保留 CLI 原文。
+  - 队列/渲染开始时，如果冻结的参数里同时有 `--ocio-input` 和 `--engine spectral-gpu`，先写一条中文提示，不等 CLI 报警。
+  - CI：macOS 的 OCIO 步骤加一条 `lut apply --engine spectral-gpu --ocio-*`，断言输出里没有 `warning: ;`。
+- **验证**：
+  - `lut apply --engine spectral-gpu --ocio-config ... --ocio-input "S-Log3 S-Gamut3.Cine"` 现在只输出一条 OCIO 回退 warning，没有空 warning。
+  - `ctest` 10/10；UI 构建与 `--stocks-selftest` 正常。
+- **后果**：
+  - OCIO + 光谱 GPU 仍然自动用 CPU 光谱（这条限制没变），但现在提示明确，不会伪装成失败。
+  - 想要全速：用 LUT 引擎（界面默认），或改用 `--engine spectral` 明确 CPU，或关掉 OCIO。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
