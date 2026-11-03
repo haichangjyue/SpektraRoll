@@ -1023,10 +1023,12 @@ bool GpuTexture::processBuffer(void* input, int width, int height, const Texture
 
 GpuTexture::~GpuTexture() {
     if (!impl_) return;
+    // Drop the big buffers now; the pipelines are released explicitly too
+    // (array elements cannot be iterated by non-const reference under ARC).
     impl_->releaseResources();
+    for (int i = 0; i < Impl::kShaderCount; ++i) impl_->pipelines[i] = nil;
     impl_->dummyRgb = nil;
     impl_->dummyScalar = nil;
-    for (id<MTLComputePipelineState>& pipeline : impl_->pipelines) pipeline = nil;
     impl_->queue = nil;
     impl_->device = nil;
 }
