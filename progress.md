@@ -167,6 +167,7 @@ OCIO 需要引入 OpenColorIO 库和配置文件，Windows / macOS CI 都要装�
 | macOS CI（run 85） | **9/9 全过**：`gpu_texture` **2.11 s**、`gpu_chain` **2.10 s**（之前 skip） |
 | Windows 本机 | 9/9 全过，D3D11 路径未受影响 |
 | 真机 M1 | `test_gpu_texture` 九组 **逐位相同**（worst 0.0）；融合 vs CPU **134.80 dB**；320×180 单帧 CPU 11.5 → Metal **5.6 ms** |
+| 真机 M1 · 2.6 MP | 颜色都用 spectral-gpu、含 PNG 读写：质感 CPU **253.6 ms** → Metal **176.6 ms**；质感本身约 **125 → 48 ms（2.6×）** |
 
 ### 五、未完成的待办
 
@@ -230,7 +231,7 @@ SPEKTRA_VIDEO_DEBUG=1 ./build/spektra-roll-cli video --engine spectral-gpu \
 | macOS CI（run 80） | `gpu_film` 通过；`gpu_texture` / `gpu_chain` skip；Windows 全绿 |
 | Windows 本机 | 9/9 测试通过，GPU 测试仍真跑 |
 | 真机 M1（macOS 14.7.5） | `MTLCopyAllDevices: 1 → Apple M1`（默认设备仍 nil）；六组 parity 最差 **2.99e-4**；320×180 CPU vs Metal **115.44 dB**；单帧 10.8 → **7.1 ms**（含 PNG I/O） |
-| Mac 2.6 MP 速度 | **还没有数字**：需要 `video` 渲染真实素材或在 Mac 上跑 2160×1214 单帧 |
+| Mac 2.6 MP 速度 | 2160×1214 单帧（含 16-bit PNG 读写）CPU **424.3 ms** → Metal **129.0 ms（3.3×）** |
 
 ### 五、未完成的待办
 
@@ -828,8 +829,8 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **长片预览代理（D053）** | 30 秒素材代理 8.7 s / 30.6 MB；预览 **960×540 · 100 ms/帧**（原先约 640 px）；重开 48 ms；4 秒素材不变 |
 | **物理点扩散核（D054）** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB；parity 149–178 dB |
 | **浮点 EXR（D055）** | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读写耗时与 PNG 相当；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB（half 82.8）；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
-| **Metal 光谱（D056）** | macOS CI run 80 双绿；真机 M1（macOS 14.7.5）：`MTLCopyAllDevices` 找到 Apple M1、默认设备仍 nil；六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**；单帧 10.8 → **7.1 ms**（含 PNG I/O）；2.6 MP 速度待测 |
-| **Metal 质感（D057）** | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1：九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms**；2.6 MP 待测 |
+| **Metal 光谱（D056）** | macOS CI run 80 双绿；真机 M1（macOS 14.7.5）：`MTLCopyAllDevices` 找到 Apple M1、默认设备仍 nil；六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**；2.6 MP 单帧 **424.3 → 129.0 ms（3.3×）**（含 PNG I/O） |
+| **Metal 质感（D057）** | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1：九组 **逐位相同**（worst 0.0），融合 **134.80 dB**；2.6 MP 质感 **253.6 → 176.6 ms**（含颜色与 I/O，质感本身约 125 → 48 ms） |
 | **线性 EXR（D058）** | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
 | **EXR ZIP（D059）** | 已调色帧 31.49 → **22.73 MB（−28%）**；带颗粒 ≈0%；half **9.82 MB（−38%）**；合成图表 −98.6%；ffmpeg 解码 92.6 dB |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
@@ -975,10 +976,10 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. **Mac 2.6 MP 实测**：双击 `scripts\bench-macos.command`，把四组 ms 发回来（颜色 CPU/Metal、质感 CPU/Metal）。
-2. **OCIO（先定依赖策略）**：引入 OpenColorIO 需要 Windows/macOS CI 都装；或者只做 OCIO-lite。线性 EXR 已有，但不是完整色彩管理。
-3. **PIZ / DWA 压缩**：颗粒重的素材 ZIP 只省 20–30%，PIZ/DWA 能再小 2–3 倍。
-4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积；4K 素材可考虑 1280 px 代理。
+1. **OCIO（先定依赖策略）**：A) 引入 OpenColorIO（Windows/macOS CI 都装） B) OCIO-lite（只做我们要的输入/显示变换）；线性 EXR 已有，但不是完整色彩管理。
+2. **PIZ / DWA 压缩**：颗粒重的素材 ZIP 收益接近 0，PIZ/DWA 能再小 2–3 倍。
+3. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积；4K 素材可考虑 1280 px 代理。
+4. **macOS Qt 打包**：现在 Mac 只跑 CLI，界面还没打包。
 
 > 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP。
 

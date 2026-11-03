@@ -917,7 +917,8 @@
 - **实测**：
   - macOS CI（run **80**）：`gpu_film` 从“3.1 s、NaN/偏差 1.0 失败”变成通过；`gpu_texture` / `gpu_chain` 按预期 skip；Windows 全绿。
   - 本机（Windows）不受影响：9/9 测试、GPU 测试仍真跑；`gpu-info` 输出 `D3D11 feature level 0xB000 / Intel Arc A750 / spectral-gpu: available`。
-  - 真机（MacBook Air M1，macOS 14.7.5 arm64）：`MTLCreateSystemDefaultDevice()` 仍然返回 nil，但 `MTLCopyAllDevices()` 找到唯一一块 **Apple M1**，兜底生效——`gpu_film` 六组 parity 最差 **2.99e-4**（容差 2e-3），320×180 的 CPU vs Metal **PSNR 115.44 dB**；同尺寸单帧 10.8 → 7.1 ms（这个尺寸主要耗在 PNG 读写，不代表 2.6 MP 的速度）。
+  - 真机（MacBook Air M1，macOS 14.7.5 arm64）：`MTLCreateSystemDefaultDevice()` 仍然返回 nil，但 `MTLCopyAllDevices()` 找到唯一一块 **Apple M1**，兜底生效——`gpu_film` 六组 parity 最差 **2.99e-4**（容差 2e-3），320×180 的 CPU vs Metal **PSNR 115.44 dB**；同尺寸单帧 10.8 → 7.1 ms（这个尺寸主要耗在 PNG 读写）。
+  - 2.6 MP 单帧（2160×1214，含 16-bit PNG 读写）：CPU 光谱 **424.3 ms** → Metal **129.0 ms（3.3×）**。
   - `MTLCreateSystemDefaultDevice()` 在 macOS 上返回 nil 并不是“没有 Metal”：Metal 3 完全可用，只是默认设备 API 没给，必须再用设备列表兜底。
   - **2.6 MP 的 Mac 速度还没有数字**：CI 只跑 17 个像素的 parity，真机验收也只跑了 320×180。要完整对比请在 Mac 上用 `video` 命令渲染一段真实素材。
 - **后果**：
@@ -949,6 +950,7 @@
   - Windows 本机：9/9 全过，D3D11 路径未受影响。
   - 真机 M1（macOS 14.7.5）：`test_gpu_texture` 九组配置全部 **逐位相同**（worst 0.0，PSNR 999 = 无差异）——质感链只有加/乘/比较，没有超越函数，Metal 关掉 fast math 后与 CPU 完全一致。
   - `test_gpu_chain`：融合 vs CPU **134.80 dB**（worst 3.67e-6），剩余差异来自 film 的超越函数，不是质感。
+  - 2.6 MP 单帧（颜色都用 spectral-gpu，含 PNG 读写）：质感 CPU **253.6 ms** → Metal **176.6 ms**；减去同一颜色时间（129.0 ms）后，质感本身约 **125 → 48 ms（约 2.6×）**。
   - 320×180 单帧：CPU 11.5 ms → Metal **5.6 ms**；CPU vs Metal 光谱 **115.44 dB**。2.6 MP 的 ms/帧待测。
 - **后果**：
   - macOS 现在颜色和质感都在 GPU，`--texture-engine auto` 在 `--engine spectral-gpu` 下自动用 Metal 质感，融合提交在 Mac 上重新生效。

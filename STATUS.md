@@ -123,8 +123,8 @@
 | GPU 质感（2.6 MP，全质感） | **245.6 ms/帧**（CPU 382.7）；`demo-gpu-texture` 233.6 vs 386.8（1.66×） |
 | 物理点扩散核（D054） | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB |
 | 浮点 EXR（D055） | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB、half 82.8 dB；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
-| Metal 光谱（D056） | macOS CI run 80 双绿；真机 M1：设备走 `MTLCopyAllDevices`（默认设备 nil），六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**，单帧 10.8 → **7.1 ms**（含 PNG I/O） |
-| Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1 九组 **逐位相同**（worst 0.0），融合 **134.80 dB**，320×180 单帧 11.5 → **5.6 ms** |
+| Metal 光谱（D056） | macOS CI run 80 双绿；真机 M1：设备走 `MTLCopyAllDevices`（默认设备 nil），六组 parity 最差 **2.99e-4**，320×180 CPU vs Metal **115.44 dB**；2.6 MP 单帧 **424.3 → 129.0 ms（3.3×）**（含 PNG I/O） |
+| Metal 质感（D057） | macOS CI run 85 **9/9 全过**：`gpu_texture` 2.11 s、`gpu_chain` 2.10 s；真机 M1 九组 **逐位相同**（worst 0.0），融合 **134.80 dB**；2.6 MP 质感 **253.6 → 176.6 ms**（质感本身约 125 → 48 ms） |
 | 线性 EXR（D058） | 同帧 display 0.0160..0.8870 → linear **0.0012..0.7619**；+3 EV 线性最大 **50.3**；体积/耗时与普通 EXR 相同 |
 | EXR ZIP（D059） | 已调色帧 31.49 → **22.73 MB（−28%）**；带颗粒 ≈0%；half **9.82 MB（−38%）**；合成图表 −98.6%；ffmpeg 解码 92.6 dB |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
@@ -151,9 +151,8 @@
 
 ## 下一步（M5）
 
-1. **Mac 2.6 MP 实测**：双击 `scripts\bench-macos.command`，把四组 ms 发回来
-2. **OCIO**：先定依赖策略（引入 OpenColorIO 还是 OCIO-lite）
-3. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+1. **OCIO**：先定依赖策略（引入 OpenColorIO 还是 OCIO-lite）
+2. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 
 > 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP。
 
