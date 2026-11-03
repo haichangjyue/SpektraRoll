@@ -67,6 +67,12 @@ int main() {
         std::printf("skipped: %s\n", probe.c_str());
         return 77;
     }
+    // The fused submit needs both backends on one device; Metal texture is not
+    // there yet (D056), so macOS skips this test instead of failing.
+    if (!sr::GpuTexture::available(probe)) {
+        std::printf("skipped: %s\n", probe.c_str());
+        return 77;
+    }
     std::printf("GPU fused colour+texture parity (D049)\n");
 
     const std::array<double, 3> filters{0.0, 51.57, 52.53};

@@ -75,16 +75,31 @@ bool runCase(const sr::FilmModel& model, const sr::BakeOptions& options, const c
     }
 
     double worst = 0.0;
+    bool sawNan = false;
     for (int i = 0; i < kSampleCount; ++i) {
         const sr::Rgb expected = model.transformFrom(options, kSamples[i]);
         for (int c = 0; c < 3; ++c) {
             const double actual = output[static_cast<size_t>(i) * 3 + c];
             const double want = c == 0 ? expected.r : (c == 1 ? expected.g : expected.b);
+            if (std::isnan(actual)) sawNan = true;
             worst = std::max(worst, std::fabs(actual - want));
         }
     }
+    if (sawNan) {
+        std::fprintf(stderr, "FAIL: %s: GPU output contains NaN\n", name);
+        ++g_failures;
+        return false;
+    }
     if (!(worst <= tolerance)) {
         std::fprintf(stderr, "FAIL: %s: worst deviation %.6f > %.6f\n", name, worst, tolerance);
+        for (int i = 0; i < kSampleCount; ++i) {
+            const sr::Rgb expected = model.transformFrom(options, kSamples[i]);
+            std::fprintf(stderr, "  %2d gpu %9.5f %9.5f %9.5f   cpu %9.5f %9.5f %9.5f\n", i,
+                         output[static_cast<size_t>(i) * 3 + 0],
+                         output[static_cast<size_t>(i) * 3 + 1],
+                         output[static_cast<size_t>(i) * 3 + 2], expected.r, expected.g,
+                         expected.b);
+        }
         ++g_failures;
         return false;
     }
@@ -106,8 +121,9 @@ bool runCase(const sr::FilmModel& model, const sr::BakeOptions& options, const c
         for (int c = 0; c < 3; ++c) {
             const double actual = output[static_cast<size_t>(i) * 3 + c];
             if (!(std::fabs(actual - want[c]) <= tolerance)) {
-                std::fprintf(stderr, "FAIL: %s: strength blend off by %.6f\n", name,
-                             std::fabs(actual - want[c]));
+                std::fprintf(stderr,
+                             "FAIL: %s: strength blend off by %.6f (gpu %.6f want %.6f)\n", name,
+                             std::fabs(actual - want[c]), actual, want[c]);
                 ++g_failures;
                 return false;
             }
