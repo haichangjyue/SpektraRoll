@@ -1111,6 +1111,33 @@
 
 ---
 
+## D063 · UI 的 OpenColorIO 输入（下拉 / 烘焙 / 原片对比）
+
+- **日期**：2026-11-04
+- **背景**：D062 把 OCIO 接进了 CLI，但界面还只有九种内置输入。产品负责人要求“继续”，按 D062 待办第一条做 **UI 的 OCIO 下拉**。
+- **实现**：
+  - **CLI 增加 `ocio-info --json`**：UI 不解析人类可读的缩进文本；JSON 带 `version / config / configFile / linearSpace / colorSpaces / displays`，配置名里的引号和控制字符会转义。
+  - **UI 左栏新增“色彩管理（OCIO）”**：勾选框 + 配置文件（默认仓库里的 ACES 2.0 studio 配置）+ `读取` 按钮 + 色彩空间下拉 + 一行说明（OCIO 版本、空间数量、实际线性空间）。勾选后“画面类型”自动变灰，两者互斥。
+  - **参数接线**：烘焙 LUT、光谱预览、渲染视频都改用 `--ocio-config/--ocio-input`，不再传 `--input`（CLI 里两者互斥）。LUT 路径仍然把解码烘进表里，`lut apply` / `video` 不需要 OCIO。
+  - **“按住看原片”**：LUT 引擎的 `look` 现在也接受 `--ocio-input`，预览服务端在 `configureLook` 里为 `raw` 单独编一个解码器；否则原片会按 sRGB 直接显示，和 LUT 的定义域对不上。
+  - **UI 仍然不链接 OCIO**（Qt 的 GCC 13.1 链接不了 GCC 16.2 编的静态库）。UI 只调 CLI：`findCli()` 优先用 `scripts\build.cmd` 产出的 `build\spektra-roll-cli.exe`（完整构建，带 OCIO），其次才是同目录的 CLI；`SPEKTRA_CLI` 环境变量可覆盖。只有 build-ui 的机器会看到“这个构建没有 OpenColorIO”，其余行为不变。
+  - **`--ocio-selftest`**：不点鼠标的验收。它强制一个固定的 look（Portra 400 + Portra Endura、0.70 EV、negative、反差 1.15、DIR、OkLCh、sRGB）和 Apple Log，走和“烘焙”按钮同一条代码路径写出 `out/ui-ocio-selftest.cube`，然后退出；不保存设置。
+  - **顺手修掉的预览 bug**：`preview` 的 `spectral-gpu` 在 D062 之后会**静默忽略 OCIO**（GPU 着色器只认内置曲线），与 CPU 光谱相差 **21.34 dB**；现在和 `lut apply` / `video` 一致：打 warning，回退 CPU 光谱。
+- **验证**（本机）：
+  - UI 自检：**52 个色彩空间**，线性空间 `Linear Rec.709 (sRGB)`，Apple Log LUT 正常写出。
+  - **UI 烘的 LUT vs CLI 同参数烘的 LUT：PSNR = inf，max |diff| = 0**（界面没有自己的第二条颜色管线）。
+  - OCIO 的 `raw` 解码 vs `convert --ocio-input "Apple Log"`：8-bit/缩放后 **49.58 dB**；不带 OCIO 的 raw 只有 **19.72 dB**，证明解码确实生效。
+  - 光谱预览 + OCIO：`ok look spectral`，1600×898 一帧 **537 ms**，`raw` **95.8 ms**。
+  - `spectral-gpu` + OCIO：`ok look spectral`（回退 CPU），一帧 **529.9 ms**，不再是 34 ms 的“假 GPU”。
+  - `ctest` **10/10**。
+  - 双击验收：`scripts\demo-ocio-ui.cmd`（界面自检 → CLI 对照 → 用 UI 的 LUT 渲一帧 → 打开图片）。
+- **后果**：
+  - 界面可以用任意相机/ACES 空间当 LUT 输入，名字来自配置本身，加空间不用改代码。
+  - UI 的 OCIO 能力取决于它调用的 CLI：完整构建（`build\`）有；只有 `build-ui\` 的便携包没有，会明确提示。
+  - 仍未做：光谱 GPU 的 OCIO（现在回退 CPU 光谱）、`--exr-linear` 认 OCIO 显示变换。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

@@ -88,6 +88,9 @@ tool works exactly as before and `--ocio-*` explains that this build has no
 OpenColorIO. The baked LUT carries the decode, so `lut apply` and `video` never
 need the library. `data/ocio/` ships the ACES 2.0 studio config (Apache-2.0).
 
+`ocio-info --json` prints the same information for the Qt UI (D063), which lists
+the config's colour spaces in the OCIO section instead of linking the library.
+
 ## Desktop UI (Qt 6)
 
 The Windows shell is Qt 6 Widgets (D009); the CLI keeps working without it.
@@ -102,6 +105,14 @@ cannot drift from the pipeline CI tests.
 Qt 6.8.3 and MinGW 13.1 are expected under `X:\agent\tools\qt` (installed with
 `aqtinstall`, not vendored). Qt is dynamically linked (LGPL-3.0/GPL-3.0);
 `windeployqt` copies the runtime next to the executable.
+
+The **色彩管理（OCIO）** section (D063) reads a `.ocio` config through
+`spektra-roll-cli ocio-info --json` and lists every colour space; with it on,
+Bake and the spectral preview pass `--ocio-config/--ocio-input` to the same CLI,
+and "hold to compare" decodes the source through OCIO too. The UI never links
+OpenColorIO: it prefers the full CLI in `build/` (which has it) and can be
+pointed elsewhere with `SPEKTRA_CLI`. `build-ui\spektra-roll-ui.exe
+--ocio-selftest` bakes an Apple Log LUT without clicking.
 
 Renders can be queued: **加入队列** freezes the current arguments and copies the
 LUT, outputs that would collide get a `-2`, `-3` suffix, and the queue runs the

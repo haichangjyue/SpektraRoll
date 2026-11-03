@@ -225,10 +225,12 @@ void printUsage() {
         "      render unexpectedly falls back to the CPU.\n"
         "\n"
         "  spektra-roll-cli ocio-info [--ocio-config <file.ocio>] [--ocio-linear <name>]\n"
+        "                           [--json]\n"
         "      OpenColorIO: print the version, the config name, every colour space,\n"
         "      and the display/view pairs. Also prints which linear Rec.709 space the\n"
         "      film model will be fed, which is what --ocio-input names are relative\n"
         "      to. Without --ocio-config the $OCIO environment variable is used.\n"
+        "      --json prints the same as JSON (used by the Qt UI).\n"
         "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
@@ -611,6 +613,31 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
     return true;
 }
 
+// Minimal JSON string quoting for `ocio-info --json` (D063). Config names are
+// user data, so quotes and control characters must survive.
+std::string jsonQuote(const std::string& value) {
+    std::string out = "\"";
+    for (const unsigned char ch : value) {
+        switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    char buffer[8];
+                    std::snprintf(buffer, sizeof buffer, "\\u%04x", ch);
+                    out += buffer;
+                } else {
+                    out.push_back(static_cast<char>(ch));
+                }
+        }
+    }
+    out.push_back('"');
+    return out;
+}
+
 // D062: list what an OCIO config offers, and which linear space the film model
 // will be fed. This is also the way to find the exact names for --ocio-input.
 int cmdOcioInfo(const Args& args) {
@@ -625,6 +652,32 @@ int cmdOcioInfo(const Args& args) {
     sr::OcioSummary summary;
     if (!sr::describeOcioConfig(config, args.get("ocio-linear"), summary, error)) {
         return fail(error);
+    }
+    // D063: the Qt UI drives the CLI and needs the names without parsing prose.
+    if (args.has("json")) {
+        std::printf("{\n");
+        std::printf("  \"version\": %s,\n", jsonQuote(summary.version).c_str());
+        std::printf("  \"config\": %s,\n", jsonQuote(summary.configName).c_str());
+        std::printf("  \"configFile\": %s,\n", jsonQuote(summary.configFile).c_str());
+        std::printf("  \"linearSpace\": %s,\n", jsonQuote(summary.linearSpace).c_str());
+        std::printf("  \"colorSpaces\": [");
+        for (size_t i = 0; i < summary.colorSpaces.size(); ++i) {
+            std::printf("%s\n    %s", i == 0 ? "" : ",",
+                        jsonQuote(summary.colorSpaces[i]).c_str());
+        }
+        std::printf("\n  ],\n");
+        std::printf("  \"displays\": [");
+        for (size_t i = 0; i < summary.views.size(); ++i) {
+            std::printf("%s\n    {\"name\": %s, \"views\": [", i == 0 ? "" : ",",
+                        jsonQuote(summary.views[i].first).c_str());
+            for (size_t v = 0; v < summary.views[i].second.size(); ++v) {
+                std::printf("%s%s", v == 0 ? "" : ", ",
+                            jsonQuote(summary.views[i].second[v]).c_str());
+            }
+            std::printf("]}");
+        }
+        std::printf("\n  ]\n}\n");
+        return 0;
     }
     std::printf("OpenColorIO:   %s\n", summary.version.c_str());
     std::printf("config:        %s\n",
@@ -2413,6 +2466,11 @@ struct Server {
     bool spectral = false;
     bool gpuColor = false;
     sr::InputTransfer input = sr::InputTransfer::Srgb;
+    // D063: `raw` (hold to compare) needs the same decode the grade used, which
+    // for OCIO input is not one of the built-in transfers.
+    std::shared_ptr<sr::OcioConfig> ocioConfig;
+    std::shared_ptr<sr::OcioProcessor> ocioRaw;
+    std::string ocioSource;
     sr::Lut3D lut;
     FilmRecipe recipe;
     sr::GpuFilm gpuFilm;
@@ -2451,6 +2509,15 @@ bool configureLook(Server& server, const Args& look, std::string& error) {
         error = std::string("--input expects one of: ") + sr::inputTransferList();
         return false;
     }
+    // D063: the LUT already has the OCIO decode baked in, but `raw` still needs
+    // the decoder so "hold to compare" shows the same source the grade saw.
+    if (!server.spectral && (look.has("ocio-input") || look.has("ocio-config"))) {
+        std::string linear;
+        if (!configureOcioInput(look, server.ocioConfig, server.ocioRaw, server.ocioSource,
+                                linear, error)) {
+            return false;
+        }
+    }
     if (!server.spectral) {
         const std::string path = look.get("lut");
         if (path.empty()) {
@@ -2461,6 +2528,18 @@ bool configureLook(Server& server, const Args& look, std::string& error) {
         return true;
     }
     if (!configureFilmRecipe(look, server.recipe, error)) return false;
+    server.ocioRaw = server.recipe.ocioProcessor;
+    server.ocioSource = server.ocioSource.empty() ? server.recipe.ocioSource : server.ocioSource;
+    server.ocioConfig = server.recipe.ocioConfig;
+    // D063: the GPU shader only knows the built-in camera curves, so an OCIO
+    // input must run on the CPU (same rule as `lut apply` / `video`). Without
+    // this the preview silently ignored OCIO and rendered the wrong frame.
+    if (server.gpuColor && !server.recipe.ocioSource.empty()) {
+        std::fprintf(stderr,
+                     "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
+                     "engine\n");
+        server.gpuColor = false;
+    }
     if (server.gpuColor &&
         !server.gpuFilm.configure(server.recipe.model, server.recipe.options, error)) {
         std::fprintf(stderr, "warning: %s; using the CPU spectral engine\n", error.c_str());
@@ -2772,7 +2851,19 @@ bool renderFrame(Server& server, int index, const std::string& outPath, bool gra
     } else {
         // Already display-encoded sRGB when the source is sRGB; log inputs need
         // the decode/gamut matrix/encode round trip for the raw preview.
-        if (server.input != sr::InputTransfer::Srgb) {
+        if (server.ocioRaw && server.ocioRaw->valid()) {
+            // D063: OCIO input -> linear Rec.709, then display sRGB.
+            server.ocioRaw->apply(server.pixels.data(), static_cast<long>(count));
+            sr::parallelChunks(count, server.threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    float* px = &server.pixels[i * 3];
+                    for (int c = 0; c < 3; ++c) {
+                        px[c] = static_cast<float>(
+                            sr::srgbEncode(std::min(1.0, std::max(0.0, static_cast<double>(px[c])))));
+                    }
+                }
+            });
+        } else if (server.input != sr::InputTransfer::Srgb) {
             sr::parallelChunks(count, server.threads, [&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
                     float* px = &server.pixels[i * 3];

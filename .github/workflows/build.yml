@@ -99,7 +99,7 @@ jobs:
             --in chart16.png --out spectral_texture.png
           ls -l spectral.png spectral_gpu.png spectral_texture.png
 
-      - name: OpenColorIO (D062)
+      - name: OpenColorIO (D062, JSON for the UI in D063)
         shell: bash
         run: |
           set -e
@@ -109,6 +109,15 @@ jobs:
           if "$exe" ocio-info --ocio-config "$cfg" > ocio.txt 2>&1; then
             head -5 ocio.txt
             test -f chart16.png
+            "$exe" ocio-info --json --ocio-config "$cfg" > ocio.json
+            python3 - <<'PY'
+          import json
+          info = json.load(open("ocio.json"))
+          assert len(info["colorSpaces"]) > 10, len(info["colorSpaces"])
+          assert info["linearSpace"], info
+          assert info["displays"], info
+          print("ocio json:", len(info["colorSpaces"]), "spaces, linear", info["linearSpace"])
+          PY
             "$exe" convert --ocio-config "$cfg" --ocio-input "Apple Log" \
               --in chart16.png --out ocio-apple.png --bits 16
             "$exe" lut bake --ocio-config "$cfg" --ocio-input "ARRI LogC3 (EI800)" \

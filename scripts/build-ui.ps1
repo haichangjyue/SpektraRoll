@@ -39,8 +39,8 @@ Write-Host ""
 Write-Host "1/3  Configure..." -ForegroundColor Cyan
 # The UI compiler is Qt's MinGW 13.1, while the OCIO static library is built
 # with the main toolchain (GCC 16.2); mixing the two libstdc++ ABIs does not
-# link. The UI never calls OCIO itself (it drives the CLI), so the UI build
-# leaves it out until the UI exposes OCIO (D062).
+# link. The UI never calls OCIO itself: it asks the full CLI in build/ for the
+# names and for the decode (D063), so this build leaves OCIO out.
 & $cmake -S . -B build-ui -G Ninja `
     "-DCMAKE_MAKE_PROGRAM=$ninja" `
     "-DCMAKE_CXX_COMPILER=$mingw\bin\g++.exe" `
@@ -66,7 +66,8 @@ if (-not (Test-Path $exe)) {
 
 Write-Host ""
 Write-Host "Done: $exe" -ForegroundColor Green
-Write-Host "The matching CLI is build-ui\spektra-roll-cli.exe." -ForegroundColor Green
+Write-Host "The UI drives build\spektra-roll-cli.exe when it exists (full build with OCIO);" -ForegroundColor Green
+Write-Host "otherwise the copy next to the UI. Override with the SPEKTRA_CLI env var." -ForegroundColor Green
 Write-Host ""
 
 if (-not $NoLaunch) {

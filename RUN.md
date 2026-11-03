@@ -282,7 +282,17 @@ X:\agent\SpektraRoll\scripts\demo-ocio.cmd
 - 光谱视频（`--engine spectral`）也能直接吃 OCIO 输入；`--engine spectral-gpu` 会打 warning 并回退 CPU（着色器里还没有 OCIO）。
 - 没有 OCIO 的构建**一切照旧**，只会明确告诉你“这个构建没有 OpenColorIO”，不会静默跳过。
 
-**要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。界面暂时还没有 OCIO 下拉（CLI 先通了）。
+**界面里怎么用**（D063）：左栏 **“色彩管理（OCIO）”** → 勾选 → 配置文件默认就是仓库里的 ACES 2.0 → 点 **读取** → 在 **色彩空间** 里选 `Apple Log` / `ARRI LogC3 (EI800)` / `ACEScg` 等。勾选后“画面类型”会自动变灰；烘焙、光谱预览、渲染和“按住看原片”都走同一个 CLI。界面不链接 OCIO，所以它需要带 OCIO 的 CLI（完整构建 `build\spektra-roll-cli.exe`）；只有 `build-ui\` 的便携包会提示“这个构建没有 OpenColorIO”，可以用 `SPEKTRA_CLI` 指到别处。
+
+不点鼠标的验收：
+
+```
+X:\agent\SpektraRoll\scripts\demo-ocio-ui.cmd
+```
+
+它会跑界面的 `--ocio-selftest`（列出 52 个色彩空间、烘一张 Apple Log LUT）、用 CLI 烘同一张表逐点比较（应为 **inf**），再用界面烘的 LUT 渲一帧真实素材。
+
+**要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。
 
 ## 用图形界面（Qt 6）
 
@@ -296,7 +306,7 @@ X:\agent\SpektraRoll\scripts\build-ui.cmd
 
 界面是三栏，和 SpektraLab 同一套骨架：
 
-- **左栏**：素材（视频、画面类型、ffmpeg）、胶片与相纸（LUT、烘焙）、输出（文件、编码、起始、帧数、分段）
+- **左栏**：素材（视频、画面类型、ffmpeg）、色彩管理（OCIO：配置文件 / 色彩空间）、胶片与相纸（LUT、烘焙）、输出（文件、编码、起始、帧数、分段）
 - **中间**：画布；下面是素材信息条、时间线、状态条（进度条）
 - **右栏**：按冲印流程分四页：
   - **显影前**：曝光、**胶片选择**（11 支彩色负片）、DIR 耦合剂、颗粒/稳定度/光晕

@@ -563,6 +563,71 @@ public:
         return status_ != nullptr ? status_->text() : QString();
     }
 
+    // `--ocio-selftest` (D063): read the bundled config through the CLI, pick
+    // Apple Log and bake a LUT through the same path as the Bake button.
+    QString ocioSelfTest() {
+        if (ocioConfig_->text().trimmed().isEmpty()) ocioConfig_->setText(defaultOcioConfig());
+        const QString config = ocioConfig_->text().trimmed();
+        if (config.isEmpty() || !QFileInfo::exists(config)) {
+            return QStringLiteral("error: no OCIO config (set OCIO or install data/ocio)");
+        }
+        {
+            const QSignalBlocker blocker(ocioEnabled_);
+            ocioEnabled_->setChecked(true);
+        }
+        updateOcioUi();
+        refreshOcioSpaces(false);
+        if (ocioSpace_->count() == 0) {
+            return QStringLiteral("error: no colour spaces (") + ocioInfoLabel_->text() +
+                   QLatin1Char(')');
+        }
+        ocioSpace_->setCurrentIndex(
+            std::max(0, ocioSpace_->findData(QStringLiteral("Apple Log"))));
+        // A LUT bake is the point of this check; the spectral engines do not
+        // need one (and would make this a no-op).
+        {
+            const QSignalBlocker blocker(engine_);
+            const int lutIndex = engine_->findData(QStringLiteral("lut"));
+            if (lutIndex >= 0) engine_->setCurrentIndex(lutIndex);
+        }
+        // Fixed look, independent of whatever the last session saved, so the
+        // demo can reproduce this exact table with one `lut bake` command.
+        const auto selectData = [](QComboBox* combo, const QString& data) {
+            const QSignalBlocker blocker(combo);
+            const int index = combo->findData(data);
+            if (index >= 0) combo->setCurrentIndex(index);
+        };
+        const auto selectStock = [](QComboBox* combo, const QString& fileName) {
+            for (int i = 0; i < combo->count(); ++i) {
+                if (QFileInfo(combo->itemData(i).toString()).fileName() == fileName) {
+                    const QSignalBlocker blocker(combo);
+                    combo->setCurrentIndex(i);
+                    return;
+                }
+            }
+        };
+        selectData(trc_, QStringLiteral("srgb"));
+        selectData(scan_, QStringLiteral("negative"));
+        selectStock(filmCombo_, QStringLiteral("kodak_portra_400.json"));
+        selectStock(paperCombo_, QStringLiteral("kodak_portra_endura.json"));
+        exposure_->setValue(0.7);
+        contrast_->setValue(1.15);
+        couplers_->setChecked(true);
+        gamut_->setChecked(true);
+        updateEngineUi();
+        lutEdit_->setText(repoRoot_ + QStringLiteral("/out/ui-ocio-selftest.cube"));
+        if (!bakeLut(false)) {
+            QString tail = log_->toPlainText().trimmed();
+            const qsizetype newline = tail.lastIndexOf(QLatin1Char('\n'));
+            if (newline >= 0) tail = tail.mid(newline + 1);
+            return QStringLiteral("error: LUT bake failed: ") + tail;
+        }
+        return QStringLiteral("ok %1 spaces · %2 · %3 · %4 bytes")
+            .arg(ocioSpace_->count())
+            .arg(ocioSpace_->currentText(), lutEdit_->text())
+            .arg(QFileInfo(lutEdit_->text()).size());
+    }
+
     // Graceful exit for the long-lived preview process (also used by quit()).
     void shutdownPreview() { stopPreviewServer(); }
 
@@ -668,11 +733,17 @@ private:
     }
 
     QString findCli() const {
+        // D063: the UI drives the CLI, including its optional OpenColorIO.
+        // scripts\build.cmd produces the full CLI with OCIO; build-ui uses the
+        // Qt toolchain, which cannot link the OCIO static library (D062), so
+        // prefer the full build when it exists. Set SPEKTRA_CLI to override.
+        const QString fromEnv = qEnvironmentVariable("SPEKTRA_CLI");
+        if (!fromEnv.isEmpty() && QFileInfo::exists(fromEnv)) return fromEnv;
+        const QString built = repoRoot_ + "/build/spektra-roll-cli" + exeSuffix();
+        if (QFileInfo::exists(built)) return built;
         const QString local =
             QCoreApplication::applicationDirPath() + "/spektra-roll-cli" + exeSuffix();
         if (QFileInfo::exists(local)) return local;
-        const QString fallback = repoRoot_ + "/build/spektra-roll-cli" + exeSuffix();
-        if (QFileInfo::exists(fallback)) return fallback;
         return local;
     }
 
@@ -793,9 +864,11 @@ private:
         return info.absolutePath() + QLatin1Char('/') + name;
     }
 
-    bool runCaptureSync(const QString& program, const QStringList& args, QString* output) const {
+    bool runCaptureSync(const QString& program, const QStringList& args, QString* output,
+                        QString* errorText = nullptr) const {
         if (program.trimmed().isEmpty()) {
             *output = QString();
+            if (errorText != nullptr) *errorText = QStringLiteral("程序路径为空");
             return false;
         }
         QProcess process;
@@ -803,10 +876,14 @@ private:
         process.start(program, args);
         if (!process.waitForStarted(10000)) {
             *output = QString();
+            if (errorText != nullptr) *errorText = QStringLiteral("无法启动：") + program;
             return false;
         }
         process.waitForFinished(-1);
         *output = QString::fromLocal8Bit(process.readAllStandardOutput());
+        if (errorText != nullptr) {
+            *errorText = QString::fromLocal8Bit(process.readAllStandardError());
+        }
         return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
     }
 
@@ -1032,6 +1109,49 @@ private:
             pathRow(ffmpegEdit_, QStringLiteral("选择 ffmpeg"),
                     QStringLiteral("ffmpeg (ffmpeg.exe)"))));
         leftLayout->addWidget(materialSection);
+
+        // D063: OpenColorIO as an input colour space. The UI never links OCIO
+        // (its Qt toolchain cannot link the OCIO static library); it asks the
+        // CLI for the names and hands the decode to `lut bake` / the spectral
+        // engine, exactly like the command line.
+        auto* ocioSection = new CollapsibleSection(QStringLiteral("色彩管理（OCIO）"));
+        ocioEnabled_ = new QCheckBox(QStringLiteral("用 OCIO 色彩空间代替“画面类型”"));
+        ocioEnabled_->setToolTip(QStringLiteral(
+            "勾选后，LUT 的输入域来自选中的 OCIO 颜色空间（相机 Log、ACES 等）。"
+            "解码会烘进 LUT，渲染时不需要 OCIO。"));
+        ocioSection->addWidget(ocioEnabled_);
+
+        auto* ocioConfigRow = new QWidget;
+        auto* ocioConfigLayout = new QHBoxLayout(ocioConfigRow);
+        ocioConfigLayout->setContentsMargins(0, 0, 0, 0);
+        ocioConfigLayout->setSpacing(4);
+        ocioConfig_ = new QLineEdit;
+        ocioConfigLayout->addWidget(ocioConfig_, 1);
+        auto* ocioConfigBrowse = new QPushButton(QStringLiteral("…"));
+        ocioConfigBrowse->setFixedWidth(28);
+        connect(ocioConfigBrowse, &QPushButton::clicked, this, [this] {
+            const QString file = QFileDialog::getOpenFileName(
+                this, QStringLiteral("选择 OCIO 配置"), ocioConfig_->text(),
+                QStringLiteral("OCIO (*.ocio)"));
+            if (file.isEmpty()) return;
+            ocioConfig_->setText(QDir::toNativeSeparators(file));
+            refreshOcioSpaces(false);
+        });
+        ocioConfigLayout->addWidget(ocioConfigBrowse);
+        ocioRefreshButton_ = new QPushButton(QStringLiteral("读取"));
+        connect(ocioRefreshButton_, &QPushButton::clicked, this,
+                [this] { refreshOcioSpaces(true); });
+        ocioConfigLayout->addWidget(ocioRefreshButton_);
+        ocioSection->addWidget(labeledRow(QStringLiteral("配置文件"), ocioConfigRow));
+
+        ocioSpace_ = new QComboBox;
+        ocioSection->addWidget(labeledRow(QStringLiteral("色彩空间"), ocioSpace_));
+        ocioInfoLabel_ = noteLabel(QStringLiteral("勾选后点“读取”，从配置里列出所有色彩空间。"));
+        ocioSection->addWidget(ocioInfoLabel_);
+        connect(ocioConfig_, &QLineEdit::editingFinished, this, [this] {
+            if (ocioEnabled_->isChecked()) refreshOcioSpaces(false);
+        });
+        leftLayout->addWidget(ocioSection);
 
         auto* filmSection = new CollapsibleSection(QStringLiteral("胶片与相纸"));
         auto* lutRow = new QWidget;
@@ -1400,6 +1520,24 @@ private:
             gamut_->setChecked(isLog);
             markLookChanged();
         });
+        connect(ocioEnabled_, &QCheckBox::toggled, this, [this](bool on) {
+            updateOcioUi();
+            if (on) {
+                if (ocioSpace_->count() == 0) refreshOcioSpaces(false);
+                // An OCIO input is a camera log space in practice; mirror what
+                // picking a built-in log does (D060).
+                couplers_->setChecked(true);
+                gamut_->setChecked(true);
+            }
+            originalImage_ = QImage();
+            originalTime_ = -1.0;
+            markLookChanged();
+        });
+        connect(ocioSpace_, &QComboBox::currentIndexChanged, this, [this](int) {
+            originalImage_ = QImage();
+            originalTime_ = -1.0;
+            markLookChanged();
+        });
         connect(scan_, &QComboBox::currentIndexChanged, this,
                 [this](int) { markLookChanged(); });
         connect(filmCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
@@ -1566,6 +1704,21 @@ private:
         resume_->setChecked(settings.value(QStringLiteral("render/resume"), true).toBool());
         previewTime_->setValue(settings.value(QStringLiteral("preview/time"), 1.5).toDouble());
 
+        // D063: OCIO input. Restore the config path, then fill the space list
+        // from the CLI. Disabled by default so the built-in inputs are unchanged.
+        ocioConfig_->setText(
+            settings.value(QStringLiteral("ocio/config"), defaultOcioConfig()).toString());
+        const bool ocioWasOn = settings.value(QStringLiteral("ocio/enabled"), false).toBool();
+        {
+            const QSignalBlocker blocker(ocioEnabled_);
+            ocioEnabled_->setChecked(ocioWasOn);
+        }
+        updateOcioUi();
+        if (ocioWasOn) {
+            refreshOcioSpaces(false);
+            selectData(ocioSpace_, settings.value(QStringLiteral("ocio/space")).toString());
+        }
+
         const QByteArray geometry = settings.value(QStringLiteral("window/geometry")).toByteArray();
         if (!geometry.isEmpty()) {
             restoreGeometry(geometry);
@@ -1609,6 +1762,9 @@ private:
         settings.setValue(QStringLiteral("look/couplers"), couplers_->isChecked());
         settings.setValue(QStringLiteral("look/gamut"), gamut_->isChecked());
         settings.setValue(QStringLiteral("look/trc"), trc_->currentData().toString());
+        settings.setValue(QStringLiteral("ocio/enabled"), ocioActive());
+        settings.setValue(QStringLiteral("ocio/config"), ocioConfig_->text());
+        settings.setValue(QStringLiteral("ocio/space"), ocioSpace_->currentData().toString());
         settings.setValue(QStringLiteral("texture/grain"), grain_->value());
         settings.setValue(QStringLiteral("texture/grainRate"), grainRate_->value());
         settings.setValue(QStringLiteral("texture/halation"), halation_->value());
@@ -1648,26 +1804,42 @@ private:
         return true;
     }
 
-    bool bakeLut() {
+    bool bakeLut(bool interactive = true) {
         if (spectralEngine()) {
-            status_->setText(QStringLiteral("光谱引擎直接计算物理链，不需要 LUT"));
+            if (interactive) {
+                status_->setText(QStringLiteral("光谱引擎直接计算物理链，不需要 LUT"));
+            }
+            return false;
+        }
+        if (ocioActive() && ocioSpace_->currentData().toString().isEmpty()) {
+            const QString message =
+                QStringLiteral("OCIO 输入还没选好：先点“读取”，再选一个色彩空间。");
+            status_->setText(message);
+            if (interactive) QMessageBox::warning(this, QStringLiteral("OpenColorIO"), message);
             return false;
         }
         QString path = lutEdit_->text().trimmed();
         if (path.isEmpty()) path = repoRoot_ + QStringLiteral("/out/ui-portra400.cube");
         QDir().mkpath(QFileInfo(path).absolutePath());
 
-        QStringList args{QStringLiteral("lut"), QStringLiteral("bake"), QStringLiteral("--input"),
-                         source_->currentData().toString(), QStringLiteral("--film"),
-                         filmCombo_->currentData().toString(), QStringLiteral("--paper"),
-                         paperCombo_->currentData().toString(), QStringLiteral("--exposure"),
-                         number(exposure_->value(), 2), QStringLiteral("--scan"),
-                         scan_->currentData().toString(), QStringLiteral("--contrast"),
-                         number(contrast_->value(), 2), QStringLiteral("--couplers"),
-                         couplers_->isChecked() ? QStringLiteral("on") : QStringLiteral("off"),
-                         QStringLiteral("--gamut"),
-                         gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("off"),
-                         QStringLiteral("--out"), path};
+        // D063: an OCIO colour space replaces --input; the decode is baked into
+        // the LUT, so `lut apply` and `video` never need the library.
+        QStringList args{QStringLiteral("lut"), QStringLiteral("bake")};
+        if (ocioActive()) {
+            args << ocioArgs();
+        } else {
+            args << QStringLiteral("--input") << source_->currentData().toString();
+        }
+        args << QStringLiteral("--film") << filmCombo_->currentData().toString()
+             << QStringLiteral("--paper") << paperCombo_->currentData().toString()
+             << QStringLiteral("--exposure") << number(exposure_->value(), 2)
+             << QStringLiteral("--scan") << scan_->currentData().toString()
+             << QStringLiteral("--contrast") << number(contrast_->value(), 2)
+             << QStringLiteral("--couplers")
+             << (couplers_->isChecked() ? QStringLiteral("on") : QStringLiteral("off"))
+             << QStringLiteral("--gamut")
+             << (gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("off"))
+             << QStringLiteral("--out") << path;
         const QString trc = trc_->currentData().toString();
         if (trc == QStringLiteral("pq") || trc == QStringLiteral("hlg")) {
             args << QStringLiteral("--hdr") << trc << QStringLiteral("--peak")
@@ -1681,7 +1853,7 @@ private:
         appendLog(output);
         if (!ok) {
             status_->setText(QStringLiteral("LUT 烘焙失败"));
-            QMessageBox::critical(this, QStringLiteral("烘焙失败"), output);
+            if (interactive) QMessageBox::critical(this, QStringLiteral("烘焙失败"), output);
             return false;
         }
         lutEdit_->setText(QDir::toNativeSeparators(path));
@@ -1692,7 +1864,10 @@ private:
         if (params.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             params.write(lookSignature().toUtf8());
         }
-        status_->setText(QStringLiteral("LUT 已烘焙：") + QFileInfo(path).fileName());
+        status_->setText(ocioActive()
+                             ? QStringLiteral("LUT 已烘焙（OCIO %1）：%2")
+                                   .arg(ocioSpace_->currentText(), QFileInfo(path).fileName())
+                             : QStringLiteral("LUT 已烘焙：") + QFileInfo(path).fileName());
         if (trc != QStringLiteral("srgb")) {
             appendLog(QStringLiteral("提示：HDR LUT 的画面在普通 SDR 屏上会偏暗，最终请用 HDR 显示器/iPhone 看。\n"));
         }
@@ -1719,7 +1894,7 @@ private:
     }
 
     QString lookSignature() const {
-        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9|%10")
+        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9|%10|%11")
             .arg(engine_->currentData().toString())
             .arg(source_->currentData().toString())
             .arg(number(exposure_->value(), 4))
@@ -1729,7 +1904,10 @@ private:
             .arg(couplers_->isChecked() ? QStringLiteral("dir") : QStringLiteral("-"))
             .arg(gamut_->isChecked() ? QStringLiteral("oklch") : QStringLiteral("-"))
             .arg(QFileInfo(filmCombo_->currentData().toString()).fileName())
-            .arg(QFileInfo(paperCombo_->currentData().toString()).fileName());
+            .arg(QFileInfo(paperCombo_->currentData().toString()).fileName())
+            .arg(ocioActive() ? QFileInfo(ocioConfig_->text().trimmed()).fileName() +
+                                    QLatin1Char(':') + ocioSpace_->currentData().toString()
+                              : QStringLiteral("-"));
     }
 
     QStringList textureArgs() const {
@@ -1889,6 +2067,7 @@ private:
             key += QLatin1Char('|') + QString::number(lut.lastModified().toMSecsSinceEpoch());
         }
         if (spectralEngine()) key += QLatin1Char('|') + lookArgs(true).join(QLatin1Char(' '));
+        else key += QLatin1Char('|') + ocioArgs().join(QLatin1Char(' '));
         return key;
     }
 
@@ -2005,6 +2184,8 @@ private:
                 args << QStringLiteral("--engine") << engineName() << lookArgs(true);
             } else {
                 args << QStringLiteral("--lut") << lutEdit_->text();
+                // D063: the LUT carries the decode, but `raw` still needs it.
+                args << ocioArgs();
             }
             QStringList safe;
             for (const QString& arg : args) safe << quoted(arg);
@@ -2169,9 +2350,13 @@ private:
         } else {
             args << QStringLiteral("convert") << QStringLiteral("--in") << source
                  << QStringLiteral("--out") << output;
-            const QString from = source_->currentData().toString();
-            if (from != QStringLiteral("srgb")) {
-                args << QStringLiteral("--from") << from;
+            if (ocioActive()) {
+                args << ocioArgs();
+            } else {
+                const QString from = source_->currentData().toString();
+                if (from != QStringLiteral("srgb")) {
+                    args << QStringLiteral("--from") << from;
+                }
             }
         }
         if (!runSync(cliPath_, args, &outputText)) {
@@ -2240,13 +2425,115 @@ private:
         return engine_ != nullptr ? engine_->currentData().toString() : QStringLiteral("lut");
     }
 
+    // ---- OpenColorIO (D063) ----------------------------------------------
+
+    bool ocioActive() const {
+        return ocioEnabled_ != nullptr && ocioEnabled_->isChecked();
+    }
+
+    QString defaultOcioConfig() const {
+        const QString env = qEnvironmentVariable("OCIO");
+        if (!env.isEmpty()) return QDir::toNativeSeparators(env);
+        const QString bundled = repoRoot_ + QStringLiteral(
+                                                "/data/ocio/"
+                                                "studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio");
+        return QFileInfo::exists(bundled) ? bundled : QString();
+    }
+
+    // `--ocio-config` / `--ocio-input`, or empty when the built-in input is used.
+    QStringList ocioArgs() const {
+        QStringList args;
+        if (!ocioActive()) return args;
+        const QString config = ocioConfig_ != nullptr ? ocioConfig_->text().trimmed() : QString();
+        if (!config.isEmpty()) {
+            args << QStringLiteral("--ocio-config") << QDir::toNativeSeparators(config);
+        }
+        const QString space =
+            ocioSpace_ != nullptr ? ocioSpace_->currentData().toString() : QString();
+        if (!space.isEmpty()) args << QStringLiteral("--ocio-input") << space;
+        return args;
+    }
+
+    void updateOcioUi() {
+        const bool on = ocioActive();
+        if (source_ != nullptr) source_->setEnabled(!on);
+        if (ocioConfig_ != nullptr) ocioConfig_->setEnabled(on);
+        if (ocioSpace_ != nullptr) ocioSpace_->setEnabled(on);
+        if (ocioRefreshButton_ != nullptr) ocioRefreshButton_->setEnabled(on);
+        if (ocioInfoLabel_ != nullptr && !on) {
+            ocioInfoLabel_->setText(
+                QStringLiteral("勾选后点“读取”，从配置里列出所有色彩空间。"));
+        }
+        if (engine_ != nullptr) updateEngineUi();
+    }
+
+    // Fills the colour-space list from `ocio-info --json`. The CLI owns OCIO;
+    // the UI only parses names so it never has to link the library.
+    void refreshOcioSpaces(bool announce) {
+        if (ocioSpace_ == nullptr || ocioConfig_ == nullptr) return;
+        QStringList args{QStringLiteral("ocio-info"), QStringLiteral("--json")};
+        const QString config = ocioConfig_->text().trimmed();
+        if (!config.isEmpty()) {
+            args << QStringLiteral("--ocio-config") << QDir::toNativeSeparators(config);
+        }
+        QString output;
+        QString errors;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const bool ok = runCaptureSync(cliPath_, args, &output, &errors);
+        QApplication::restoreOverrideCursor();
+        if (!ok) {
+            ocioSpace_->clear();
+            const QString message =
+                errors.trimmed().isEmpty() ? output.trimmed() : errors.trimmed();
+            ocioInfoLabel_->setText(QStringLiteral("读不到 OCIO：") + message);
+            if (announce) {
+                QMessageBox::warning(this, QStringLiteral("OpenColorIO"), message);
+            }
+            return;
+        }
+
+        const QJsonObject root = QJsonDocument::fromJson(output.toUtf8()).object();
+        const QJsonArray spaces = root.value(QStringLiteral("colorSpaces")).toArray();
+        if (spaces.isEmpty()) {
+            ocioSpace_->clear();
+            ocioInfoLabel_->setText(QStringLiteral("这个配置里没有色彩空间"));
+            return;
+        }
+        const QString previous = ocioSpace_->currentData().toString();
+        {
+            const QSignalBlocker blocker(ocioSpace_);
+            ocioSpace_->clear();
+            for (const QJsonValue& value : spaces) {
+                const QString name = value.toString();
+                if (!name.isEmpty()) ocioSpace_->addItem(name, name);
+            }
+            int index = ocioSpace_->findData(previous);
+            if (index < 0) index = ocioSpace_->findData(QStringLiteral("Apple Log"));
+            if (index < 0) index = 0;
+            ocioSpace_->setCurrentIndex(index);
+        }
+        ocioInfoLabel_->setText(
+            QStringLiteral("OCIO %1 · %2 个色彩空间 · 线性空间 %3")
+                .arg(root.value(QStringLiteral("version")).toString())
+                .arg(spaces.size())
+                .arg(root.value(QStringLiteral("linearSpace")).toString()));
+        if (announce) {
+            appendLog(QStringLiteral("OCIO: ") + ocioInfoLabel_->text() + QLatin1Char('\n'));
+        }
+        markLookChanged();
+    }
+
     // Everything the physical chain needs at run time, shared by the spectral
     // image and video paths. `withHdr` is false for video because `--trc`
     // already selects PQ/HLG there.
     QStringList lookArgs(bool withHdr) const {
         QStringList args;
-        args << QStringLiteral("--input") << source_->currentData().toString()
-             << QStringLiteral("--film") << filmCombo_->currentData().toString()
+        if (ocioActive()) {
+            args << ocioArgs();
+        } else {
+            args << QStringLiteral("--input") << source_->currentData().toString();
+        }
+        args << QStringLiteral("--film") << filmCombo_->currentData().toString()
              << QStringLiteral("--paper") << paperCombo_->currentData().toString()
              << QStringLiteral("--exposure") << number(exposure_->value(), 2)
              << QStringLiteral("--scan") << scan_->currentData().toString()
@@ -2272,11 +2559,15 @@ private:
             const QString data = engineName();
             status_->setText(
                 data == QStringLiteral("spectral-gpu")
-                    ? QStringLiteral("光谱 GPU 引擎：D3D11 上跑逐像素物理链，"
-                                     "无显卡时自动退回 CPU")
+                    ? (ocioActive()
+                           ? QStringLiteral("OCIO 输入 + 光谱 GPU：GPU 链不支持 OCIO，会自动用 CPU 光谱")
+                           : QStringLiteral("光谱 GPU 引擎：D3D11 上跑逐像素物理链，"
+                                            "无显卡时自动退回 CPU"))
                     : (spectral
                            ? QStringLiteral("光谱引擎：逐像素物理链，约 1.2 s / 2.6 MP 每帧")
-                           : QStringLiteral("LUT 引擎：每帧查表")));
+                           : (ocioActive()
+                                  ? QStringLiteral("LUT 引擎：每帧查表；OCIO 解码已烘进 LUT")
+                                  : QStringLiteral("LUT 引擎：每帧查表"))));
         }
     }
 
@@ -2955,6 +3246,12 @@ private:
     QLineEdit* outputEdit_ = nullptr;
 
     QComboBox* source_ = nullptr;
+    // OpenColorIO input (D063).
+    QCheckBox* ocioEnabled_ = nullptr;
+    QLineEdit* ocioConfig_ = nullptr;
+    QComboBox* ocioSpace_ = nullptr;
+    QPushButton* ocioRefreshButton_ = nullptr;
+    QLabel* ocioInfoLabel_ = nullptr;
     QComboBox* filmCombo_ = nullptr;
     QComboBox* paperCombo_ = nullptr;
     QDoubleSpinBox* exposure_ = nullptr;
@@ -3089,6 +3386,16 @@ int main(int argc, char** argv) {
             std::printf("selftest second: %s\n", second.toUtf8().constData());
             std::fflush(stdout);
             QCoreApplication::quit();
+        });
+    }
+    // D063: OCIO wiring without clicking: list the config, bake a LUT.
+    if (arguments.contains(QStringLiteral("--ocio-selftest"))) {
+        QTimer::singleShot(400, &window, [&window, &app] {
+            const QString result = window.ocioSelfTest();
+            std::printf("ocio selftest: %s\n", result.toUtf8().constData());
+            std::fflush(stdout);
+            window.shutdownPreview();
+            app.exit(result.startsWith(QStringLiteral("ok")) ? 0 : 1);
         });
     }
     return app.exec();
