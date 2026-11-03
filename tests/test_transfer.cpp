@@ -87,6 +87,58 @@ int main() {
     sr::bt2020ToSrgb(in3, got);
     checkRgb3(got, out3, 1e-9, "BT2020 -> sRGB out-of-gamut colour");
 
+    // Camera log decodes (D060), references from colour-science 0.4.7
+    // (log_decoding_SLog3 / log_decoding_CanonLog3 / log_decoding_VLog).
+    checkNear(sr::slog3Decode(0.0), -0.014023695936, 1e-9, "s-log3 code 0");
+    checkNear(sr::slog3Decode(0.410557185), 0.180000000427, 1e-9, "s-log3 18% grey");
+    checkNear(sr::slog3Decode(1.0), 38.420934337203, 1e-6, "s-log3 white");
+
+    checkNear(sr::cLog3Decode(0.0), -0.073813340025, 1e-9, "c-log3 code 0");
+    checkNear(sr::cLog3Decode(0.343389370), 0.179999999437, 1e-9, "c-log3 18% grey");
+    checkNear(sr::cLog3Decode(1.0), 14.668301411196, 1e-6, "c-log3 white");
+
+    checkNear(sr::vLogDecode(0.0), -0.022321428571, 1e-9, "v-log code 0");
+    checkNear(sr::vLogDecode(0.423311449), 0.180000000432, 1e-9, "v-log 18% grey");
+    checkNear(sr::vLogDecode(1.0), 46.085527956740, 1e-6, "v-log white");
+
+    // Full input decode to linear sRGB, including the gamut matrix and the
+    // negative clamp. References: colour-science matrix_RGB_to_RGB.
+    {
+        const double code[3] = {0.5, 0.25, 0.75};
+        const double expected[3] = {0.681716281, 0.0, 4.304315652};
+        double linear[3];
+        sr::decodeInputToLinearSrgb(sr::InputTransfer::CLog3, code, linear);
+        checkRgb3(linear, expected, 1e-5, "c-log3 to linear sRGB");
+    }
+    {
+        const double code[3] = {0.5, 0.25, 0.75};
+        const double expected[3] = {0.203067013, 0.0, 4.990814381};
+        double linear[3];
+        sr::decodeInputToLinearSrgb(sr::InputTransfer::VLog, code, linear);
+        checkRgb3(linear, expected, 1e-5, "v-log to linear sRGB");
+    }
+    {
+        const double code[3] = {0.410557185, 0.410557185, 0.410557185};
+        const double expected[3] = {0.180000000, 0.180000000, 0.180000000};
+        double linear[3];
+        sr::decodeInputToLinearSrgb(sr::InputTransfer::SLog3, code, linear);
+        checkRgb3(linear, expected, 1e-6, "s-log3 18% grey to linear sRGB");
+    }
+
+    // Parsing accepts the CLI spellings.
+    {
+        sr::InputTransfer transfer = sr::InputTransfer::Srgb;
+        check(sr::parseInputTransfer("s-log3", transfer) && transfer == sr::InputTransfer::SLog3,
+              "s-log3 parses");
+        check(sr::parseInputTransfer("clog3", transfer) && transfer == sr::InputTransfer::CLog3,
+              "clog3 parses");
+        check(sr::parseInputTransfer("vlog", transfer) && transfer == sr::InputTransfer::VLog,
+              "vlog parses");
+        check(sr::parseInputTransfer("apple-log", transfer) &&
+                  transfer == sr::InputTransfer::AppleLog,
+              "apple-log still parses");
+    }
+
     const double white[3] = {1.0, 1.0, 1.0};
     const double whiteOut[3] = {0.99984328, 1.00009915, 1.00007444};
     sr::bt2020ToSrgb(white, got);

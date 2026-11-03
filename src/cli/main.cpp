@@ -59,7 +59,7 @@ void printUsage() {
         "      Write the built-in test chart (grey ramp + colour patches). An .exr\n"
         "      output is float (or half with --exr-half) and is not clamped.\n"
         "\n"
-        "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log]\n"
+        "  spektra-roll-cli convert --in <image> --out <image> [--from srgb|apple-log|s-log3|c-log3|v-log]\n"
         "                           [--to srgb] [--exposure EV] [--bits 8|16]\n"
         "                           [--exr-half] [--exr-raw] [--exr-linear [--exr-trc srgb|pq|hlg]\n"
         "                           [--peak 1000]]\n"
@@ -67,7 +67,7 @@ void printUsage() {
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
-        "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log]\n"
+        "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|s-log3|c-log3|v-log]\n"
         "                         [--film <json>] [--paper <json>]\n"
         "                         [--trc srgb|pq|hlg] [--in-matrix bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
@@ -115,7 +115,7 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
-        "                            [--input srgb|apple-log] [--exposure EV]\n"
+        "                            [--input srgb|apple-log|s-log3|c-log3|v-log] [--exposure EV]\n"
         "                            [--scan print|negative] [--contrast 1.15]\n"
         "                            [--gamut oklch|off] [--couplers on|off]\n"
         "                            [--hdr pq|hlg] [--peak 1000]\n"
@@ -125,6 +125,9 @@ void printUsage() {
         "      --input apple-log the LUT expects Apple Log code values in BT.2020\n"
         "      primaries (e.g. a frame decoded from an iPhone ProRes/HEVC clip),\n"
         "      and --exposure shifts scene exposure in stops before the film model.\n"
+        "      --input s-log3 / c-log3 / v-log expect Sony S-Log3 (S-Gamut3.Cine),\n"
+        "      Canon Log 3 v1.2 (Cinema Gamut) or Panasonic V-Log (V-Gamut) code\n"
+        "      values; each decodes through its log curve and gamut matrix first.\n"
         "      --scan negative scans the negative itself (inverted against the film\n"
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
         "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
@@ -137,7 +140,7 @@ void printUsage() {
         "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
-        "                             [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log]\n"
+        "                             [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|s-log3|c-log3|v-log]\n"
         "                             [--film <json>] [--paper <json>]\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
@@ -448,7 +451,7 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
 
     if (args.has("input")) {
         if (!sr::parseInputTransfer(args.get("input"), recipe.options.input)) {
-            error = "--input expects 'srgb' or 'apple-log'";
+            error = "--input expects 'srgb', 'apple-log', 's-log3', 'c-log3' or 'v-log'";
             return false;
         }
     }
@@ -2002,7 +2005,7 @@ int cmdConvert(const Args& args) {
 
     sr::InputTransfer from = sr::InputTransfer::Srgb;
     if (args.has("from") && !sr::parseInputTransfer(args.get("from"), from)) {
-        return fail("--from expects 'srgb' or 'apple-log'");
+        return fail("--from expects 'srgb', 'apple-log', 's-log3', 'c-log3' or 'v-log'");
     }
     if (args.has("to") && args.get("to") != "srgb") {
         return fail("--to currently supports 'srgb' only (HDR output is M2 work)");
@@ -2022,16 +2025,9 @@ int cmdConvert(const Args& args) {
     const bool floatOut = isExrPath(outPath);
     for (size_t i = 0; i < count; ++i) {
         float* px = &image.pixels[i * 3];
+        const double code[3] = {px[0], px[1], px[2]};
         double linear[3];
-        if (from == sr::InputTransfer::AppleLog) {
-            const double code[3] = {px[0], px[1], px[2]};
-            double lin2020[3];
-            for (int c = 0; c < 3; ++c) lin2020[c] = sr::appleLogDecode(code[c]);
-            sr::bt2020ToSrgb(lin2020, linear);
-            for (int c = 0; c < 3; ++c) linear[c] = std::max(0.0, linear[c]);
-        } else {
-            for (int c = 0; c < 3; ++c) linear[c] = sr::srgbDecode(px[c]);
-        }
+        sr::decodeInputToLinearSrgb(from, code, linear);
         for (int c = 0; c < 3; ++c) {
             const double encoded = sr::srgbEncode(linear[c] * gain);
             px[c] = static_cast<float>(floatOut ? encoded
@@ -2188,7 +2184,7 @@ struct Server {
 
     bool spectral = false;
     bool gpuColor = false;
-    bool appleLog = false;
+    sr::InputTransfer input = sr::InputTransfer::Srgb;
     sr::Lut3D lut;
     FilmRecipe recipe;
     sr::GpuFilm gpuFilm;
@@ -2223,7 +2219,10 @@ bool configureLook(Server& server, const Args& look, std::string& error) {
     }
     server.spectral = engine != "lut";
     server.gpuColor = engine == "spectral-gpu";
-    server.appleLog = look.get("input", "srgb") == "apple-log";
+    if (!sr::parseInputTransfer(look.get("input", "srgb"), server.input)) {
+        error = "--input expects 'srgb', 'apple-log', 's-log3', 'c-log3' or 'v-log'";
+        return false;
+    }
     if (!server.spectral) {
         const std::string path = look.get("lut");
         if (path.empty()) {
@@ -2542,20 +2541,18 @@ bool renderFrame(Server& server, int index, const std::string& outPath, bool gra
                               index, &server.grainCache, &gpu);
         }
     } else {
-        // Already display-encoded sRGB when the source is sRGB; only Apple Log
-        // needs the decode/BT.2020->sRGB/encode round trip.
-        if (server.appleLog) {
+        // Already display-encoded sRGB when the source is sRGB; log inputs need
+        // the decode/gamut matrix/encode round trip for the raw preview.
+        if (server.input != sr::InputTransfer::Srgb) {
             sr::parallelChunks(count, server.threads, [&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
                     float* px = &server.pixels[i * 3];
                     const double code[3] = {px[0], px[1], px[2]};
-                    double lin2020[3];
-                    for (int c = 0; c < 3; ++c) lin2020[c] = sr::appleLogDecode(code[c]);
                     double linear[3];
-                    sr::bt2020ToSrgb(lin2020, linear);
+                    sr::decodeInputToLinearSrgb(server.input, code, linear);
                     for (int c = 0; c < 3; ++c) {
-                        px[c] = static_cast<float>(sr::srgbEncode(
-                            std::min(1.0, std::max(0.0, linear[c]))));
+                        px[c] = static_cast<float>(
+                            sr::srgbEncode(std::min(1.0, std::max(0.0, linear[c]))));
                     }
                 }
             });

@@ -10,9 +10,13 @@ namespace sr {
 //
 //   Srgb      display-encoded sRGB, the M1 default (D013)
 //   AppleLog  Apple Log code values in BT.2020 primaries (D021)
-enum class InputTransfer { Srgb, AppleLog };
+//   SLog3     Sony S-Log3 in S-Gamut3.Cine
+//   CLog3     Canon Log 3 (v1.2) in Cinema Gamut
+//   VLog      Panasonic V-Log in V-Gamut
+enum class InputTransfer { Srgb, AppleLog, SLog3, CLog3, VLog };
 
-// "srgb" / "apple-log" (also accepts "applelog", "apple_log").
+// "srgb" / "apple-log" (also accepts "applelog", "apple_log") / "s-log3" /
+// "c-log3" / "v-log" (with or without the dash).
 bool parseInputTransfer(const std::string& name, InputTransfer& out);
 
 const char* inputTransferName(InputTransfer value);
@@ -30,6 +34,19 @@ double srgbEncode(double linear);
 // black (linear 0) sits at code 0.1504764523.
 double appleLogEncode(double linear);
 double appleLogDecode(double encoded);
+
+// Camera log decodes, normalised code values in, scene-linear camera RGB out.
+// Verified against colour-science 0.4.7 over a 101-point sweep (D060).
+double slog3Decode(double encoded);   // Sony S-Log3
+double cLog3Decode(double encoded);   // Canon Log 3 (v1.2)
+double vLogDecode(double encoded);    // Panasonic V-Log
+
+// Decodes one input triple to linear sRGB (Rec.709 primaries). Log formats
+// also apply their gamut matrix (BT.2020 for Apple Log, S-Gamut3.Cine, Cinema
+// Gamut, V-Gamut) and clamp negatives to zero, like the film model always did
+// for Apple Log.
+void decodeInputToLinearSrgb(InputTransfer input, const double encoded[3],
+                             double linear[3]);
 
 // Linear BT.2020 (D65) -> linear sRGB (D65). Out-of-gamut colours come back
 // negative; the caller applies gamut mapping or clipping (D014).

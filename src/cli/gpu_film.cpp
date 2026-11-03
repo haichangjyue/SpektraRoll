@@ -67,7 +67,7 @@ cbuffer Params : register(b0) {
     int scanNegative;
     int gamutCompress;
     int hdrMode;
-    int appleLog;
+    int inputMode;
     float exposureGain;
     float contrast;
     float peakNits;
@@ -107,6 +107,70 @@ float3 bt2020ToSrgb(float3 v) {
         dot(float3(1.660303485421445, -0.587570142531617, -0.072890060215056), v),
         dot(float3(-0.124375595308386, 1.132834481431958, -0.008359737187401), v),
         dot(float3(-0.018112279959916, -0.100583608507212, 1.118770326157098), v));
+}
+
+// Camera log decodes and gamut matrices (D060), same constants as transfer.cpp.
+float slog3Decode(float y) {
+    if (y >= 171.2102946929 / 1023.0) {
+        return pow(10.0, (y * 1023.0 - 420.0) / 261.5) * 0.19 - 0.01;
+    }
+    return (y * 1023.0 - 95.0) * 0.01125 / (171.2102946929 - 95.0);
+}
+
+float cLog3Decode(float y) {
+    float x;
+    if (y < 0.097465473) {
+        x = -(pow(10.0, (0.12783901 - y) / 0.36726845) - 1.0) / 14.98325;
+    } else if (y <= 0.15277891) {
+        x = (y - 0.12512219) / 1.9754798;
+    } else {
+        x = (pow(10.0, (y - 0.12240537) / 0.36726845) - 1.0) / 14.98325;
+    }
+    return x * 0.9;
+}
+
+float vLogDecode(float y) {
+    if (y < 0.181) return (y - 0.125) / 5.6;
+    return pow(10.0, (y - 0.598206) / 0.241514) - 0.00873;
+}
+
+float3 camMatrix(float3 v, float3 r, float3 g, float3 b) {
+    return float3(dot(r, v), dot(g, v), dot(b, v));
+}
+
+// inputMode: 0 sRGB, 1 Apple Log, 2 S-Log3, 3 C-Log3, 4 V-Log.
+float3 decodeInput(float3 encoded) {
+    if (inputMode == 0) {
+        return float3(srgbDecode(encoded.x), srgbDecode(encoded.y), srgbDecode(encoded.z));
+    }
+    float3 camera;
+    if (inputMode == 1) {
+        camera = float3(appleLogDecode(encoded.x), appleLogDecode(encoded.y),
+                        appleLogDecode(encoded.z));
+        return max(bt2020ToSrgb(camera), 0.0);
+    }
+    if (inputMode == 2) {
+        camera = float3(slog3Decode(encoded.x), slog3Decode(encoded.y), slog3Decode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.626947409865913, -0.540138538842170, -0.086808870733380),
+                             float3(-0.178515527182660, 1.417940927396144, -0.239425400446255),
+                             float3(-0.044436114956758, -0.195919966185631, 1.240356081207883)),
+                   0.0);
+    }
+    if (inputMode == 3) {
+        camera = float3(cLog3Decode(encoded.x), cLog3Decode(encoded.y), cLog3Decode(encoded.z));
+        return max(camMatrix(camera,
+                             float3(1.923861295898551, -0.798760663248431, -0.125100632650120),
+                             float3(-0.204310848200921, 1.495898509750939, -0.291587661550018),
+                             float3(-0.023685020970341, -0.420127011030270, 1.443812032000612)),
+                   0.0);
+    }
+    camera = float3(vLogDecode(encoded.x), vLogDecode(encoded.y), vLogDecode(encoded.z));
+    return max(camMatrix(camera,
+                         float3(1.806573570346048, -0.695698131346300, -0.110878567820157),
+                         float3(-0.170089035422901, 1.305954766066613, -0.135864821747590),
+                         float3(-0.025205692416949, -0.154467764144244, 1.179673668428944)),
+               0.0);
 }
 
 float pqEncode(float nits) {
@@ -316,16 +380,8 @@ float3 encodeOutput(float3 linRgb) {
 [numthreads(64, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
     if (id.x >= count) return;
-    float3 encoded = inputPixels[id.x].xyz;
-    float3 linRgb;
-    if (appleLog != 0) {
-        float3 lin2020 = float3(appleLogDecode(encoded.x), appleLogDecode(encoded.y),
-                                appleLogDecode(encoded.z));
-        linRgb = max(bt2020ToSrgb(lin2020), 0.0);
-    } else {
-        linRgb = float3(srgbDecode(encoded.x), srgbDecode(encoded.y), srgbDecode(encoded.z));
-    }
-    linRgb *= exposureGain;
+    const float3 encoded = inputPixels[id.x].xyz;
+    const float3 linRgb = decodeInput(encoded) * exposureGain;
 
     float3 cmyFilm = filmCmy(linRgb);
     float3 rgb;
@@ -411,7 +467,7 @@ struct GpuFilm::Impl {
         int scanNegative;
         int gamutCompress;
         int hdrMode;
-        int appleLog;
+        int inputMode;
         float exposureGain;
         float contrast;
         float peakNits;
@@ -539,7 +595,7 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
     p.scanNegative = options.scan == ScanMode::Negative ? 1 : 0;
     p.gamutCompress = options.gamutCompress ? 1 : 0;
     p.hdrMode = options.hdr == HdrMode::Pq ? 1 : (options.hdr == HdrMode::Hlg ? 2 : 0);
-    p.appleLog = options.input == InputTransfer::AppleLog ? 1 : 0;
+    p.inputMode = static_cast<int>(options.input);
     p.exposureGain = static_cast<float>(std::exp2(options.exposureEv));
     p.contrast = static_cast<float>(options.contrast);
     p.peakNits = static_cast<float>(options.peakNits);

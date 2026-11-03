@@ -1011,6 +1011,32 @@
 
 ---
 
+## D060 · 多相机 Log 输入（S-Log3 / C-Log3 / V-Log）
+
+- **日期**：2026-11-03
+- **背景**：输入只有 sRGB 和 Apple Log。Sony / Canon / Panasonic 的 Log 素材要先用别处转成 sRGB 或 Apple Log 才能进管线，等于把最脏的一步留给用户。
+- **实现**：
+  - `InputTransfer` 扩成 `Srgb / AppleLog / SLog3 / CLog3 / VLog`；`--input` 接受 `s-log3`、`c-log3`、`v-log`（也接受无连字符写法）。
+  - 曲线（逐行对齐 colour-science 0.4.7）：
+    - **S-Log3**：`171.2102946929/1023` 分段，261.5 / 420 / 0.19 / 0.01 常数；
+    - **C-Log3 v1.2**：0.097465473 / 0.15277891 三段，`×0.9` 的 reflection 输出；
+    - **V-Log**：`0.181` 分段，`c=0.241514, d=0.598206, b=0.00873`。
+  - 色域：S-Gamut3.Cine、Cinema Gamut、V-Gamut → 线性 Rec.709 的 3×3 矩阵，全部取自 `colour.matrix_RGB_to_RGB`（都是 D65，无色适应）。
+  - CPU：`sr::decodeInputToLinearSrgb()` 统一做“曲线 → 矩阵 → 负值钳 0”，`FilmModel::transformFrom`、`convert`、预览服务端都改用它。
+  - GPU：着色器里的 `appleLog` 布尔换成 `inputMode`（0–4），HLSL 与 MSL 都加同一组曲线和矩阵，保证 `--engine spectral-gpu` 对新输入同样有效。
+  - UI：“画面类型”下拉增加 S-Log3 / C-Log3 / V-Log；选任何 Log 输入时自动勾上 DIR 耦合剂与 OkLCh 压缩。
+- **验证**：
+  - 三条曲线在 0..1 的 **101 点扫描与 colour-science 完全一致（max |diff| = 0）**；`s-log3` 18% 灰码值 0.410557185 → 0.180000000。
+  - `test_transfer` 加入曲线参考值、完整线性 sRGB 转换（含负值钳制）与解析名检查。
+  - `test_gpu_film` 加入 S-Log3 / C-Log3 / V-Log 三个 parity 用例；Windows 本机 CPU vs D3D11 **110.67 dB**（320×180）。
+  - `lut bake --input c-log3` 正常出表。
+- **后果**：
+  - 四种 Log 素材可以直接进 LUT 烘焙、`lut apply`、视频、预览和 UI，不再需要外部转换。
+  - 没有自动识别：`--input` 仍要用户选（或 UI 下拉），因为同一段素材的 Log 曲线无法可靠地从像素猜出来。
+  - 色域按各家标准配对（S-Gamut3.Cine / Cinema Gamut / V-Gamut）；如果素材用的是别的 gamut（例如 S-Gamut3），需要以后加选项。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

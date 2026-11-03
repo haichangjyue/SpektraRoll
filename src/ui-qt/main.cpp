@@ -993,6 +993,9 @@ private:
                     QStringLiteral("视频 (*.mov *.mp4 *.mxf)"))));
         source_ = new QComboBox;
         source_->addItem(QStringLiteral("Apple Log（iPhone）"), QStringLiteral("apple-log"));
+        source_->addItem(QStringLiteral("Sony S-Log3"), QStringLiteral("s-log3"));
+        source_->addItem(QStringLiteral("Canon C-Log3"), QStringLiteral("c-log3"));
+        source_->addItem(QStringLiteral("Panasonic V-Log"), QStringLiteral("v-log"));
         source_->addItem(QStringLiteral("普通 SDR 素材"), QStringLiteral("srgb"));
         materialSection->addWidget(labeledRow(QStringLiteral("画面类型"), source_));
         materialSection->addWidget(labeledRow(
@@ -1362,10 +1365,10 @@ private:
         connect(source_, &QComboBox::currentIndexChanged, this, [this](int) {
             originalImage_ = QImage();
             originalTime_ = -1.0;
-            const bool appleLog =
-                source_->currentData().toString() == QStringLiteral("apple-log");
-            couplers_->setChecked(appleLog);
-            gamut_->setChecked(appleLog);
+            const bool isLog =
+                source_->currentData().toString() != QStringLiteral("srgb");
+            couplers_->setChecked(isLog);
+            gamut_->setChecked(isLog);
             markLookChanged();
         });
         connect(scan_, &QComboBox::currentIndexChanged, this,

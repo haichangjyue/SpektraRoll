@@ -434,19 +434,9 @@ Rgb FilmModel::transform(Rgb srgb) const {
 }
 
 Rgb FilmModel::transformFrom(const BakeOptions& options, Rgb value) const {
+    const double encoded[3] = {value.r, value.g, value.b};
     double linear[3];
-    if (options.input == InputTransfer::AppleLog) {
-        const double code[3] = {value.r, value.g, value.b};
-        double lin2020[3];
-        // No per-channel clamp before the matrix: below-black codes decode
-        // negative and still contribute to the hue near black.
-        for (int c = 0; c < 3; ++c) lin2020[c] = appleLogDecode(code[c]);
-        bt2020ToSrgb(lin2020, linear);
-        for (int c = 0; c < 3; ++c) linear[c] = std::max(0.0, linear[c]);
-    } else {
-        const double encoded[3] = {value.r, value.g, value.b};
-        for (int c = 0; c < 3; ++c) linear[c] = srgbDecode(encoded[c]);
-    }
+    decodeInputToLinearSrgb(options.input, encoded, linear);
     if (options.exposureEv != 0.0) {
         const double gain = std::exp2(options.exposureEv);
         for (int c = 0; c < 3; ++c) linear[c] *= gain;

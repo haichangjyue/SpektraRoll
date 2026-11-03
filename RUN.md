@@ -54,6 +54,10 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 
 ### 看 Apple Log 真实素材（M2）
 
+> 现在输入不止 Apple Log：CLI 的 `--input` 和界面左栏“画面类型”都可以选
+> **Sony S-Log3 / Canon C-Log3 / Panasonic V-Log**（D060）；选任何 Log 都会自动
+> 用对应曲线和色域解码。
+
 双击：
 
 ```

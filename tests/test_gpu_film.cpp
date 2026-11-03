@@ -178,6 +178,20 @@ int main() {
     negativeHdr.hdr = sr::HdrMode::Pq;
     runCase(srgbModel, negativeHdr, "apple-log / negative / PQ", tolerance);
 
+    // Camera log inputs (D060): the shader must decode the curve and the gamut
+    // matrix exactly like the CPU reference.
+    sr::BakeOptions slog3 = negative;
+    slog3.input = sr::InputTransfer::SLog3;
+    runCase(srgbModel, slog3, "s-log3 / negative", tolerance);
+
+    sr::BakeOptions clog3 = negative;
+    clog3.input = sr::InputTransfer::CLog3;
+    runCase(srgbModel, clog3, "c-log3 / negative", tolerance);
+
+    sr::BakeOptions vlog = negative;
+    vlog.input = sr::InputTransfer::VLog;
+    runCase(srgbModel, vlog, "v-log / negative", tolerance);
+
     sr::FilmModelOptions couplerOptions;
     couplerOptions.couplers = true;
     sr::FilmModel couplerModel;

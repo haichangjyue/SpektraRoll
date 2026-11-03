@@ -6,12 +6,12 @@ Open-source spectral film simulation for **motion picture**.
 
 Status: **M5 in progress** — the M1 spectral chain bakes a real **Kodak Portra 400
 + Portra Endura** LUT with parity against the upstream Python model at
-**PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log** footage (BT.2020,
-log-encoded) as input, can either print it (`--scan print`) or scan the
-negative (`--scan negative`, much more latitude), writes SDR or **HDR
-(PQ/HLG)** as 16-bit PNG or unclipped **float/half EXR**, and renders clips in
-resumable segments while keeping the camera timecode. A **Qt 6 desktop UI**
-wraps the same pipeline.
+**PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log**, **Sony S-Log3**,
+**Canon C-Log3** and **Panasonic V-Log** footage as input, can either print it
+(`--scan print`) or scan the negative (`--scan negative`, much more latitude),
+writes SDR or **HDR (PQ/HLG)** as 16-bit PNG or unclipped **float/half EXR**,
+and renders clips in resumable segments while keeping the camera timecode. A
+**Qt 6 desktop UI** wraps the same pipeline.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -199,6 +199,11 @@ spektra-roll-cli lut bake --input apple-log --exposure 0.7 --out applelog.cube
 spektra-roll-cli convert --in frame.png --out frame_sdr.png --from apple-log --exposure 0.7
 spektra-roll-cli lut apply --lut applelog.cube --in frame.png --out frame_portra.png
 
+# Sony / Canon / Panasonic log inputs (native gamuts, D060)
+spektra-roll-cli lut bake --input s-log3 --scan negative --out slog3.cube
+spektra-roll-cli lut bake --input c-log3 --scan negative --out clog3.cube
+spektra-roll-cli lut bake --input v-log  --scan negative --out vlog.cube
+
 # scan the negative instead of printing it: more latitude, flatter look
 spektra-roll-cli lut bake --input apple-log --exposure 0.7 --scan negative --out neg.cube
 spektra-roll-cli lut apply --lut neg.cube --in frame.png --out frame_negative.png
@@ -259,7 +264,7 @@ src/core/       C++20 library, no UI, no I/O policy
   profile       spektrafilm profile JSON -> spectral data
   film_model    M1 spectral chain: upsampling, curves, print, scan
   metrics       PSNR and CIE76 delta E for parity checks
-  transfer      sRGB / Apple Log OETF, BT.2020 -> sRGB (M2)
+  transfer      sRGB / Apple Log / S-Log3 / C-Log3 / V-Log decode (M2, D060)
 src/cli/        headless entry point (render-farm friendly later)
 tests/          assert-based tests, no framework; frozen reference LUT
 data/profiles/  upstream CC BY-SA 4.0 film / paper data + NOTICE
