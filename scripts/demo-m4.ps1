@@ -9,7 +9,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [double]$Time = 1.5,
     [double]$Exposure = 0.7,
     [double]$Seconds = 2,
@@ -62,13 +62,13 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host ""
 
 Write-Host "1/4  Bake the SDR negative LUT..." -ForegroundColor Cyan
-& $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\m4-applelog-sdr.cube"
+& $exe lut bake --input s-log3 --exposure $Exposure --scan negative --out "out\m4-slog3-sdr.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "2/4  Render $Seconds s in $Segment s chunks..." -ForegroundColor Cyan
-& $exe video --lut "out\m4-applelog-sdr.cube" --in $Footage --out $out `
-    --trc srgb --duration $Seconds --segment $Segment --keep-parts --ffmpeg $ffmpeg
+& $exe video --lut "out\m4-slog3-sdr.cube" --in $Footage --out $out `
+    --in-matrix bt709 --trc srgb --duration $Seconds --segment $Segment --keep-parts --ffmpeg $ffmpeg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
@@ -84,8 +84,8 @@ if ($victims) {
 Write-Host ""
 Write-Host "4/4  Resume the same command..." -ForegroundColor Cyan
 Write-Host "     watch for 'part 1/2: already done'" -ForegroundColor DarkGray
-& $exe video --lut "out\m4-applelog-sdr.cube" --in $Footage --out $out `
-    --trc srgb --duration $Seconds --segment $Segment --resume --ffmpeg $ffmpeg
+& $exe video --lut "out\m4-slog3-sdr.cube" --in $Footage --out $out `
+    --in-matrix bt709 --trc srgb --duration $Seconds --segment $Segment --resume --ffmpeg $ffmpeg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $frames = (& $ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of default=nw=1:nk=1 $out) -join ""
@@ -102,7 +102,8 @@ Write-Host "  audio:     $audio"
 Write-Host ""
 Write-Host "What to look for:" -ForegroundColor Green
 Write-Host "  * the resumed run says 'part 1/2: already done' and renders only the rest"
-Write-Host "  * the final clip still has the camera timecode (15:38:35:00 on this footage)"
+Write-Host "  * the final clip still has the camera timecode (00:13:37:46 on this footage)"
+Write-Host "  * the PCM audio is muxed once; chunk boundaries have no AAC seam"
 Write-Host "  * the clip plays through the chunk boundary without a flash or a gap"
 Write-Host ""
 

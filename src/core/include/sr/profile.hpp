@@ -19,6 +19,7 @@ struct ProfileInfo {
     std::string name;
     std::string type;               // "negative" | "positive"
     std::string support;            // "film" | "paper"
+    std::string stage;              // "filming" | "printing"
     std::string referenceIlluminant;  // illuminant the sensitivity was measured under
     std::string viewingIlluminant;    // illuminant the print is viewed under
 };

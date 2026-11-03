@@ -8,7 +8,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [double]$Time = 1.5,
     [double]$Exposure = 0.7,
     [double]$Grain = 0.4,
@@ -58,13 +58,13 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host ""
 
 Write-Host "1/5  烘焙 SDR 扫描负片 LUT..." -ForegroundColor Cyan
-& $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\spread-lut.cube"
+& $exe lut bake --input s-log3 --exposure $Exposure --scan negative --out "out\spread-lut.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "2/5  取一帧..." -ForegroundColor Cyan
 & $ffmpeg -v error -y -ss $Time -i $Footage -frames:v 1 `
-    -vf "scale=in_color_matrix=bt2020:in_range=tv:out_range=full" `
+    -vf "scale=in_color_matrix=bt709:in_range=auto:out_range=full" `
     -pix_fmt rgb48le "out\spread-frame.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -103,10 +103,10 @@ if ($null -ne $psnr) {
 Write-Host ""
 Write-Host "5/5  同一段 1 秒视频, 两个模型各渲一次..." -ForegroundColor Cyan
 & $exe video --lut "out\spread-lut.cube" --in $Footage --out "out\spread-box.mov" `
-    --duration 1 --codec prores --spread-model box @common --ffmpeg $ffmpeg
+    --in-matrix bt709 --duration 1 --codec prores --spread-model box @common --ffmpeg $ffmpeg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $exe video --lut "out\spread-lut.cube" --in $Footage --out "out\spread-physical.mov" `
-    --duration 1 --codec prores --spread-model physical `
+    --in-matrix bt709 --duration 1 --codec prores --spread-model physical `
     --halation-spread $HalationSpread --glare-spread $GlareSpread `
     --diffusion-spread $DiffusionSpread @common --ffmpeg $ffmpeg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -55,6 +55,33 @@ so we do not.
 `scripts\verify-m1.cmd`; it lets the acceptance check run without Python.
 Regenerate it only when the model is intentionally changed.
 
+## Cinema stocks (D065)
+
+The same harness accepts a cinema pair; the film's reference illuminant (D55 or
+T) and the print's viewing illuminant (D50 or K75P) come from the profiles:
+
+```powershell
+X:\agent\tools\python\python.exe tools\parity\reference_model.py `
+    --film kodak_vision3_500t --paper kodak_2383 --size 17 `
+    --out out\reference_vision3_500t_2383.cube
+.\build\spektra-roll-cli.exe lut bake --film data\profiles\kodak_vision3_500t.json `
+    --paper data\profiles\kodak_2383.json --scan print --size 17 `
+    --out out\vision3-2383-17.cube
+.\build\spektra-roll-cli.exe lut compare --a out\reference_vision3_500t_2383.cube `
+    --b out\vision3-2383-17.cube
+```
+
+| Metric | Value |
+|---|---|
+| PSNR | 88.85 dB |
+| max abs difference | 4.48e-4 |
+| mean abs difference | 1.33e-5 |
+| CIE76 delta E, mean / p95 / max | 0.0018 / 0.0050 / 0.0097 |
+| print exposure factor (C++ / upstream) | 1.720756678 / 1.720784699 |
+
+`tests/test_film_model.cpp` keeps six anchors from this run, so the cinema chain
+fails `ctest` without Python if it drifts.
+
 ## Camera log curves (D060 / D061)
 
 Every input decode (`slog3Decode`, `arriLogC3Decode`, `arriLogC4Decode`,

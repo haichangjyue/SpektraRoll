@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # D063 demo: OpenColorIO in the Qt UI.
 #   1) the UI reads the bundled ACES 2.0 config and lists every colour space
-#   2) the Bake button path bakes a Portra 400 negative LUT with "Apple Log"
+#   2) the Bake button path bakes a Portra 400 negative LUT with "S-Log3 S-Gamut3.Cine"
 #   3) the same table is baked from the CLI and compared (should be identical)
 #   4) a real frame is rendered with the UI-baked LUT
 #
@@ -12,7 +12,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [string]$Config = "",
     [double]$Time = 1.5
 )
@@ -55,7 +55,7 @@ Write-Host " SpektraRoll Qt 界面 + OpenColorIO (D063)" -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "1/4  界面读取配置: 列出所有色彩空间并烘一张 Apple Log LUT..." -ForegroundColor Cyan
+Write-Host "1/4  界面读取配置: 列出所有色彩空间并烘一张 S-Log3 LUT..." -ForegroundColor Cyan
 # A GUI-subsystem exe is not waited for by `&`, so use Start-Process -Wait with
 # redirected output (same reason the preview selftest lives in a script).
 $selftestOut = Join-Path $out "selftest.out.txt"
@@ -81,7 +81,7 @@ $uiLut = Join-Path $out "lut-ui.cube"
 
 Write-Host ""
 Write-Host "2/4  同一个参数用 CLI 再烘一张, 两张表逐点比较..." -ForegroundColor Cyan
-& $cli lut bake --ocio-config $Config --ocio-input "Apple Log" --scan negative `
+& $cli lut bake --ocio-config $Config --ocio-input "S-Log3 S-Gamut3.Cine" --scan negative `
     --contrast 1.15 --couplers on --gamut oklch --exposure 0.70 `
     --out (Join-Path $out "lut-cli.cube") | Out-Null
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -113,7 +113,7 @@ if (Test-Path $Footage) {
     }
     if (Test-Path $ffmpeg) {
         & $ffmpeg -v error -y -ss $Time -i $Footage -frames:v 1 `
-            -vf "scale=in_color_matrix=bt2020:in_range=tv:out_range=full" `
+            -vf "scale=in_color_matrix=bt709:in_range=auto:out_range=full" `
             -pix_fmt rgb48le $src
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
@@ -121,7 +121,7 @@ if (Test-Path $Footage) {
     Write-Host "找不到素材: $Footage (用内置测试图代替)" -ForegroundColor Yellow
     & $cli gen --out $src --bits 16 | Out-Null
 }
-& $cli convert --ocio-config $Config --ocio-input "Apple Log" --in $src --out $decoded --bits 16 |
+& $cli convert --ocio-config $Config --ocio-input "S-Log3 S-Gamut3.Cine" --in $src --out $decoded --bits 16 |
     Out-Null
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $cli lut apply --lut $uiLut --in $src --out $graded --bits 16 | Out-Null
@@ -132,7 +132,7 @@ Write-Host "     $graded  (UI 烘的 LUT: 解码 + Portra 400 负片)" -Foregrou
 Write-Host ""
 Write-Host "4/4  以后在界面里怎么用..." -ForegroundColor Cyan
 Write-Host "     左栏 '色彩管理（OCIO）' -> 勾选 -> 配置文件默认就是仓库里的 ACES 2.0"
-Write-Host "     点 '读取' -> 在 '色彩空间' 里选 Apple Log / ARRI LogC3 / ACEScg ..."
+Write-Host "     点 '读取' -> 在 '色彩空间' 里选 S-Log3 S-Gamut3.Cine / ARRI LogC3 / ACEScg ..."
 Write-Host "     '画面类型' 会自动变灰; 烘焙 LUT 时用的是 OCIO 色彩空间"
 Write-Host "     (光谱 GPU 不支持 OCIO, 会像 CLI 一样自动退回 CPU 光谱)"
 

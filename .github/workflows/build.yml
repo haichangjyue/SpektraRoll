@@ -129,6 +129,21 @@ jobs:
             grep -q "without OpenColorIO" ocio.txt
           fi
 
+      - name: Cinema stocks (D065)
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          # Vision3 500T is a T-illuminant film printed on 2383 (K75P viewing).
+          "$exe" lut bake --film data/profiles/kodak_vision3_500t.json \
+            --paper data/profiles/kodak_2383.json --scan print --out cine-500t.cube
+          # Daylight Vision3 on the alternative print film.
+          "$exe" lut bake --film data/profiles/kodak_vision3_250d.json \
+            --paper data/profiles/kodak_2393.json --scan print --out cine-250d.cube
+          "$exe" lut info --lut cine-500t.cube
+          ls -l cine-500t.cube cine-250d.cube
+
       - name: Bake the M1 film LUT and compare with the frozen reference
         shell: bash
         run: |

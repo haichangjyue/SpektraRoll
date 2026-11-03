@@ -291,6 +291,10 @@ def dump_tables(chain: ColourChain, path: Path) -> None:
             ("kIlluminantD55", chain.reference_illuminant),
             ("kIlluminantD50", chain.viewing_illuminant),
             ("kIlluminantThKg3", chain.print_illuminant_raw),
+            # D065: the two illuminants the cine stocks need. Independent of
+            # the chain so a Portra run can still dump the whole file.
+            ("kIlluminantT", standard_illuminant("T")),
+            ("kIlluminantK75P", standard_illuminant("K75P")),
             ("kMallettBasis", basis),
         ):
             handle.write(f"extern const float {name}[] = {{\n")

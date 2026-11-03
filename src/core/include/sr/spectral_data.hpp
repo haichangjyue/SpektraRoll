@@ -26,6 +26,10 @@ extern const float kCmfs[];
 extern const float kIlluminantD55[];
 extern const float kIlluminantD50[];
 extern const float kIlluminantThKg3[];
+// D065: T (tungsten / CIE A, the Vision3 200T/500T reference) and K75P
+// (Kinoton 75P, the projector light a 2383 print is viewed under).
+extern const float kIlluminantT[];
+extern const float kIlluminantK75P[];
 // Mallett 2019 sRGB basis, interleaved per wavelength: 81 * 3.
 extern const float kMallettBasis[];
 

@@ -18,6 +18,80 @@ double nanToZero(double value) { return std::isnan(value) ? 0.0 : value; }
 
 double normCdf(double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); }
 
+// CAT02, the transform colour-science uses by default in XYZ_to_RGB (D065).
+constexpr double kCat02[3][3] = {{0.7328, 0.4296, -0.1624},
+                                 {-0.7036, 1.6975, 0.0061},
+                                 {0.0030, 0.0136, 0.9834}};
+constexpr double kCat02Inverse[3][3] = {{1.096124, -0.278869, 0.182745},
+                                        {0.454369, 0.473533, 0.072098},
+                                        {-0.009628, -0.005698, 1.015326}};
+
+// The illuminants the profiles name. D55 for most still stocks, T for the
+// tungsten Vision3, D50 for papers and K75P for a 2383/2393 print.
+const float* illuminantTable(const std::string& name) {
+    if (name == "D55") return data::kIlluminantD55;
+    if (name == "D50") return data::kIlluminantD50;
+    if (name == "T") return data::kIlluminantT;
+    if (name == "K75P") return data::kIlluminantK75P;
+    if (name == "TH-KG3") return data::kIlluminantThKg3;
+    return nullptr;
+}
+
+// White XYZ (Y = 1) of an illuminant, integrated with the same CMFs the scan
+// uses, so the adaptation agrees with the upstream `XYZ_to_RGB(illuminant=...)`.
+void whiteXyz(const std::vector<double>& spd, double white[3]) {
+    double xyz[3] = {0.0, 0.0, 0.0};
+    for (int l = 0; l < kN; ++l) {
+        for (int c = 0; c < 3; ++c) {
+            xyz[c] += spd[static_cast<size_t>(l)] * data::kCmfs[l * 3 + c];
+        }
+    }
+    const double y = xyz[1] > 1e-12 ? xyz[1] : 1.0;
+    for (int c = 0; c < 3; ++c) white[c] = xyz[c] / y;
+}
+
+// CAT02 from the viewing illuminant to D50. D50 maps to the exact identity so
+// every pre-D065 profile keeps its numbers bit for bit.
+void viewingToD50Matrix(const std::vector<double>& spd, double matrix[3][3]) {
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            matrix[i][j] = i == j ? 1.0 : 0.0;
+        }
+    }
+    double source[3];
+    double destination[3];
+    whiteXyz(spd, source);
+    const std::vector<double> d50(data::kIlluminantD50, data::kIlluminantD50 + kN);
+    whiteXyz(d50, destination);
+    double sourceCone[3];
+    double destinationCone[3];
+    bool identity = true;
+    for (int i = 0; i < 3; ++i) {
+        sourceCone[i] = 0.0;
+        destinationCone[i] = 0.0;
+        for (int j = 0; j < 3; ++j) {
+            sourceCone[i] += kCat02[i][j] * source[j];
+            destinationCone[i] += kCat02[i][j] * destination[j];
+        }
+        if (std::fabs(source[i] - destination[i]) > 1e-6) identity = false;
+    }
+    if (identity) return;
+
+    double scale[3];
+    for (int i = 0; i < 3; ++i) {
+        scale[i] = sourceCone[i] > 1e-12 ? destinationCone[i] / sourceCone[i] : 1.0;
+    }
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            double sum = 0.0;
+            for (int k = 0; k < 3; ++k) {
+                sum += kCat02Inverse[i][k] * scale[k] * kCat02[k][j];
+            }
+            matrix[i][j] = sum;
+        }
+    }
+}
+
 }  // namespace
 
 bool FilmModel::configure(const Profile& film, const Profile& paper,
@@ -30,18 +104,27 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
         error = "expected a film profile, got support '" + film.info.support + "'";
         return false;
     }
-    if (paper.info.support != "paper") {
-        error = "expected a paper profile, got support '" + paper.info.support + "'";
+    // D065: the second medium can be a paper, or a print film (2383/2393:
+    // support=film, stage=printing) in the cinema chain.
+    const bool secondIsPaper = paper.info.support == "paper";
+    const bool secondIsPrintFilm =
+        paper.info.support == "film" && paper.info.stage == "printing";
+    if (!secondIsPaper && !secondIsPrintFilm) {
+        error = "expected a paper or a printing film profile, got support '" + paper.info.support +
+                "' / stage '" + paper.info.stage + "'";
         return false;
     }
-    if (film.info.referenceIlluminant != "D55") {
-        error = "M1 supports reference illuminant D55 only, profile asks for '" +
-                film.info.referenceIlluminant + "'";
+    if (illuminantTable(film.info.referenceIlluminant) == nullptr) {
+        error = "unsupported film reference illuminant '" + film.info.referenceIlluminant +
+                "' (D55 and T are wired)";
         return false;
     }
-    if (paper.info.viewingIlluminant != "D50") {
-        error = "M1 supports viewing illuminant D50 only, profile asks for '" +
-                paper.info.viewingIlluminant + "'";
+    if (illuminantTable(film.info.viewingIlluminant) == nullptr) {
+        error = "unsupported film viewing illuminant '" + film.info.viewingIlluminant + "'";
+        return false;
+    }
+    if (illuminantTable(paper.info.viewingIlluminant) == nullptr) {
+        error = "unsupported print viewing illuminant '" + paper.info.viewingIlluminant + "'";
         return false;
     }
     if (!paper.model.valid()) {
@@ -200,9 +283,13 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
     }
 
     // Illuminants. The tables are already normalised to mean 1 over 380..780.
-    const std::vector<double> referenceIlluminant(data::kIlluminantD55,
-                                                 data::kIlluminantD55 + kN);
-    viewingIlluminant_.assign(data::kIlluminantD50, data::kIlluminantD50 + kN);
+    const float* filmReferenceTable = illuminantTable(film.info.referenceIlluminant);
+    const std::vector<double> referenceIlluminant(filmReferenceTable,
+                                                 filmReferenceTable + kN);
+    const float* filmViewingTable = illuminantTable(film.info.viewingIlluminant);
+    const float* printViewingTable = illuminantTable(paper.info.viewingIlluminant);
+    filmViewingIlluminant_.assign(filmViewingTable, filmViewingTable + kN);
+    printViewingIlluminant_.assign(printViewingTable, printViewingTable + kN);
 
     // Enlarger: 3400 K tungsten + KG3 heat filter, then the neutral CC
     // filters. `custom_dichroic_filters` uses these fixed edges/transitions.
@@ -241,10 +328,15 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
     }
     filmMidgrayGreen_ = 0.184 * midgrayGreen;
 
-    scanNormalization_ = 0.0;
+    filmScanNormalization_ = 0.0;
+    printScanNormalization_ = 0.0;
     for (int l = 0; l < kN; ++l) {
-        scanNormalization_ += viewingIlluminant_[static_cast<size_t>(l)] * data::kCmfs[l * 3 + 1];
+        const double cmfY = data::kCmfs[l * 3 + 1];
+        filmScanNormalization_ += filmViewingIlluminant_[static_cast<size_t>(l)] * cmfY;
+        printScanNormalization_ += printViewingIlluminant_[static_cast<size_t>(l)] * cmfY;
     }
+    viewingToD50Matrix(filmViewingIlluminant_, filmScanMatrix_);
+    viewingToD50Matrix(printViewingIlluminant_, printScanMatrix_);
 
     // Negative scan: invert the film's dye densities (no base density, so the
     // orange mask and the film base fall away) and scan the resulting virtual
@@ -382,6 +474,8 @@ bool FilmModel::gpuData(GpuFilmData& out) const {
             out.filmMatrix[r][c] = static_cast<float>(filmMatrix_[r][c]);
             out.couplersMatrix[r][c] = static_cast<float>(couplersMatrix_[r][c]);
             out.xyzD50ToSrgb[r][c] = static_cast<float>(data::kXyzD50ToSrgb[r * 3 + c]);
+            out.filmScanMatrix[r][c] = static_cast<float>(filmScanMatrix_[r][c]);
+            out.printScanMatrix[r][c] = static_cast<float>(printScanMatrix_[r][c]);
         }
     }
     for (int i = 0; i < kCurve; ++i) {
@@ -400,7 +494,8 @@ bool FilmModel::gpuData(GpuFilmData& out) const {
             out.cmfs[l][c] = static_cast<float>(data::kCmfs[l * 3 + c]);
         }
         out.printIlluminant[l] = static_cast<float>(printIlluminant_[l]);
-        out.viewingIlluminant[l] = static_cast<float>(viewingIlluminant_[l]);
+        out.viewingIlluminant[l] = static_cast<float>(filmViewingIlluminant_[l]);
+        out.printViewingIlluminant[l] = static_cast<float>(printViewingIlluminant_[l]);
         out.filmBaseDensity[l] = static_cast<float>(filmBaseDensity_[l]);
         out.paperBaseDensity[l] = static_cast<float>(paperBaseDensity_[l]);
     }
@@ -414,7 +509,8 @@ bool FilmModel::gpuData(GpuFilmData& out) const {
                            (kCurve - 1));
     out.filmMidgrayGreen = static_cast<float>(filmMidgrayGreen_);
     out.printExposureFactor = static_cast<float>(printExposureFactor_);
-    out.scanNormalization = static_cast<float>(scanNormalization_);
+    out.scanNormalization = static_cast<float>(filmScanNormalization_);
+    out.printScanNormalization = static_cast<float>(printScanNormalization_);
     out.negativeGreyLuma = static_cast<float>(negativeGreyLuma_);
     for (int c = 0; c < 3; ++c) {
         out.filmMaxCmy[c] = static_cast<float>(filmMaxCmy_[c]);
@@ -490,14 +586,18 @@ void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const
         const double light =
             std::isnan(density) ? 0.0
                                 : std::pow(10.0, -density) *
-                                      viewingIlluminant_[static_cast<size_t>(l)];
+                                      filmViewingIlluminant_[static_cast<size_t>(l)];
         for (int c = 0; c < 3; ++c) xyz[c] += light * data::kCmfs[l * 3 + c];
     }
-    for (int c = 0; c < 3; ++c) xyz[c] /= scanNormalization_;
+    for (int c = 0; c < 3; ++c) xyz[c] /= filmScanNormalization_;
+    double adapted[3] = {0.0, 0.0, 0.0};
     for (int c = 0; c < 3; ++c) {
-        linearSrgb[c] = data::kXyzD50ToSrgb[c * 3 + 0] * xyz[0] +
-                        data::kXyzD50ToSrgb[c * 3 + 1] * xyz[1] +
-                        data::kXyzD50ToSrgb[c * 3 + 2] * xyz[2];
+        for (int k = 0; k < 3; ++k) adapted[c] += filmScanMatrix_[c][k] * xyz[k];
+    }
+    for (int c = 0; c < 3; ++c) {
+        linearSrgb[c] = data::kXyzD50ToSrgb[c * 3 + 0] * adapted[0] +
+                        data::kXyzD50ToSrgb[c * 3 + 1] * adapted[1] +
+                        data::kXyzD50ToSrgb[c * 3 + 2] * adapted[2];
     }
 }
 
@@ -569,16 +669,21 @@ Rgb FilmModel::transformLinear(const double linear[3], const BakeOptions& option
         const double light =
             std::isnan(density)
                 ? 0.0
-                : std::pow(10.0, -density) * viewingIlluminant_[static_cast<size_t>(l)];
+                : std::pow(10.0, -density) *
+                      printViewingIlluminant_[static_cast<size_t>(l)];
         for (int c = 0; c < 3; ++c) xyz[c] += light * data::kCmfs[l * 3 + c];
     }
-    for (int c = 0; c < 3; ++c) xyz[c] /= scanNormalization_;
+    for (int c = 0; c < 3; ++c) xyz[c] /= printScanNormalization_;
+    double adapted[3] = {0.0, 0.0, 0.0};
+    for (int c = 0; c < 3; ++c) {
+        for (int k = 0; k < 3; ++k) adapted[c] += printScanMatrix_[c][k] * xyz[k];
+    }
 
     double rgb[3];
     for (int c = 0; c < 3; ++c) {
-        rgb[c] = data::kXyzD50ToSrgb[c * 3 + 0] * xyz[0] +
-                 data::kXyzD50ToSrgb[c * 3 + 1] * xyz[1] +
-                 data::kXyzD50ToSrgb[c * 3 + 2] * xyz[2];
+        rgb[c] = data::kXyzD50ToSrgb[c * 3 + 0] * adapted[0] +
+                 data::kXyzD50ToSrgb[c * 3 + 1] * adapted[1] +
+                 data::kXyzD50ToSrgb[c * 3 + 2] * adapted[2];
     }
     if (options.gamutCompress) {
         const Rgb mapped = compressGamutOklch(

@@ -6,7 +6,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [double]$Time = 1.5,
     [double]$Exposure = 0.7
 )
@@ -63,7 +63,7 @@ Write-Host ""
 
 Write-Host "1/4  取一帧, 再缩一张小图给 CPU/GPU 对照用..." -ForegroundColor Cyan
 & $ffmpeg -v error -y -ss $Time -i $Footage -frames:v 1 `
-    -vf "scale=in_color_matrix=bt2020:in_range=tv:out_range=full" `
+    -vf "scale=in_color_matrix=bt709:in_range=auto:out_range=full" `
     -pix_fmt rgb48le "out\log-inputs\src.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $ffmpeg -v error -y -i "out\log-inputs\src.png" -vf "scale=480:-2" `

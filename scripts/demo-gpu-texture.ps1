@@ -10,7 +10,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [double]$Seconds = 2,
     [double]$Grain = 0.4,
     [double]$Halation = 0.45,
@@ -54,12 +54,13 @@ New-Item -ItemType Directory -Force -Path "out" | Out-Null
 $shared = @(
     "video",
     "--engine", "spectral-gpu",
-    "--input", "apple-log",
+    "--input", "s-log3",
     "--scan", "negative",
     "--contrast", "1.15",
     "--couplers", "on",
     "--gamut", "oklch",
     "--exposure", "0.7",
+    "--in-matrix", "bt709",
     "--grain", $Grain,
     "--halation", $Halation,
     "--glare", $Glare,

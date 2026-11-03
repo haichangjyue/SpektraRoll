@@ -52,15 +52,20 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 
 觉得不对就告诉我"太黄了 / 太灰了 / 肤色太红"，我来调。
 
-### 看 Apple Log 真实素材（M2）
+### 看 Log 真实素材（M2）
 
-> 现在输入不止 Apple Log：CLI 的 `--input` 和界面左栏“画面类型”都可以选
+> 默认测试素材是 **Sony FX30 的 S-Log3**：`X:\agent\footage\C0113.MP4`
+> （3840×2160 / 50p / 10-bit，没有 color_space 标签）。这个文件要走
+> `--in-matrix bt709`（S-Gamut3.Cine 的容器矩阵）；界面已经按输入类型自动用
+> bt709，CLI 的 `auto` 对无标签素材仍按 D061 回退 bt2020。
+>
+> 现在输入不止 S-Log3：CLI 的 `--input` 和界面左栏“画面类型”都可以选
 > **Sony S-Log3（S-Gamut3.Cine / S-Gamut3）、Canon C-Log3、Panasonic V-Log、
-> ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate**（D060/D061）；
+> ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate、Apple Log**（D060/D061）；
 > 选任何 Log 都会自动用对应曲线和色域解码。
 >
-> 素材的 YUV→RGB 矩阵现在**跟着素材自己的标签走**（`--in-matrix auto`），
-> 不需要按相机去猜；标签写错时才用 `--in-matrix bt709` / `bt2020` 覆盖。
+> 素材的 YUV→RGB 矩阵**跟着素材自己的标签走**（`--in-matrix auto`）；
+> 标签缺失时才用 `--in-matrix bt709` / `bt2020` 覆盖。
 >
 > 想一次看清九种输入：双击 `scripts\demo-log-inputs.cmd`，会给每种输入烘一张
 > LUT、出一张图，并打印 CPU 与 GPU 的 PSNR。
@@ -71,7 +76,7 @@ X:\agent\SpektraRoll\scripts\demo-m1.cmd
 X:\agent\SpektraRoll\scripts\demo-m2.cmd
 ```
 
-它会用 `ffmpeg` 从 `X:\agent\footage\` 里的 `.mov` 抽一帧，然后出四张图：
+它会用 `ffmpeg` 从 `X:\agent\footage\C0113.MP4` 抽一帧，然后出四张图：
 
 - `out\m2-before.png` —— 只解码，不上胶片（对照）
 - `out\m2-after.png` —— 印片：Kodak Portra 400 + Endura（对比强，像洗出来的照片）
@@ -258,6 +263,29 @@ X:\agent\SpektraRoll\scripts\demo-log-inputs.cmd
 - 容器的 YUV→RGB 矩阵**跟着素材标签走**（`--in-matrix auto`），不用按相机猜；标签写错才用 `--in-matrix bt709` / `bt2020` 覆盖
 - 还没做自动识别 Log 格式：曲线无法从像素可靠推断，仍然要手动选
 
+## 电影片库（Vision3 / 2383，D065）
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-cine.cmd
+```
+
+它用同一帧 S-Log3 素材出三张：
+
+- **Vision3 500T + 2383**（电影负片 + 电影印片）
+- **Vision3 500T 负片扫描**（跳过印片，留更多余量）
+- **Portra 400 + Endura**（静态照片口味，对照）
+
+自己用的时候：
+
+- 片库：Vision3 50D / 250D / 200T / 500T、Verita 200D + 2383 / 2393 印片。界面里“相纸”下拉会显示 **“Kodak Vision 2383（电影印片）”**，选 Vision3 会自动切过去。
+- CLI：`lut bake --film data\profiles\kodak_vision3_500t.json --paper data\profiles\kodak_2383.json --scan print --input s-log3 --out x.cube`
+- Vision3 200T / 500T 是 **T 型灯**，2383 的观看光源是 **K75P**（放映机），模型会自动用对，不用手动设。
+- 视频渲染记得给无标签的 FX30 文件加 `--in-matrix bt709`。
+
+> 反转片（Ektachrome / Velvia / Provia / Kodachrome）还没接：它们需要“正片直扫”路径，不是印片。
+
 ## OpenColorIO（可选）
 
 双击：
@@ -269,8 +297,8 @@ X:\agent\SpektraRoll\scripts\demo-ocio.cmd
 四节，全部离线（配置在仓库里）：
 
 1. `ocio-info`：版本、配置名、自动选中的线性空间、配置里有哪些相机空间
-2. 同一帧：**内置 Apple Log 解码 vs OCIO 的 Apple Log**（本机 **93.6 dB**）
-3. 同一帧：**ACES 2.0 显示器变换**（SDR 100 nits），出一张 `out\ocio-demo\apple-aces2-sdr.png`
+2. 同一帧：**内置 S-Log3 解码 vs OCIO 的 S-Log3 S-Gamut3.Cine**（本机 **61.4 dB**）
+3. 同一帧：**ACES 2.0 显示器变换**（SDR 100 nits），出一张 `out\ocio-demo\slog3-aces2-sdr.png`
 4. 同一张负片 LUT：**内置 ARRI LogC3 vs OCIO 的 ARRI LogC3**（本机 **63.9 dB**）
 
 自己用的时候：
@@ -278,11 +306,11 @@ X:\agent\SpektraRoll\scripts\demo-ocio.cmd
 - 先要有一个带 OCIO 的构建。Windows：双击 **`tools\ocio\build-ocio.cmd`** 编一次（约 15–20 分钟，编到 `X:\agent\tools\ocio`，之后不用再编）；macOS：`brew install opencolorio`，然后 `cmake -DCMAKE_PREFIX_PATH="$(brew --prefix)"`。
 - 看配置里有什么：`spektra-roll-cli ocio-info --ocio-config <配置.ocio>`（不填 `--ocio-config` 就用环境变量 `$OCIO`）。
 - 用任意色彩空间烘 LUT：`lut bake --ocio-config <配置> --ocio-input "ARRI LogC3 (EI800)" --scan negative --out x.cube`。**解码已经烘进 LUT，之后 `lut apply` / `video` 不需要 OCIO。**
-- 只解码或看显示器变换：`convert --ocio-config <配置> --ocio-input "Apple Log" --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" --in a.png --out b.png`。
+- 只解码或看显示器变换：`convert --ocio-config <配置> --ocio-input "S-Log3 S-Gamut3.Cine" --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" --in a.png --out b.png`。
 - 光谱视频（`--engine spectral`）也能直接吃 OCIO 输入；`--engine spectral-gpu` 会打 warning 并回退 CPU（着色器里还没有 OCIO）。
 - 没有 OCIO 的构建**一切照旧**，只会明确告诉你“这个构建没有 OpenColorIO”，不会静默跳过。
 
-**界面里怎么用**（D063）：左栏 **“色彩管理（OCIO）”** → 勾选 → 配置文件默认就是仓库里的 ACES 2.0 → 点 **读取** → 在 **色彩空间** 里选 `Apple Log` / `ARRI LogC3 (EI800)` / `ACEScg` 等。勾选后“画面类型”会自动变灰；烘焙、光谱预览、渲染和“按住看原片”都走同一个 CLI。界面不链接 OCIO，所以它需要带 OCIO 的 CLI（完整构建 `build\spektra-roll-cli.exe`）；只有 `build-ui\` 的便携包会提示“这个构建没有 OpenColorIO”，可以用 `SPEKTRA_CLI` 指到别处。
+**界面里怎么用**（D063）：左栏 **“色彩管理（OCIO）”** → 勾选 → 配置文件默认就是仓库里的 ACES 2.0 → 点 **读取** → 在 **色彩空间** 里选 `S-Log3 S-Gamut3.Cine` / `ARRI LogC3 (EI800)` / `ACEScg` 等。勾选后“画面类型”会自动变灰；烘焙、光谱预览、渲染和“按住看原片”都走同一个 CLI。界面不链接 OCIO，所以它需要带 OCIO 的 CLI（完整构建 `build\spektra-roll-cli.exe`）；只有 `build-ui\` 的便携包会提示“这个构建没有 OpenColorIO”，可以用 `SPEKTRA_CLI` 指到别处。
 
 不点鼠标的验收：
 
@@ -309,8 +337,8 @@ X:\agent\SpektraRoll\scripts\build-ui.cmd
 - **左栏**：素材（视频、画面类型、ffmpeg）、色彩管理（OCIO：配置文件 / 色彩空间）、胶片与相纸（LUT、烘焙）、输出（文件、编码、起始、帧数、分段）
 - **中间**：画布；下面是素材信息条、时间线、状态条（进度条）
 - **右栏**：按冲印流程分四页：
-  - **显影前**：曝光、**胶片选择**（11 支彩色负片）、DIR 耦合剂、颗粒/稳定度/光晕
-  - **显影后**：**相纸选择**（6 种）、扫描方式、反差、OkLCh 色域压缩、眩光/扩散、预览时间
+  - **显影前**：曝光、**胶片选择**（16 支彩色负片：11 支静态 + Vision3/Verita）、DIR 耦合剂、颗粒/稳定度/光晕
+  - **显影后**：**相纸选择**（6 种相纸 + 2 种电影印片 2383/2393）、扫描方式、反差、OkLCh 色域压缩、眩光/扩散、预览时间
   - **队列**、**日志**
 - **顶栏**：预览一帧、按住看原片、渲染整段、加入队列、取消、输出文件夹；右上角是文件名和 FIT 徽章
 

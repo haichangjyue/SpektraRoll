@@ -218,6 +218,28 @@ int main() {
     runCase(couplerModel, couplerNegative, "couplers / negative +gamut", tolerance);
     runCase(couplerModel, sr::BakeOptions{}, "couplers / print", tolerance);
 
+    // D065: the cinema chain. Vision3 500T uses the T reference illuminant and
+    // the 2383 print is scanned under K75P, so both extra matrices and the
+    // second viewing illuminant must cross the constant buffer intact.
+    sr::Profile cineFilm;
+    sr::Profile cinePrint;
+    std::array<double, 3> cineFilters{};
+    if (!sr::loadProfile(root + "/data/profiles/kodak_vision3_500t.json", cineFilm, error) ||
+        !sr::loadProfile(root + "/data/profiles/kodak_2383.json", cinePrint, error) ||
+        !sr::loadNeutralFilters(root + "/data/profiles/neutral_print_filters.json",
+                                cinePrint.info.stock, cineFilm.info.stock, "TH-KG3",
+                                cineFilters, error)) {
+        std::fprintf(stderr, "FAIL: cine profile load: %s\n", error.c_str());
+        return 1;
+    }
+    sr::FilmModel cineModel;
+    if (!cineModel.configure(cineFilm, cinePrint, cineFilters, error)) {
+        std::fprintf(stderr, "FAIL: cine configure: %s\n", error.c_str());
+        return 1;
+    }
+    runCase(cineModel, sr::BakeOptions{}, "vision3 500T / 2383 / print", tolerance);
+    runCase(cineModel, slog3, "vision3 500T / 2383 / s-log3 neg", tolerance);
+
     if (g_failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

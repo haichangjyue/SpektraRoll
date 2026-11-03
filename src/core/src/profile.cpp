@@ -214,6 +214,7 @@ bool loadProfile(const std::string& path, Profile& out, std::string& error) {
     readString(*info, "name", out.info.name);
     readString(*info, "type", out.info.type);
     readString(*info, "support", out.info.support);
+    readString(*info, "stage", out.info.stage);
     readString(*info, "reference_illuminant", out.info.referenceIlluminant);
     readString(*info, "viewing_illuminant", out.info.viewingIlluminant);
 

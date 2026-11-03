@@ -163,6 +163,58 @@ int main() {
     check(model.transform({0.5f, 0.5f, 0.5f}).g != couplerModel.transform({0.5f, 0.5f, 0.5f}).g,
           "couplers change the result");
 
+    // D065: cinema chain. Vision3 500T is measured under T and the 2383 print is
+    // viewed under K75P. Anchors from tools/parity/reference_model.py (same 33^3
+    // bake, PSNR 88.85 dB at 17^3).
+    sr::Profile cineFilm;
+    sr::Profile cinePrint;
+    check(sr::loadProfile(root + "/data/profiles/kodak_vision3_500t.json", cineFilm, error),
+          "Vision3 500T profile loads");
+    check(sr::loadProfile(root + "/data/profiles/kodak_2383.json", cinePrint, error),
+          "2383 print profile loads");
+    check(cineFilm.info.stage == "filming" && cinePrint.info.stage == "printing",
+          "cinema profile stages");
+    sr::Triple cineFilters{0.0, 0.0, 0.0};
+    check(sr::loadNeutralFilters(root + "/data/profiles/neutral_print_filters.json",
+                                 cinePrint.info.stock, cineFilm.info.stock, "TH-KG3",
+                                 cineFilters, error),
+          "cinema neutral filters load");
+    sr::FilmModel cine;
+    check(cine.configure(cineFilm, cinePrint, cineFilters, error), "cinema chain configures");
+    checkNear(cine.printExposureFactor(), 1.720784698861, 5e-5, "cinema print exposure factor");
+    checkRgb(cine.transform({0.0f, 0.0f, 0.0f}), {0.00273f, 0.00372f, 0.00335f}, 5e-4,
+             "cinema probe 0.0");
+    checkRgb(cine.transform({0.184f, 0.184f, 0.184f}), {0.03846f, 0.06614f, 0.05668f}, 5e-4,
+             "cinema probe 0.184");
+    checkRgb(cine.transform({0.5f, 0.5f, 0.5f}), {0.49671f, 0.49776f, 0.49658f}, 5e-4,
+             "cinema probe 0.5");
+    checkRgb(cine.transform({1.0f, 1.0f, 1.0f}), {0.83715f, 0.82096f, 0.77999f}, 5e-4,
+             "cinema probe 1.0");
+    checkRgb(cine.transform({0.8f, 0.2f, 0.2f}), {0.60061f, 0.20366f, 0.16389f}, 5e-4,
+             "cinema probe warm red");
+    checkRgb(cine.transform({0.2f, 0.6f, 0.2f}), {0.09026f, 0.42742f, 0.26134f}, 5e-4,
+             "cinema probe green");
+
+    // The daylight Vision3 and the alternative print film take the same path.
+    sr::Profile daylightFilm;
+    sr::Profile premierPrint;
+    check(sr::loadProfile(root + "/data/profiles/kodak_vision3_250d.json", daylightFilm, error),
+          "Vision3 250D profile loads");
+    check(sr::loadProfile(root + "/data/profiles/kodak_2393.json", premierPrint, error),
+          "2393 print profile loads");
+    sr::Triple daylightFilters{0.0, 0.0, 0.0};
+    check(sr::loadNeutralFilters(root + "/data/profiles/neutral_print_filters.json",
+                                 premierPrint.info.stock, daylightFilm.info.stock, "TH-KG3",
+                                 daylightFilters, error),
+          "250D / 2393 neutral filters load");
+    sr::FilmModel daylight;
+    check(daylight.configure(daylightFilm, premierPrint, daylightFilters, error),
+          "250D / 2393 configures");
+    const sr::Rgb daylightGrey = daylight.transform({0.5f, 0.5f, 0.5f});
+    check(std::fabs(daylightGrey.r - daylightGrey.g) < 0.01f &&
+              std::fabs(daylightGrey.g - daylightGrey.b) < 0.01f,
+          "250D / 2393 mid-grey is neutral");
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

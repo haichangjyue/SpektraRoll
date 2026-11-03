@@ -163,6 +163,11 @@ void printUsage() {
         "      OkLCh chroma; negative scans default to it, print keeps it off.\n"
         "      --couplers on adds DIR interlayer inhibition (Apple Log defaults\n"
         "      to on, the sRGB reference keeps it off).\n"
+        "      --paper also accepts a cinema print film (kodak_2383 / kodak_2393).\n"
+        "      Vision3 uses its T (tungsten) or D55 reference illuminant and the\n"
+        "      2383/2393 print is viewed under K75P automatically (D065):\n"
+        "        lut bake --film data/profiles/kodak_vision3_500t.json \\\n"
+        "                 --paper data/profiles/kodak_2383.json --scan print\n"
         "      --hdr pq writes ST 2084 code values with the image's white at\n"
         "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
@@ -1593,7 +1598,7 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     const std::string seek = start > 0.0 ? " -ss " + formatSeconds(start) : "";
     const std::string limit = frameCount > 0 ? " -frames:v " + std::to_string(frameCount) : "";
     const std::string filter =
-        "scale=in_color_matrix=" + job.inMatrix + ":in_range=tv:out_range=full";
+        "scale=in_color_matrix=" + job.inMatrix + ":in_range=auto:out_range=full";
     // Hardware decode was measured on this footage and is not a win: QSV plus
     // hwdownload costs ~21.8 ms/frame against 19.5 ms for the software decoder
     // (D050), so the software path stays.
@@ -2613,7 +2618,7 @@ bool buildProxy(const Server& server, const std::string& clip, int width, int he
     const std::string command =
         shellQuote(server.ffmpeg) + " -v error -y -i " + shellQuote(clip) + " -an -vf " +
         shellQuote("scale=" + std::to_string(width) + ":" + std::to_string(height) +
-                   ":in_color_matrix=" + server.clipMatrix + ":in_range=tv:out_range=full") +
+                   ":in_color_matrix=" + server.clipMatrix + ":in_range=auto:out_range=full") +
         " -c:v libx264 -preset veryfast -crf 18 -g 1 -pix_fmt yuv420p " + shellQuote(path);
     if (runCommand(command) != 0 || !std::filesystem::exists(path)) {
         error = "could not build the preview proxy for " + clip;
@@ -2722,7 +2727,7 @@ bool openClip(Server& server, const std::string& path, std::string& error) {
     const std::string decodeCmd =
         shellQuote(server.ffmpeg) + " -v error -i " + shellQuote(path) + " -vf " +
         shellQuote("scale=" + std::to_string(width) + ":" + std::to_string(height) +
-                   ":in_color_matrix=" + server.clipMatrix + ":in_range=tv:out_range=full") +
+                   ":in_color_matrix=" + server.clipMatrix + ":in_range=auto:out_range=full") +
         " -pix_fmt rgb48le -f rawvideo -";
 
     FILE* pipe = openPipe(decodeCmd, "rb");

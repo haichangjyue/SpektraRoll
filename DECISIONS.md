@@ -1139,6 +1139,52 @@
 
 ---
 
+## D064 · 测试素材换成 Sony FX30 S-Log3
+
+- **日期**：2026-11-04
+- **背景**：产品负责人提供 `X:\agent\footage\C0113.MP4`（Sony FX30，S-Log3 / S-Gamut3.Cine，3840×2160，50p，10-bit 4:2:2，6.24 s / 312 帧，**没有 color_space / transfer / primaries 标签，但 color_range 标成 full（pc）**；有 PCM 48 kHz 立体声音轨，相机 timecode 在 rtmd 数据流里：**00:13:37:46**）。旧的 iPhone `A001_11011538_C001.mov` 不再当测试素材。仓库从未跟踪过视频文件（`git ls-files` 里没有 `.mov`/`.mp4`），所以没有二进制要删，只有脚本和文档里的路径。
+- **实现**：
+  - UI `defaultInput()` → `C0113.MP4`；“画面类型”默认改成 `s-log3`。老安装如果保存的是旧默认路径（`A001_11011538_C001`）且输入是 Apple Log，载入时一次性迁到新素材 + S-Log3。
+  - 9 个 demo 脚本的 `$Footage` 默认值、ffmpeg 抽帧矩阵（`bt2020` → `bt709`）、`--input/--from apple-log`（→ `s-log3`）、产物名（`m2/m3/m4-applelog*` → `*-slog3*`）全部同步。
+  - `video` 调用显式加 `--in-matrix bt709`：这个文件没有标签，CLI 的 `auto` 按 D061 会回退 `bt2020`，对 S-Gamut3.Cine 是错的。
+  - ffmpeg 抽帧与 CLI 的 `video`/`preview` 解码从 `in_range=tv` 改成 **`in_range=auto`**：跟随素材的 `color_range` 标签；这个文件是全范围，硬编码 tv 会把 S-Log3 码值压暗约 1%，无标签素材仍然等价于 tv。
+  - OCIO 演示与 UI 自检改用 `S-Log3 S-Gamut3.Cine`（配置里存在）；`demo-ocio` 的对照从 Apple Log 改成 S-Log3。
+  - `demo-m4` 的分段/续渲演示保留相机 timecode（00:13:37:46）和 PCM 音频，不再写死 `--timecode`。
+- **验证**：
+  - ffprobe：3840×2160、50 fps、312 帧、yuv422p10le、`color_range=pc`（全范围）、无 color_space / transfer / primaries 标签；PCM 48 kHz 立体声；timecode 00:13:37:46 在 rtmd 数据流里。
+  - 抽帧：`in_range=auto` 与 `in_range=pc` 逐位相同，和 `in_range=tv` 不同——所以脚本/CLI 改用 `in_range=auto`，不再硬编码 tv。
+  - `demo-ocio`：内置 S-Log3 vs OCIO `S-Log3 S-Gamut3.Cine` **61.44 dB**（曲线一致，差异来自 ACES 的色域/白点转换）。
+  - `demo-ocio-ui`：UI 自检 52 个空间；UI 烘的 LUT 与 CLI **inf**；S-Log3 原片正常解码/出图。
+  - `demo-cine`：同一帧输出 Vision3 500T + 2383 / Vision3 负片 / Portra 400 三张。
+  - `demo-m4`：100 帧 / 2 段，续渲只补缺失段；输出 timecode **00:13:37:46**、音频 PCM。
+- **后果**：
+  - 4K50 素材的预览会走 960 px 代理；逐帧渲染成本约是 2.6 MP 的 2.4 倍（按像素计）。
+  - 无标签的 Sony XAVC 必须 `--in-matrix bt709`；UI 已按输入类型回退 bt709，CLI 的 `auto` 仍按 D061 回退 bt2020。
+
+---
+
+## D065 · 电影片库：Vision3 + 2383/2393 + T/K75P
+
+- **日期**：2026-11-04
+- **背景**：产品负责人选 **A（电影片库）**。仓库里 28 个 profile 有 11 个进不了管线：4 支 Vision3、Verita、2 种电影印片（2383/2393）、4 支反转片。对“动态影像胶片模拟器”来说，Vision3 + 2383 是核心片库。
+- **实现**：
+  - `ProfileInfo` 增加 `stage`；第二层乳剂接受 `support=paper` **或** `support=film + stage=printing`（2383/2393）。
+  - 参考光支持 **D55 / T**；观看光支持 **D50 / K75P**。新增 `kIlluminantT`（CIE A / Incandescent）与 `kIlluminantK75P`（Kinoton 75P），用 colour-science 0.4.7 生成、按上游同样的“均值 1”归一。
+  - 负片扫描用**胶片自己的** viewing illuminant（D50），印片扫描用**第二层乳剂的**（2383 是 K75P）。K75P → D50 用 CAT02 适应；D50 保持严格单位矩阵，旧片库数值逐位不变。
+  - CPU 与两个 GPU 后端（D3D11 / Metal）同步：常量缓冲新增 `printViewingIlluminant[81]`、两套扫描归一化与 3×3 矩阵；顺手补了 16 字节对齐。
+  - UI 片库：负片允许 `D55` 或 `T`，第二层允许相纸或电影印片；电影印片在下拉里标注“（电影印片）”。选 Vision3 会自动选中 2383。
+- **验证**：
+  - `lut bake --film kodak_vision3_500t --paper kodak_2383 --scan print` vs 上游 `tools/parity/reference_model.py`：17³ **88.85 dB**，max |diff| **4.48e-4**；6 个探针逐项一致。
+  - `test_film_model` 新增：片库 stage、印片曝光因子 **1.720784698861**、0.0 / 0.184 / 0.5 / 1.0 / 暖红 / 绿地的锚点；250D + 2393 中灰中性。
+  - `test_gpu_film` 新增：Vision3 500T/2383 的 print 与 S-Log3 negative，worst **1e-6**；`ctest` **10/10**。
+  - `spektra-roll-ui.exe --stocks-selftest`：**films=16 / papers=8**，Vision3 500T、Verita、2383、2393、Portra 400/Endura 全在。
+  - 200T + 2393、250D + 2383、Verita + 2383 都能烘表。
+- **后果**：
+  - 界面可用 profile 从 **17 → 24**（16 支负片 + 6 相纸 + 2 电影印片）；只剩 4 支反转片没接。
+  - 仍未做：反转片直扫（Ektachrome/Velvia/Provia/Kodachrome）、印片机 Y/M 微调 / 预闪 / 光源选择、Vision3 的颗粒/光晕物理模型、`--exr-linear` 的 OCIO 显示变换。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

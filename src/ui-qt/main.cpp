@@ -563,6 +563,33 @@ public:
         return status_ != nullptr ? status_->text() : QString();
     }
 
+    // `--stocks-selftest` (D065): the catalogue the UI builds from the profile
+    // JSON, checked without clicking. Prints counts and the cinema entries.
+    QString stocksSelfTest() {
+        const auto has = [](QComboBox* combo, const QString& name) {
+            for (int i = 0; i < combo->count(); ++i) {
+                if (combo->itemText(i).contains(name)) return true;
+            }
+            return false;
+        };
+        const bool vision3 = has(filmCombo_, QStringLiteral("Vision3 500T"));
+        const bool verita = has(filmCombo_, QStringLiteral("Verita"));
+        const bool print2383 = has(paperCombo_, QStringLiteral("2383"));
+        const bool print2393 = has(paperCombo_, QStringLiteral("2393"));
+        const bool portra = has(filmCombo_, QStringLiteral("Portra 400")) &&
+                            has(paperCombo_, QStringLiteral("Portra Endura"));
+        const bool ok = vision3 && verita && print2383 && print2393 && portra;
+        return QStringLiteral("%1 films=%2 papers=%3 vision3=%4 verita=%5 print=%6/%7 portra=%8")
+            .arg(ok ? QStringLiteral("ok") : QStringLiteral("error"))
+            .arg(filmCombo_->count())
+            .arg(paperCombo_->count())
+            .arg(vision3)
+            .arg(verita)
+            .arg(print2383)
+            .arg(print2393)
+            .arg(portra);
+    }
+
     // `--ocio-selftest` (D063): read the bundled config through the CLI, pick
     // Apple Log and bake a LUT through the same path as the Bake button.
     QString ocioSelfTest() {
@@ -582,7 +609,7 @@ public:
                    QLatin1Char(')');
         }
         ocioSpace_->setCurrentIndex(
-            std::max(0, ocioSpace_->findData(QStringLiteral("Apple Log"))));
+            std::max(0, ocioSpace_->findData(QStringLiteral("S-Log3 S-Gamut3.Cine"))));
         // A LUT bake is the point of this check; the spectral engines do not
         // need one (and would make this a no-op).
         {
@@ -756,19 +783,20 @@ private:
     }
 
     QString defaultInput() const {
-        const QString known =
-            QStringLiteral("X:/agent/footage/A001_11011538_C001.mov");
+        const QString known = QStringLiteral("X:/agent/footage/C0113.MP4");
         return QFileInfo::exists(known) ? known : QString();
     }
 
-    // Colour negative stocks (D55) and papers the M1 engine supports. Slide
-    // films (positive) and T-illuminant Vision3 need the direct-scan path that
-    // is not wired yet, so they stay out of the catalogue for now.
+    // Colour negative stocks and second mediums the engine supports (D065):
+    // D55 still stocks plus T/D55 Vision3, printed on a paper or on a cinema
+    // print film (2383/2393). Slide films (positive) still need the direct-scan
+    // path, so they stay out of the catalogue.
     void populateStocks() {
         struct Stock {
             QString path;
             QString name;
             QString target;
+            bool printFilm = false;
         };
         QVector<Stock> films;
         QVector<Stock> papers;
@@ -791,11 +819,17 @@ private:
                 info.value(QStringLiteral("reference_illuminant")).toString();
             Stock stock{entry.absoluteFilePath(),
                         info.value(QStringLiteral("name")).toString(entry.completeBaseName()),
-                        info.value(QStringLiteral("target_print")).toString()};
-            if (support == QStringLiteral("film") && stage == QStringLiteral("filming") &&
-                type == QStringLiteral("negative") && illuminant == QStringLiteral("D55")) {
+                        info.value(QStringLiteral("target_print")).toString(), false};
+            const bool filmingNegative =
+                support == QStringLiteral("film") && stage == QStringLiteral("filming") &&
+                type == QStringLiteral("negative") &&
+                (illuminant == QStringLiteral("D55") || illuminant == QStringLiteral("T"));
+            const bool printFilm =
+                support == QStringLiteral("film") && stage == QStringLiteral("printing");
+            if (filmingNegative) {
                 films.append(stock);
-            } else if (support == QStringLiteral("paper")) {
+            } else if (support == QStringLiteral("paper") || printFilm) {
+                stock.printFilm = printFilm;
                 papers.append(stock);
             }
         }
@@ -812,12 +846,14 @@ private:
                     break;
                 }
             }
-            if (!targetAvailable) continue;  // e.g. Vision3 -> 2383 print film, not wired yet
+            if (!targetAvailable) continue;
             filmCombo_->addItem(stock.name, stock.path);
             filmCombo_->setItemData(filmCombo_->count() - 1, stock.target, Qt::UserRole + 1);
         }
         for (const Stock& stock : papers) {
-            paperCombo_->addItem(stock.name, stock.path);
+            paperCombo_->addItem(
+                stock.printFilm ? stock.name + QStringLiteral("（电影印片）") : stock.name,
+                stock.path);
         }
         filmCombo_->blockSignals(false);
         paperCombo_->blockSignals(false);
@@ -1655,8 +1691,18 @@ private:
     void loadSettings() {
         QSettings settings(QStringLiteral("SpektraRoll"), QStringLiteral("SpektraRoll UI"));
         const QString defaultLut = repoRoot_ + QStringLiteral("/out/ui-portra400.cube");
-        inputEdit_->setText(
-            settings.value(QStringLiteral("paths/input"), defaultInput()).toString());
+        // D065: the bundled test clip is now the Sony FX30 S-Log3 recording.
+        // Migrate the old default so an existing install does not decode the
+        // new clip with the Apple Log curve.
+        QString storedInput =
+            settings.value(QStringLiteral("paths/input"), defaultInput()).toString();
+        QString storedSource =
+            settings.value(QStringLiteral("look/source"), QStringLiteral("s-log3")).toString();
+        if (storedInput.contains(QStringLiteral("A001_11011538_C001"))) {
+            storedInput = defaultInput();
+            if (storedSource == QStringLiteral("apple-log")) storedSource = QStringLiteral("s-log3");
+        }
+        inputEdit_->setText(storedInput);
         ffmpegEdit_->setText(
             settings.value(QStringLiteral("paths/ffmpeg"), defaultFfmpeg()).toString());
         lutEdit_->setText(settings.value(QStringLiteral("paths/lut"), defaultLut).toString());
@@ -1665,7 +1711,7 @@ private:
                                         repoRoot_ + QStringLiteral("/out/ui-render.mov"))
                                  .toString());
 
-        selectData(source_, settings.value(QStringLiteral("look/source"), QStringLiteral("apple-log")).toString());
+        selectData(source_, storedSource);
         const auto selectStock = [](QComboBox* combo, const QString& fileName) {
             for (int i = 0; i < combo->count(); ++i) {
                 if (QFileInfo(combo->itemData(i).toString()).fileName() == fileName) {
@@ -2327,7 +2373,7 @@ private:
             inputEdit_->text(),             QStringLiteral("-frames:v"),
             QStringLiteral("1"),            QStringLiteral("-vf"),
             QStringLiteral("scale=in_color_matrix=") + matrix +
-                QStringLiteral(":in_range=tv:out_range=full"),
+                QStringLiteral(":in_range=auto:out_range=full"),
             QStringLiteral("-pix_fmt"),     QStringLiteral("rgb48le"),
             source};
 
@@ -2508,7 +2554,7 @@ private:
                 if (!name.isEmpty()) ocioSpace_->addItem(name, name);
             }
             int index = ocioSpace_->findData(previous);
-            if (index < 0) index = ocioSpace_->findData(QStringLiteral("Apple Log"));
+            if (index < 0) index = ocioSpace_->findData(QStringLiteral("S-Log3 S-Gamut3.Cine"));
             if (index < 0) index = 0;
             ocioSpace_->setCurrentIndex(index);
         }
@@ -3372,8 +3418,11 @@ int main(int argc, char** argv) {
 
     MainWindow window;
     const QStringList arguments = QCoreApplication::arguments();
-    // The OCIO check only bakes a LUT; do not flash a window for scripts.
-    if (!arguments.contains(QStringLiteral("--ocio-selftest"))) window.show();
+    // The OCIO and stock checks only read JSON/bake a LUT; do not flash a window.
+    if (!arguments.contains(QStringLiteral("--ocio-selftest")) &&
+        !arguments.contains(QStringLiteral("--stocks-selftest"))) {
+        window.show();
+    }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &window,
                      [&window] { window.shutdownPreview(); });
 
@@ -3394,6 +3443,16 @@ int main(int argc, char** argv) {
         QTimer::singleShot(400, &window, [&window, &app] {
             const QString result = window.ocioSelfTest();
             std::printf("ocio selftest: %s\n", result.toUtf8().constData());
+            std::fflush(stdout);
+            window.shutdownPreview();
+            app.exit(result.startsWith(QStringLiteral("ok")) ? 0 : 1);
+        });
+    }
+    // D065: check the profile catalogue the UI builds.
+    if (arguments.contains(QStringLiteral("--stocks-selftest"))) {
+        QTimer::singleShot(400, &window, [&window, &app] {
+            const QString result = window.stocksSelfTest();
+            std::printf("stocks selftest: %s\n", result.toUtf8().constData());
             std::fflush(stdout);
             window.shutdownPreview();
             app.exit(result.startsWith(QStringLiteral("ok")) ? 0 : 1);

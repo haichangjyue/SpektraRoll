@@ -41,11 +41,14 @@ struct Params {
     float cmfs[81][4];
     float printIlluminant[81][4];
     float viewingIlluminant[81][4];
+    float printViewingIlluminant[81][4];
     float filmBaseDensity[81][4];
     float paperBaseDensity[81][4];
     float filmMatrix[3][4];
     float couplersMatrix[3][4];
     float xyzD50ToSrgb[3][4];
+    float filmScanMatrix[3][4];
+    float printScanMatrix[3][4];
     float filmMaxCmy[4];
     float negativeWhite[4];
     float negativeBlack[4];
@@ -57,6 +60,7 @@ struct Params {
     float filmMidgrayGreen;
     float printExposureFactor;
     float scanNormalization;
+    float printScanNormalization;
     float negativeGreyLuma;
     uint count;
     int couplersActive;
@@ -69,7 +73,11 @@ struct Params {
     float contrast;
     float peakNits;
     float strength;
+    // D065: keep the struct size a multiple of 16 bytes (MSL and host match).
     float pad1;
+    float pad2;
+    float pad3;
+    float pad4;
 };
 
 constant float kLog2Of10 = 3.321928094887362f;
@@ -369,6 +377,10 @@ float3 scanPositive(constant Params& p, float3 positive) {
         xyz += light * float3(p.cmfs[l][0], p.cmfs[l][1], p.cmfs[l][2]);
     }
     xyz /= p.scanNormalization;
+    xyz = float3(
+        dot(float3(p.filmScanMatrix[0][0], p.filmScanMatrix[0][1], p.filmScanMatrix[0][2]), xyz),
+        dot(float3(p.filmScanMatrix[1][0], p.filmScanMatrix[1][1], p.filmScanMatrix[1][2]), xyz),
+        dot(float3(p.filmScanMatrix[2][0], p.filmScanMatrix[2][1], p.filmScanMatrix[2][2]), xyz));
     return float3(
         dot(float3(p.xyzD50ToSrgb[0][0], p.xyzD50ToSrgb[0][1], p.xyzD50ToSrgb[0][2]), xyz),
         dot(float3(p.xyzD50ToSrgb[1][0], p.xyzD50ToSrgb[1][1], p.xyzD50ToSrgb[1][2]), xyz),
@@ -404,10 +416,14 @@ float3 printPath(constant Params& p, float3 cmyFilm) {
                         p.paperDensity[l][2] * cmyPaper.z;
         float light = (density != density)
                           ? 0.0f
-                          : exp2(-density * kLog2Of10) * p.viewingIlluminant[l][0];
+                          : exp2(-density * kLog2Of10) * p.printViewingIlluminant[l][0];
         xyz += light * float3(p.cmfs[l][0], p.cmfs[l][1], p.cmfs[l][2]);
     }
-    xyz /= p.scanNormalization;
+    xyz /= p.printScanNormalization;
+    xyz = float3(
+        dot(float3(p.printScanMatrix[0][0], p.printScanMatrix[0][1], p.printScanMatrix[0][2]), xyz),
+        dot(float3(p.printScanMatrix[1][0], p.printScanMatrix[1][1], p.printScanMatrix[1][2]), xyz),
+        dot(float3(p.printScanMatrix[2][0], p.printScanMatrix[2][1], p.printScanMatrix[2][2]), xyz));
     return float3(
         dot(float3(p.xyzD50ToSrgb[0][0], p.xyzD50ToSrgb[0][1], p.xyzD50ToSrgb[0][2]), xyz),
         dot(float3(p.xyzD50ToSrgb[1][0], p.xyzD50ToSrgb[1][1], p.xyzD50ToSrgb[1][2]), xyz),
@@ -558,11 +574,14 @@ struct GpuFilm::Impl {
         float cmfs[81][4];
         float printIlluminant[81][4];
         float viewingIlluminant[81][4];
+        float printViewingIlluminant[81][4];
         float filmBaseDensity[81][4];
         float paperBaseDensity[81][4];
         float filmMatrix[3][4];
         float couplersMatrix[3][4];
         float xyzD50ToSrgb[3][4];
+        float filmScanMatrix[3][4];
+        float printScanMatrix[3][4];
         float filmMaxCmy[4];
         float negativeWhite[4];
         float negativeBlack[4];
@@ -574,6 +593,7 @@ struct GpuFilm::Impl {
         float filmMidgrayGreen;
         float printExposureFactor;
         float scanNormalization;
+        float printScanNormalization;
         float negativeGreyLuma;
         unsigned int count;
         int couplersActive;
@@ -587,6 +607,9 @@ struct GpuFilm::Impl {
         float peakNits;
         float strength;
         float pad1;
+        float pad2;
+        float pad3;
+        float pad4;
     };
 
     id<MTLDevice> device = nil;
@@ -761,6 +784,7 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
         }
         p.printIlluminant[l][0] = data.printIlluminant[l];
         p.viewingIlluminant[l][0] = data.viewingIlluminant[l];
+        p.printViewingIlluminant[l][0] = data.printViewingIlluminant[l];
         p.filmBaseDensity[l][0] = data.filmBaseDensity[l];
         p.paperBaseDensity[l][0] = data.paperBaseDensity[l];
     }
@@ -769,6 +793,8 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
             p.filmMatrix[r][c] = data.filmMatrix[r][c];
             p.couplersMatrix[r][c] = data.couplersMatrix[r][c];
             p.xyzD50ToSrgb[r][c] = data.xyzD50ToSrgb[r][c];
+            p.filmScanMatrix[r][c] = data.filmScanMatrix[r][c];
+            p.printScanMatrix[r][c] = data.printScanMatrix[r][c];
         }
         p.filmMaxCmy[r] = data.filmMaxCmy[r];
         p.negativeWhite[r] = data.negativeWhite[r];
@@ -782,6 +808,7 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
     p.filmMidgrayGreen = data.filmMidgrayGreen;
     p.printExposureFactor = data.printExposureFactor;
     p.scanNormalization = data.scanNormalization;
+    p.printScanNormalization = data.printScanNormalization;
     p.negativeGreyLuma = data.negativeGreyLuma;
     p.couplersActive = data.couplersActive ? 1 : 0;
     p.filmIsPositive = data.filmIsPositive ? 1 : 0;

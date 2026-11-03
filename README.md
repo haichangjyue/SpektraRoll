@@ -127,8 +127,10 @@ structure and colour tokens were adopted, no source or assets copied. Notes:
 fit/100% zoom (wheel, drag, double-click, Ctrl+0/1). The inspector is split the
 way a lab works: **显影前** holds exposure, film, DIR couplers and emulsion
 effects; **显影后** holds paper, scan mode, contrast, gamut compression and
-lens/scan diffusion. The film and paper pickers list 11 colour negative stocks
-and 6 papers; choosing a film auto-selects its recommended paper.
+lens/scan diffusion. The film and paper pickers list 16 colour negative stocks
+(11 still-photo plus Vision3/Verita) and 8 second mediums (6 papers and the
+2383/2393 cinema print films); choosing a film auto-selects its recommended
+paper or print film.
 
 Colour normally runs as a baked 3D LUT. `--engine spectral` (CLI, or **引擎** in
 the UI) bypasses the LUT and runs the per-pixel film/paper chain directly:
@@ -338,6 +340,11 @@ docs/           architecture and licensing notes
   not final.
 - SDR output is the default; HDR (PQ/HLG, `--hdr`, D029) works and the demo
   writes an HEVC Main10 HDR clip, but seeing it needs an HDR display.
+- The catalogue is negative-only. Vision3 50D/250D/200T/500T and Verita print on
+  2383/2393 with the T/K75P illuminants (D065); the four slide films
+  (Ektachrome, Velvia, Provia, Kodachrome) still need a direct positive scan and
+  are not wired. The cinema print path has no pre-flash or Y/M dichroic shifts
+  yet.
 - No video file I/O in the library yet: `video` drives `ffmpeg` as a child process
   (D022), so a clip can be graded, trimmed, rendered as ProRes or HDR, and
   resumed from completed segments in one command.

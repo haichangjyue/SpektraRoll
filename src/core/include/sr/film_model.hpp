@@ -75,9 +75,14 @@ struct GpuFilmData {
     float cmfs[kWavelengths][3]{};
     float printIlluminant[kWavelengths]{};
     float viewingIlluminant[kWavelengths]{};
+    // D065: the print is scanned under the second medium's viewing illuminant
+    // (K75P for a 2383 print) with its own normalisation and CAT02 matrix.
+    float printViewingIlluminant[kWavelengths]{};
     float filmBaseDensity[kWavelengths]{};
     float paperBaseDensity[kWavelengths]{};
     float xyzD50ToSrgb[3][3]{};
+    float filmScanMatrix[3][3]{};
+    float printScanMatrix[3][3]{};
 
     float filmAxisStart = 0.0f;
     float filmAxisStep = 0.0f;
@@ -86,6 +91,7 @@ struct GpuFilmData {
     float filmMidgrayGreen = 1.0f;
     float printExposureFactor = 1.0f;
     float scanNormalization = 1.0f;
+    float printScanNormalization = 1.0f;
     float negativeGreyLuma = 0.18f;
     float filmMaxCmy[3]{};
     float negativeWhite[3]{};
@@ -174,7 +180,10 @@ private:
     std::vector<Triple> paperCurves_;
 
     std::vector<double> printIlluminant_;
-    std::vector<double> viewingIlluminant_;
+    // D065: the negative is scanned under the film's viewing illuminant and the
+    // print under the second medium's (a 2383 print is viewed under K75P).
+    std::vector<double> filmViewingIlluminant_;
+    std::vector<double> printViewingIlluminant_;
 
     // raw[m] = sum_k rgb[k] * filmMatrix_[k][m], then divided by the green
     // mid-grey reference (spektrafilm normalises the sensor response there).
@@ -182,7 +191,12 @@ private:
     double filmMidgrayGreen_ = 1.0;
 
     double printExposureFactor_ = 1.0;
-    double scanNormalization_ = 1.0;
+    double filmScanNormalization_ = 1.0;
+    double printScanNormalization_ = 1.0;
+    // CAT02 adaptation from the viewing illuminant white to D50, so the single
+    // kXyzD50ToSrgb matrix can be reused. Identity for D50 (D065).
+    double filmScanMatrix_[3][3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+    double printScanMatrix_[3][3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
     // Maximum film CMY densities, used to invert a negative scan.
     double filmMaxCmy_[3] = {0.0, 0.0, 0.0};
     // Linear sRGB of the positive scan at no dye (white) and at maximum dye

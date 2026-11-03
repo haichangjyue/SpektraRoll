@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # D062 demo: OpenColorIO in the film chain.
 #   1) show what the config offers
-#   2) decode a real Apple Log frame through OCIO and compare with the built-in
+#   2) decode a real Sony S-Log3 frame through OCIO and compare with the built-in
 #      decode
 #   3) render an ACES 2.0 display view of that frame
 #   4) bake one negative LUT with OCIO's ARRI LogC3 and one with the built-in
@@ -11,7 +11,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [string]$Config = "",
     [double]$Time = 1.5
 )
@@ -66,26 +66,26 @@ Write-Host "     相机空间 (节选):" -ForegroundColor Green
 foreach ($line in $cameras) { Write-Host "     $($line.Line.Trim())" }
 
 Write-Host ""
-Write-Host "2/4  同一帧: 内置 Apple Log 解码 vs OCIO 的 Apple Log..." -ForegroundColor Cyan
+Write-Host "2/4  同一帧: 内置 S-Log3 解码 vs OCIO 的 S-Log3 S-Gamut3.Cine..." -ForegroundColor Cyan
 if (-not (Test-Path $Footage)) {
     Write-Host "找不到素材: $Footage (只跳过这一节)" -ForegroundColor Yellow
 } else {
     & $ffmpeg -v error -y -ss $Time -i $Footage -frames:v 1 `
-        -vf "scale=in_color_matrix=bt2020:in_range=tv:out_range=full" `
+        -vf "scale=in_color_matrix=bt709:in_range=auto:out_range=full" `
         -pix_fmt rgb48le (Join-Path $out "src.png")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    & $exe convert --from apple-log --in (Join-Path $out "src.png") `
-        --out (Join-Path $out "apple-builtin.png") --bits 16 | Out-Null
+    & $exe convert --from s-log3 --in (Join-Path $out "src.png") `
+        --out (Join-Path $out "slog3-builtin.png") --bits 16 | Out-Null
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & $exe convert --ocio-config $Config --ocio-input "Apple Log" `
-        --in (Join-Path $out "src.png") --out (Join-Path $out "apple-ocio.png") --bits 16 | Out-Null
+    & $exe convert --ocio-config $Config --ocio-input "S-Log3 S-Gamut3.Cine" `
+        --in (Join-Path $out "src.png") --out (Join-Path $out "slog3-ocio.png") --bits 16 | Out-Null
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $psnr = (& $ffmpeg -v info -i (Join-Path $out "apple-ocio.png") `
-        -i (Join-Path $out "apple-builtin.png") -lavfi psnr -f null - 2>&1 |
+    $psnr = (& $ffmpeg -v info -i (Join-Path $out "slog3-ocio.png") `
+        -i (Join-Path $out "slog3-builtin.png") -lavfi psnr -f null - 2>&1 |
         Select-String -Pattern "average:" | Select-Object -First 1)
     $ErrorActionPreference = $previous
     if ($null -ne $psnr) {
@@ -95,12 +95,12 @@ if (-not (Test-Path $Footage)) {
 
     Write-Host ""
     Write-Host "3/4  同一帧: OCIO 显示器变换 (ACES 2.0 SDR 100 nits)..." -ForegroundColor Cyan
-    & $exe convert --ocio-config $Config --ocio-input "Apple Log" `
+    & $exe convert --ocio-config $Config --ocio-input "S-Log3 S-Gamut3.Cine" `
         --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" `
-        --in (Join-Path $out "src.png") --out (Join-Path $out "apple-aces2-sdr.png") --bits 16 |
+        --in (Join-Path $out "src.png") --out (Join-Path $out "slog3-aces2-sdr.png") --bits 16 |
         Out-Null
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "     out\ocio-demo\apple-aces2-sdr.png" -ForegroundColor Green
+    Write-Host "     out\ocio-demo\slog3-aces2-sdr.png" -ForegroundColor Green
 }
 
 Write-Host ""
@@ -119,14 +119,14 @@ Write-Host "要怎么看:" -ForegroundColor Green
 Write-Host "  * OCIO 现在是可选依赖: 有它就能用任意相机/ACES 色彩空间当 LUT 的输入域,"
 Write-Host "    没有它一切照旧 (只是 --ocio-* 会明确报错)"
 Write-Host "  * 胶片模型永远吃线性 Rec.709; 配置里的 'Linear Rec.709 (sRGB)' 就是它"
-Write-Host "  * Apple Log 的两条实现差 90 dB 以上: 我们手写的曲线和 ACES 官方配置一致"
+Write-Host "  * S-Log3 的两条实现差 60 dB 以上: 我们手写的曲线和 ACES 官方配置一致"
 Write-Host "  * ARRI LogC3 的 LUT 与官方配置差约 64 dB (差异来自 ACES 的 D60->D65 适应)"
 Write-Host "  * LUT 烘好之后, lut apply / video 不需要装 OCIO, 因为解码已经烘进表里"
 Write-Host ""
 Write-Host "生成的文件:" -ForegroundColor Green
-Write-Host "  $out\apple-builtin.png   内置 Apple Log 解码"
-Write-Host "  $out\apple-ocio.png      OCIO 的 Apple Log 解码"
-Write-Host "  $out\apple-aces2-sdr.png ACES 2.0 显示器变换 (SDR 100 nits)"
+Write-Host "  $out\slog3-builtin.png   内置 S-Log3 解码"
+Write-Host "  $out\slog3-ocio.png      OCIO 的 S-Log3 解码"
+Write-Host "  $out\slog3-aces2-sdr.png ACES 2.0 显示器变换 (SDR 100 nits)"
 Write-Host "  $out\lut-builtin.cube    内置 ARRI LogC3 负片 LUT"
 Write-Host "  $out\lut-ocio.cube       OCIO ARRI LogC3 负片 LUT"
 Write-Host ""

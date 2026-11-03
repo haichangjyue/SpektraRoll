@@ -38,8 +38,14 @@ display-encoded sRGB
   → print exposure factor (geometric mean of mid-grey response = 1)
   → paper characteristic curves (sum of normal CDFs)
   → CMY → spectral density
-  → scan under D50 → XYZ → CAT02 → linear sRGB → encode sRGB CCTF
+  → scan under the viewing illuminant → XYZ → CAT02 → linear sRGB → encode
 ```
+
+The film reference and the second medium are profile-driven (D065): most still
+stocks use D55 and D50, Vision3 200T/500T use **T**, and a 2383/2393 cinema
+print is viewed under **K75P**. The scan adapts the viewing illuminant to D50
+with CAT02, so the single D50→sRGB matrix still applies; D50 stays an exact
+identity and older outputs do not move.
 
 Everything is a pure function of one RGB triple. That is what makes the bake
 deterministic and the LUT meaningful.

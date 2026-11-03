@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D063：UI 的 OCIO 输入）
-> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉，D041–D063）
+> **最后更新**：2026-11-04（D064–D065：测试素材换成 FX30 S-Log3 + 电影片库）
+> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 电影片库（Vision3/2383）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393，D041–D065）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,9 +33,9 @@
 
 ---
 
-## 零之一、本阶段交接摘要：D056–D063（Metal → 浮点 → 相机 Log → OCIO → UI OCIO）
+## 零之一、本阶段交接摘要：D056–D065（Metal → 浮点 → 相机 Log → OCIO → 电影片库）
 
-> 新开对话只需要读这一节 + §三；详细记录按决策编号**从 D063 往下**（最新在前）。
+> 新开对话只需要读这一节 + §三；详细记录按决策编号**从 D065 往下**（最新在前）。
 
 ### 已完成（按交付）
 
@@ -49,6 +49,8 @@
 | **D061** | 更多相机 Log | LogC3 / LogC4 / BMD Gen5 / DaVinci / S-Gamut3；101 点曲线 **0 差**；CPU vs D3D11 **118.06–119.97 dB**；`--in-matrix auto` 按素材标签解码 |
 | **D062** | OpenColorIO | 可选依赖（`SR_WITH_OCIO`）；MinGW 自建静态 OCIO 2.4.2；`ocio-info` / `lut bake --ocio-input` / `convert --ocio-*`；OCIO sRGB vs 内置 **118.24 dB**、Apple Log **93.60 dB** |
 | **D063** | UI 的 OCIO 输入 | 左栏新增 OCIO 组（配置 + 色彩空间下拉，名字来自 `ocio-info --json`）；烘焙 / 光谱 / 渲染都走 `--ocio-input`；UI 烘的 LUT 与 CLI **逐位相同（inf）**；顺手修掉 `preview` 的 spectral-gpu 静默忽略 OCIO（21.34 dB 差异） |
+| **D064** | 测试素材 | 换成 Sony FX30 `C0113.MP4`（S-Log3 / S-Gamut3.Cine，4K50，10-bit，全范围、无颜色标签；有 PCM 音频与 00:13:37:46 timecode）；UI 默认与 9 个 demo 全部迁到 `s-log3` + `--in-matrix bt709` + `in_range=auto`；旧素材从未进 git |
+| **D065** | 电影片库 | Vision3 50D/250D/200T/500T + Verita + 2383/2393 印片；T 参考光、K75P 观看光、CAT02 适应；CPU/D3D11/Metal 同步；与上游 **88.85 dB（max 4.48e-4）**；界面可用 profile 17 → 24 |
 
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
 - CI：本轮 D061 的 run **93 / 95**、D062 的 run **97** Windows + macOS 全绿；macOS 从 run 97 起用 Homebrew 的 OpenColorIO 真跑 `test_ocio`，Windows 跑 stub 路径。
@@ -68,14 +70,16 @@
 | D061 | 更多 Log + 容器矩阵 | 追加 5 种输入（枚举只能往末尾加）；未知 `inputMode` 回退 sRGB；`--in-matrix auto` 读素材 `color_space` |
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 | D063 | UI 的 OCIO | UI 不链库，CLI 提供名字（`--json`）+ 解码；LUT 路径烘进表里；`raw` 也走 OCIO；GPU 光谱明确回退 CPU |
+| D064 | 测试素材 | 统一用 FX30 S-Log3 `C0113.MP4`；无标签容器矩阵显式 `bt709`；视频文件不进仓库 |
+| D065 | 电影片库 | 第二层乳剂可以是相纸或印片；T/K75P 进模型；D50 保持单位矩阵；GPU 常量缓冲同步 |
 
 ### 未完成的待办（按建议顺序）
 
-1. **光谱 GPU 的 OCIO**：目前给了 `--ocio-input` 会回退 CPU 光谱（界面已明确提示）
-2. **PIZ / DWA 压缩**：带颗粒的 float 用 ZIP 基本不省
-3. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积
-4. **macOS Qt 打包**：Mac 目前只有 CLI
-5. **Mac 视频 ms/帧**：`video` 还没在 Mac 上量过
+1. **反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome（4 支，正片直扫路径还没接）
+2. **光谱 GPU 的 OCIO**：目前给了 `--ocio-input` 会回退 CPU 光谱（界面已明确提示）
+3. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪白/黑校正 + unsharp
+4. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散滤镜、镜头/扫描仪 blur
+5. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 6. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
 
 ### 新对话的第一步
@@ -84,10 +88,83 @@
 2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
 3. `scripts\demo-exr.cmd -NoOpen`（读回 PSNR = inf；linear 范围 0.0012..0.7619）
 4. `scripts\demo-log-inputs.cmd -NoOpen`（9 种输入各自的烘焙耗时 + GPU/CPU 118–120 dB）
-5. `scripts\demo-ocio.cmd -NoOpen`（Apple Log 双实现 93.6 dB；ARRI LogC3 LUT 63.9 dB）
+5. `scripts\demo-ocio.cmd -NoOpen`（S-Log3 双实现 61.4 dB；ARRI LogC3 LUT 63.9 dB）
 6. `scripts\demo-ocio-ui.cmd -NoOpen`（UI 自检 52 个空间；UI LUT vs CLI **inf**）
-7. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`
-8. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+7. `scripts\demo-cine.cmd -NoOpen`（Vision3 500T + 2383 / 负片 / Portra 400 三张）
+8. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`
+9. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+
+---
+
+## 会话 D064–D065 · 测试素材换成 FX30 S-Log3 + 电影片库
+
+会话目标：产品负责人选 **A（电影片库）**，并要求之后的测试素材统一用 `X:\agent\footage\C0113.MP4`（Sony FX30，S-Log3），旧的 iPhone 素材不再使用。
+
+### 一、已完成的事项
+
+**D064 · 测试素材**
+- 新素材：3840×2160、50p、10-bit 4:2:2、6.24 s / 312 帧；**没有 color_space / transfer / primaries 标签，但 `color_range` 标成全范围（pc）**；有 PCM 48 kHz 立体声，相机 timecode **00:13:37:46** 在 rtmd 数据流里。
+- UI：默认素材 → `C0113.MP4`，默认“画面类型” → `S-Log3（S-Gamut3.Cine）`；老安装里如果保存的是旧默认路径，载入时一次性迁移。
+- 9 个 demo 脚本：`$Footage`、抽帧矩阵（bt2020 → **bt709**）、`--input/--from`（apple-log → **s-log3**）、产物名（`*-applelog*` → `*-slog3*`）全部同步；`video` 调用显式 `--in-matrix bt709`。
+- `in_range` 从硬编码 `tv` 改成 **`auto`**（CLI 的 `video` / `preview` 和 UI 回退路径）：这个文件是全范围，硬编码 tv 会把 S-Log3 码值压暗约 1%；无标签素材仍等价 tv。
+- OCIO 演示和 UI 自检改用 `S-Log3 S-Gamut3.Cine`。
+- `demo-m4` 保留相机 timecode（00:13:37:46）和 PCM 音频，不再写死 `--timecode`。
+- 仓库从未跟踪视频文件，所以没有二进制要删；素材仍在 `X:\agent\footage\`（git 外）。
+
+**D065 · 电影片库**
+- 第二层乳剂可以是相纸，也可以是 `support=film + stage=printing` 的电影印片（2383/2393）。
+- 参考光支持 D55 / **T**；印片观看光支持 D50 / **K75P**；负片用胶片自己的 viewing、印片用第二层乳剂的。
+- K75P → D50 用 CAT02；D50 保持严格单位矩阵，旧片库数值逐位不变。
+- CPU / D3D11 / Metal 三个后端同步；常量缓冲新增印片光源、归一化和两套 3×3 矩阵（顺手补 16 字节对齐）。
+- UI 片库：12 支负片（含 4 支 Vision3 + Verita）+ 6 相纸 + 2 电影印片；选 Vision3 自动选中 2383；印片下拉标注“（电影印片）”。
+
+### 二、两条关键决策（详见 DECISIONS D064/D065）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D064 | 测试素材 | 统一 FX30 S-Log3；无标签容器矩阵显式 bt709；视频不进 git |
+| D065 | 电影片库 | 第二层可以是印片；T/K75P 进模型；D50 单位矩阵；GPU 同步 |
+
+### 三、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| 片库覆盖率 | 界面可用 profile **17 → 24**（16 负片 + 6 相纸 + 2 印片）；只剩 4 支反转片 |
+| Vision3 500T + 2383 vs 上游 reference | 17³ **88.85 dB**，max |diff| **4.48e-4** |
+| 印片曝光因子 | **1.720784698861**（上游 1.720784698861） |
+| `test_film_model` | 新增片库 stage、8 个锚点；250D + 2393 中灰中性 |
+| `test_gpu_film` | Vision3 print + S-Log3 negative，worst **1e-6**；**10/10** |
+| 其他片库 | 200T + 2393、250D + 2383、Verita + 2383 都能烘表 |
+| 界面片库 | `--stocks-selftest`：**films=16 / papers=8**，Vision3 / Verita / 2383 / 2393 都在 |
+| `demo-ocio`（新素材） | 内置 S-Log3 vs OCIO **61.44 dB**；ARRI LogC3 LUT 63.89 dB |
+| `demo-ocio-ui` | UI 自检 52 个空间（S-Log3）；UI LUT vs CLI **inf** |
+| `demo-cine` | Vision3 500T + 2383 / Vision3 负片 / Portra 400 三张正常出图 |
+| `demo-m4`（新素材） | 100 帧 / 2 段，续渲只补缺失段；timecode **00:13:37:46**、音频 PCM 正常 |
+| 范围 | `in_range=auto` 与 `in_range=pc` 逐位相同、与 `tv` 不同；无标签素材 auto == tv |
+
+### 四、怎么用
+
+```powershell
+# 电影负片 + 印片
+.\build\spektra-roll-cli.exe lut bake --film data\profiles\kodak_vision3_500t.json `
+  --paper data\profiles\kodak_2383.json --scan print --input s-log3 `
+  --exposure 0.7 --out out\vision3-2383.cube
+
+# 视频（无标签的 FX30 XAVC 记得 bt709）
+.\build\spektra-roll-cli.exe video --engine spectral-gpu --input s-log3 `
+  --film data\profiles\kodak_vision3_500t.json --paper data\profiles\kodak_2383.json `
+  --scan print --exposure 0.7 --in-matrix bt709 `
+  --in X:\agent\footage\C0113.MP4 --out out\cine.mov --duration 2 --codec prores
+```
+
+界面：左栏“胶片”选 Vision3 500T / 250D 等，“相纸”会自动切到 2383（标注“电影印片”）。
+
+### 五、未完成的待办
+
+- [ ] **反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome
+- [ ] 印片机 Y/M 微调、预闪、光源选择；扫描仪白/黑校正 + unsharp
+- [ ] 空间物理模型（染料云颗粒、逐通道 halation、具名扩散、镜头/扫描仪 blur）
+- [ ] 光谱 GPU 的 OCIO、PIZ/DWA、代理清理 / 4K 预览、macOS Qt 打包
 
 ---
 
@@ -103,7 +180,7 @@
 - 烘焙 LUT、光谱预览、渲染视频都改传 `--ocio-config/--ocio-input`，不再传 `--input`；LUT 路径仍把解码烘进表里。
 - 预览协议：LUT 引擎的 `look` 也接受 OCIO，服务端在 `configureLook` 里为 `raw`（按住看原片）编一个独立解码器。
 - UI 仍不链接 OCIO：`findCli()` 优先用完整构建 `build\spektra-roll-cli.exe`，`SPEKTRA_CLI` 可覆盖；只有 build-ui 的包会提示“这个构建没有 OpenColorIO”。
-- 新增 `--ocio-selftest`：固定 look（Portra 400 / Endura、0.70 EV、negative、1.15、DIR、OkLCh、sRGB）烘 Apple Log LUT，供脚本验收。
+- 新增 `--ocio-selftest`：固定 look（Portra 400 / Endura、0.70 EV、negative、1.15、DIR、OkLCh、sRGB）烘一张 OCIO LUT，供脚本验收（D063 时是 Apple Log，D064 起改用 S-Log3 S-Gamut3.Cine）。
 - 顺手修掉：`preview` 的 `spectral-gpu` 在 OCIO 下**静默忽略解码**（和 CPU 差 21.34 dB），现在与 `lut apply`/`video` 一样 warning + 回退 CPU。
 
 ### 二、一条关键决策（详见 DECISIONS D063）
@@ -129,13 +206,13 @@
 ### 四、怎么用
 
 ```powershell
-# 不点鼠标的验收：界面读配置 + 烘 Apple Log LUT + 和 CLI 逐位比较
+# 不点鼠标的验收：界面读配置 + 烘 S-Log3 LUT + 和 CLI 逐位比较
 scripts\demo-ocio-ui.cmd -NoOpen
 
 # 直接跑界面自检
 .\build-ui\spektra-roll-ui.exe --ocio-selftest
 
-# 界面里：左栏“色彩管理（OCIO）” → 勾选 → 读取 → 选 Apple Log / ARRI LogC3 / ACEScg
+# 界面里：左栏“色彩管理（OCIO）” → 勾选 → 读取 → 选 S-Log3 S-Gamut3.Cine / ARRI LogC3 / ACEScg
 ```
 
 界面用的 CLI 可以显式指定（便携包 / 多套构建时）：
@@ -679,7 +756,7 @@ scripts\demo-spread.cmd            # 左旧 / 右新，打印 PSNR 与 ms/帧
 .\build\spektra-roll-cli.exe lut apply ... --spread-model box --out out\spread-box.png
 
 # 自定义物理尺度（微米）
-.\build\spektra-roll-cli.exe video --lut out\m3-applelog-sdr.cube --in X:\agent\footage\A001_11011538_C001.mov `
+.\build\spektra-roll-cli.exe video --lut out\m3-applelog-sdr.cube --in X:\agent\footage\C0113.MP4 `
   --out out\spread-custom.mov --halation 0.45 --glare 0.2 --diffusion 0.1 `
   --halation-spread 120 --glare-spread 500 --diffusion-spread 80 --frame-width-mm 24.9
 ```
@@ -754,7 +831,7 @@ scripts\demo-spread.cmd            # 左旧 / 右新，打印 PSNR 与 ms/帧
 # 单帧/视频（应约 79 ms/帧，ProRes）
 .\build\spektra-roll-cli.exe video --engine spectral-gpu --input apple-log --exposure 0.7 `
   --scan negative --contrast 1.15 --couplers on --gamut oklch --grain 0.4 --halation 0.45 `
-  --glare 0.2 --diffusion 0.1 --in X:\agent\footage\A001_11011538_C001.mov `
+  --glare 0.2 --diffusion 0.1 --in X:\agent\footage\C0113.MP4 `
   --duration 2 --codec prores --out out\check.mov
 
 $env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
@@ -823,7 +900,7 @@ $env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
 
 ```powershell
 # 预览服务端协议（CI 也跑这一段）
-printf 'look --lut out/m3-applelog-sdr.cube\nopen "X:\agent\footage\A001_11011538_C001.mov"\nframe 40 "out/p.rgba"\nquit\n' |
+printf 'look --lut out/m3-applelog-sdr.cube\nopen "X:\agent\footage\C0113.MP4"\nframe 40 "out/p.rgba"\nquit\n' |
   .\build\spektra-roll-cli.exe preview --ffmpeg J:\ffmpeg\bin\ffmpeg.exe --in-matrix bt2020
 
 # 界面里跑两次真实预览并打印耗时（无需手点）
@@ -897,7 +974,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 .\build\spektra-roll-cli.exe video --engine spectral-gpu --input apple-log --exposure 0.7 `
   --scan negative --contrast 1.15 --couplers on --gamut oklch `
   --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1 `
-  --in X:\agent\footage\A001_11011538_C001.mov --out out\gpu.mov --frames 24 --codec prores
+  --in X:\agent\footage\C0113.MP4 --out out\gpu.mov --frames 24 --codec prores
 
 # 强制 CPU 参考链做对比
 .\build\spektra-roll-cli.exe video ... --texture-engine cpu
@@ -955,7 +1032,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 # 视频（约 379 ms/帧，ProRes）
 .\build\spektra-roll-cli.exe video --engine spectral-gpu --input apple-log --exposure 0.7 `
   --scan negative --contrast 1.15 --couplers on --gamut oklch `
-  --in X:\agent\footage\A001_11011538_C001.mov --out out\gpu.mov --frames 3 --codec prores
+  --in X:\agent\footage\C0113.MP4 --out out\gpu.mov --frames 3 --codec prores
 
 # 一致性测试（无显卡时自动 skip）
 & "C:\Program Files\CMake\bin\ctest.exe" --test-dir build --output-on-failure
@@ -1415,7 +1492,7 @@ ctest --test-dir build --output-on-failure # 应 10/10 通过（gpu_* 无显卡�
 ```powershell
 # 整段：解码 → 套 LUT → 带原声重新编码
 .\build\spektra-roll-cli.exe video --lut out\m3-applelog-sdr.cube `
-    --in X:\agent\footage\A001_11011538_C001.mov --out out\graded.mov `
+    --in X:\agent\footage\C0113.MP4 --out out\graded.mov `
     --trc srgb --grain 0.4 --halation 0.45 --glare 0.2 --diffusion 0.1 `
     --ffmpeg J:\ffmpeg\bin\ffmpeg.exe
 ```
@@ -1442,7 +1519,7 @@ Python 环境里已装：numpy、scipy、colour-science 0.4.7、opt_einsum、num
 ### 素材（Apple Log / ProRes）
 
 ```
-X:\agent\footage\A001_11011538_C001.mov    已收到（仓库外，不进 git）
+X:\agent\footage\C0113.MP4    已收到（仓库外，不进 git）
 ```
 
 规格（ffprobe）：iPhone 16 Pro + Blackmagic Cam，HEVC Rext 4:2:2 10-bit，

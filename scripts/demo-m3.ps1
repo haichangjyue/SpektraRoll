@@ -6,7 +6,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [double]$Time = 1.5,
     [double]$Exposure = 0.7,
     [double]$Grain = 0.4,
@@ -54,28 +54,28 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host ""
 
 Write-Host "1/4  烘焙 SDR 扫描负片 LUT..." -ForegroundColor Cyan
-& $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\m3-applelog-sdr.cube"
+& $exe lut bake --input s-log3 --exposure $Exposure --scan negative --out "out\m3-slog3-sdr.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "2/4  取一帧..." -ForegroundColor Cyan
 & $ffmpeg -v error -y -ss $Time -i $Footage -frames:v 1 `
-    -vf "scale=in_color_matrix=bt2020:in_range=tv:out_range=full" `
+    -vf "scale=in_color_matrix=bt709:in_range=auto:out_range=full" `
     -pix_fmt rgb48le "out\m3-frame.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "3/4  同一帧: 干净版 vs 颗粒+光晕版..." -ForegroundColor Cyan
-& $exe lut apply --lut "out\m3-applelog-sdr.cube" --in "out\m3-frame.png" --out "out\m3-clean.png"
+& $exe lut apply --lut "out\m3-slog3-sdr.cube" --in "out\m3-frame.png" --out "out\m3-clean.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $exe lut apply --lut "out\m3-applelog-sdr.cube" --in "out\m3-frame.png" --out "out\m3-texture.png" `
+& $exe lut apply --lut "out\m3-slog3-sdr.cube" --in "out\m3-frame.png" --out "out\m3-texture.png" `
     --grain $Grain --grain-rate $GrainRate --halation $Halation --glare $Glare --diffusion $Diffusion
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "4/4  整段渲染 (带颗粒和光晕)..." -ForegroundColor Cyan
-& $exe video --lut "out\m3-applelog-sdr.cube" --in $Footage --out "out\m3-texture.mov" `
-    --trc srgb --grain $Grain --halation $Halation --glare $Glare --diffusion $Diffusion --ffmpeg $ffmpeg
+& $exe video --lut "out\m3-slog3-sdr.cube" --in $Footage --out "out\m3-texture.mov" `
+    --in-matrix bt709 --trc srgb --grain $Grain --halation $Halation --glare $Glare --diffusion $Diffusion --ffmpeg $ffmpeg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""

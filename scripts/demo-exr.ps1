@@ -7,7 +7,7 @@
 
 param(
     [switch]$NoOpen,
-    [string]$Footage = "X:\agent\footage\A001_11011538_C001.mov",
+    [string]$Footage = "X:\agent\footage\C0113.MP4",
     [double]$Time = 1.5,
     [double]$Exposure = 0.7
 )
@@ -55,13 +55,13 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host ""
 
 Write-Host "1/5  烘焙 SDR 扫描负片 LUT..." -ForegroundColor Cyan
-& $exe lut bake --input apple-log --exposure $Exposure --scan negative --out "out\exr-lut.cube"
+& $exe lut bake --input s-log3 --exposure $Exposure --scan negative --out "out\exr-lut.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "2/5  取一帧..." -ForegroundColor Cyan
 & $ffmpeg -v error -y -ss $Time -i $Footage -frames:v 1 `
-    -vf "scale=in_color_matrix=bt2020:in_range=tv:out_range=full" `
+    -vf "scale=in_color_matrix=bt709:in_range=auto:out_range=full" `
     -pix_fmt rgb48le "out\exr-frame-src.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -108,10 +108,10 @@ if ($null -ne $psnr) {
 
 Write-Host ""
 Write-Host "5/5  曝光 +3 EV: PNG 会切掉高光, EXR 保留..." -ForegroundColor Cyan
-& $exe convert --from apple-log --exposure 3 --in "out\exr-frame-src.png" `
+& $exe convert --from s-log3 --exposure 3 --in "out\exr-frame-src.png" `
     --out "out\exr-over.png" --bits 16
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $exe convert --from apple-log --exposure 3 --in "out\exr-frame-src.png" `
+& $exe convert --from s-log3 --exposure 3 --in "out\exr-frame-src.png" `
     --out "out\exr-over.exr"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "     (EXR 那一行会打印范围: 超过 1 的部分没有丢, PNG 那行没有这个提示)" -ForegroundColor Green
