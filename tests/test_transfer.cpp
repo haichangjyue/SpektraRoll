@@ -217,8 +217,6 @@ int main() {
         check(std::string(sr::inputTransferName(sr::InputTransfer::DaVinciIntermediate)) ==
                   "davinci",
               "davinci name");
-        check(sr::isCameraLog(sr::InputTransfer::BmdFilmGen5), "bmd-film is a camera log");
-        check(!sr::isCameraLog(sr::InputTransfer::Srgb), "srgb is not a camera log");
     }
 
     const double white[3] = {1.0, 1.0, 1.0};

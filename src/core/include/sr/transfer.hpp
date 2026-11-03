@@ -45,10 +45,6 @@ const char* inputTransferName(InputTransfer value);
 // Comma separated list of every accepted --input spelling, for CLI errors.
 const char* inputTransferList();
 
-// True for every camera log input (everything except sRGB); the UI turns DIR
-// couplers and OkLCh compression on for these.
-bool isCameraLog(InputTransfer value);
-
 // sRGB transfer function, no clamping on encode (the caller decides).
 double srgbDecode(double encoded);
 double srgbEncode(double linear);

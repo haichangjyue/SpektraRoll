@@ -387,6 +387,4 @@ const char* inputTransferList() {
            "bmd-film, davinci";
 }
 
-bool isCameraLog(InputTransfer value) { return value != InputTransfer::Srgb; }
-
 }  // namespace sr
