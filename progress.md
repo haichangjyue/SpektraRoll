@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D064–D066：FX30 素材 + 电影片库 + 状态栏提示）
-> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 电影片库（Vision3/2383）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393，D041–D065）
+> **最后更新**：2026-11-04（D063–D066：UI OCIO + FX30 素材 + 电影片库 + 回退提示）
+> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 电影片库（Vision3/2383）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393，D041–D066）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -29,13 +29,75 @@
   - 每次交付必须有一个我能双击验证的东西
   - 所有决定写进 DECISIONS.md
   - 每次结束时更新 progress.md 和 STATUS.md
+
+测试素材固定用 X:\agent\footage\C0113.MP4
+（Sony FX30，S-Log3 / S-Gamut3.Cine，4K50，全范围，PCM 音频，timecode 00:13:37:46）。
+不要再用旧的 A001_11011538_C001.mov；视频文件不进仓库。
 ```
 
 ---
 
-## 零之一、本阶段交接摘要：D056–D066（Metal → 浮点 → 相机 Log → OCIO → 电影片库）
+## 零之一、本次对话（D063–D066）交接摘要
 
-> 新开对话只需要读这一节 + §三；详细记录按决策编号**从 D066 往下**（最新在前）。
+> **新开对话先读这一节**；更早的 D056–D062 在下一节，细节按决策编号往下（最新在前）。
+
+### 这次完成了什么
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **D063** | UI 的 OCIO 输入 | 左栏“色彩管理（OCIO）”：配置 + 色彩空间下拉（名字来自 `ocio-info --json`）；烘焙 / 光谱预览 / 渲染 / “按住看原片”都走 `--ocio-input`；UI 烘的 LUT 与 CLI **逐位相同（inf）**；顺手修掉 `preview` 的 spectral-gpu 静默忽略 OCIO（21.34 dB） |
+| **D064** | 测试素材换成 FX30 S-Log3 | 统一 `X:\agent\footage\C0113.MP4`（4K50、10-bit、全范围）；UI 默认 + 9 个 demo 改 `s-log3` / `--in-matrix bt709` / `in_range=auto`；OCIO 演示改 `S-Log3 S-Gamut3.Cine`；旧素材从未进 git |
+| **D065** | 电影片库 | Vision3 50D/250D/200T/500T + Verita + 2383/2393 印片；T 参考光 / K75P 观看光 / CAT02；CPU + D3D11 + Metal 同步；与上游 **88.85 dB（max 4.48e-4）**；界面可用 profile **17 → 24** |
+| **D066** | 状态栏回退提示 | OCIO + 光谱 GPU 只打一条明确 warning（不再有 `warning: ;`）；UI 显示“提示：”而不是像报错；队列开始先说明会回退 CPU |
+
+- CI：D063 的 run **102**、D064/D065 的 run **104**、D066 的 run **107**，Windows + macOS 全绿。
+- 本机：`ctest` **10/10**；`verify-m1` **88.07 dB**；`--stocks-selftest` **16 films / 8 papers**。
+- 最新代码提交：`a869e14`（D066）；之后只有文档更新（DECISIONS / STATUS / 本文件）。
+
+### 关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D063 | UI 的 OCIO | UI 不链库；CLI 提供名字（`--json`）与解码；LUT 路径烘进表里；`raw` 也走 OCIO；GPU 光谱明确回退 CPU |
+| D064 | 测试素材 | 统一 FX30 S-Log3 `C0113.MP4`；无标签容器矩阵显式 `bt709`；解码 `in_range=auto`；视频文件不进仓库 |
+| D065 | 电影片库 | 第二层乳剂可以是相纸或印片；T/K75P 进模型；D50 保持严格单位矩阵；GPU 常量缓冲同步 |
+| D066 | 回退提示 | OCIO + 光谱 GPU 是“提示”不是失败；CLI 只打一条；UI 映射成中文提示 |
+
+### 未完成的待办（按建议顺序）
+
+1. **反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome（4 支，正片直扫路径还没接）
+2. **光谱 GPU 的 OCIO**：现在 `--ocio-input` 会回退 CPU 光谱（4K 约 3.5 s/帧）
+3. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪白/黑校正 + unsharp
+4. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散滤镜、镜头/扫描仪 blur
+5. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+6. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
+
+> 我的建议顺序：先做**反转片直扫**（4 支，约 1 个 D），再做**空间物理**（染料云颗粒 + 逐通道光晕，2–3 个 D），然后是**印片机/扫描仪控制**；光谱 GPU 的 OCIO 可以等。
+
+### 新对话第一步
+
+1. `ctest --test-dir build --output-on-failure`（10/10；`ocio` 在没有 OCIO 的机器上 skip）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `scripts\demo-cine.cmd -NoOpen`（Vision3 500T + 2383 / 负片 / Portra 400 三张）
+4. `scripts\demo-ocio-ui.cmd -NoOpen`（UI 自检 52 个空间；UI LUT vs CLI **inf**）
+5. `scripts\demo-ocio.cmd -NoOpen`（S-Log3 双实现 61.4 dB；ARRI LogC3 LUT 63.9 dB）
+6. `scripts\demo-log-inputs.cmd -NoOpen`（9 种输入；GPU/CPU 118–120 dB）
+7. `scripts\demo-exr.cmd -NoOpen`（EXR 回归；读回 PSNR = inf）
+8. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
+
+### 当前已知限制 / 坑
+
+- **OCIO + 光谱 GPU 会回退 CPU**（D062/D066）；UI 会显示“提示：OCIO 输入只能用 CPU 光谱…”，不是失败。想快就用 LUT 引擎或关掉 OCIO。
+- 4K50 素材的预览会走 **960 px 代理**；光谱 GPU 在 4K 上约 **765 ms/帧**（含上传/回读 + GPU 质感），LUT 路径快得多。
+- FX30 的 XAVC **没有颜色标签**：CLI 的 `--in-matrix` 要显式 `bt709`；UI 已按输入类型自动用 bt709。
+- UI 的 OCIO 能力取决于它调用的 CLI：完整构建 `build\spektra-roll-cli.exe` 有；只有 `build-ui\` 的包没有，可用 `SPEKTRA_CLI` 覆盖。
+- 仓库里 **没有视频文件**；素材在 `X:\agent\footage\`（git 外）。
+
+---
+
+## 零之二、更早的阶段摘要：D056–D062（Metal → 浮点 → 相机 Log → OCIO）
+
+> 这里是上一次交接的摘要，保留给需要回溯 D056–D062 的对话。
 
 ### 已完成（按交付）
 
@@ -48,17 +110,9 @@
 | **D060** | 多相机 Log | S-Log3 / C-Log3 / V-Log；曲线 101 点 vs colour-science **完全一致**；CPU vs D3D11 **110.67 dB**；UI 下拉可选 |
 | **D061** | 更多相机 Log | LogC3 / LogC4 / BMD Gen5 / DaVinci / S-Gamut3；101 点曲线 **0 差**；CPU vs D3D11 **118.06–119.97 dB**；`--in-matrix auto` 按素材标签解码 |
 | **D062** | OpenColorIO | 可选依赖（`SR_WITH_OCIO`）；MinGW 自建静态 OCIO 2.4.2；`ocio-info` / `lut bake --ocio-input` / `convert --ocio-*`；OCIO sRGB vs 内置 **118.24 dB**、Apple Log **93.60 dB** |
-| **D063** | UI 的 OCIO 输入 | 左栏新增 OCIO 组（配置 + 色彩空间下拉，名字来自 `ocio-info --json`）；烘焙 / 光谱 / 渲染都走 `--ocio-input`；UI 烘的 LUT 与 CLI **逐位相同（inf）**；顺手修掉 `preview` 的 spectral-gpu 静默忽略 OCIO（21.34 dB 差异） |
-| **D064** | 测试素材 | 换成 Sony FX30 `C0113.MP4`（S-Log3 / S-Gamut3.Cine，4K50，10-bit，全范围、无颜色标签；有 PCM 音频与 00:13:37:46 timecode）；UI 默认与 9 个 demo 全部迁到 `s-log3` + `--in-matrix bt709` + `in_range=auto`；旧素材从未进 git |
-| **D065** | 电影片库 | Vision3 50D/250D/200T/500T + Verita + 2383/2393 印片；T 参考光、K75P 观看光、CAT02 适应；CPU/D3D11/Metal 同步；与上游 **88.85 dB（max 4.48e-4）**；界面可用 profile 17 → 24 |
-| **D066** | 回退提示 | OCIO + 光谱 GPU 只打一条明确 warning（不再有 `warning: ;`）；UI 把 warning 显示成“提示：”，日志保留原文；队列开始先提示会回退 CPU |
 
 - CI：D057–D060 的最终提交（run **85–91**）Windows + macOS 全绿；macOS 上 `gpu_film` / `gpu_texture` / `gpu_chain` 都是真跑，不是 skip（run 84 是 D057 开发中的一次编译失败）。
 - CI：本轮 D061 的 run **93 / 95**、D062 的 run **97** Windows + macOS 全绿；macOS 从 run 97 起用 Homebrew 的 OpenColorIO 真跑 `test_ocio`，Windows 跑 stub 路径。
-- D063 是界面接 OCIO：UI 不链接库，靠 CLI 的 `ocio-info --json` 填下拉；`findCli` 优先用带 OCIO 的完整构建，`SPEKTRA_CLI` 可覆盖。
-- CI：D063 的 run **102** Windows + macOS 全绿；macOS 用 Homebrew 的 OCIO 真跑 `ocio-info --json`（Python 解析断言 52 个空间）+ LUT，Windows 跑 stub 并断言那句报错。
-- CI：D064/D065 的 run **104** Windows + macOS 全绿（11m32s）；macOS 真跑 Metal 光谱/质感/融合链和 OCIO，Windows 真跑 D3D11。
-- CI：D066 的 run **107** Windows + macOS 全绿（含 macOS 的 `warning: ;` 断言）。
 - 真机：MacBook Air M1（macOS 14.7.5，arm64）三轮截图验收（verify ×2 + bench）；Windows 本机 **10/10** 测试。
 
 ### 关键决策（D056–D062）
@@ -72,30 +126,8 @@
 | D060 | 多相机 Log | 官方曲线 + 原生 gamut 矩阵；CPU/GPU 同一套 `inputMode`；手动选输入 |
 | D061 | 更多 Log + 容器矩阵 | 追加 5 种输入（枚举只能往末尾加）；未知 `inputMode` 回退 sRGB；`--in-matrix auto` 读素材 `color_space` |
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
-| D063 | UI 的 OCIO | UI 不链库，CLI 提供名字（`--json`）+ 解码；LUT 路径烘进表里；`raw` 也走 OCIO；GPU 光谱明确回退 CPU |
-| D064 | 测试素材 | 统一用 FX30 S-Log3 `C0113.MP4`；无标签容器矩阵显式 `bt709`；视频文件不进仓库 |
-| D065 | 电影片库 | 第二层乳剂可以是相纸或印片；T/K75P 进模型；D50 保持单位矩阵；GPU 常量缓冲同步 |
 
-### 未完成的待办（按建议顺序）
-
-1. **反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome（4 支，正片直扫路径还没接）
-2. **光谱 GPU 的 OCIO**：目前给了 `--ocio-input` 会回退 CPU 光谱（界面已明确提示）
-3. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪白/黑校正 + unsharp
-4. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散滤镜、镜头/扫描仪 blur
-5. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
-6. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
-
-### 新对话的第一步
-
-1. `ctest --test-dir build --output-on-failure`（10/10；`ocio` 在没有 OCIO 的机器上 skip）
-2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
-3. `scripts\demo-exr.cmd -NoOpen`（读回 PSNR = inf；linear 范围 0.0012..0.7619）
-4. `scripts\demo-log-inputs.cmd -NoOpen`（9 种输入各自的烘焙耗时 + GPU/CPU 118–120 dB）
-5. `scripts\demo-ocio.cmd -NoOpen`（S-Log3 双实现 61.4 dB；ARRI LogC3 LUT 63.9 dB）
-6. `scripts\demo-ocio-ui.cmd -NoOpen`（UI 自检 52 个空间；UI LUT vs CLI **inf**）
-7. `scripts\demo-cine.cmd -NoOpen`（Vision3 500T + 2383 / 负片 / Portra 400 三张）
-8. Mac：`scripts\verify-macos.command`（设备 + 三组 parity + PSNR）与 `scripts\bench-macos.command`
-9. 改 Log 输入就 `lut bake --input s-log3`，再用 `--engine spectral` / `spectral-gpu` 出图比 PSNR（应 ≥60 dB，实测 118–120 dB）
+> 本次对话（D063–D066）的完成、决策和待办见前面的「零之一」；下面是更早阶段的记录。
 
 ---
 
@@ -148,7 +180,7 @@
 - 参考光支持 D55 / **T**；印片观看光支持 D50 / **K75P**；负片用胶片自己的 viewing、印片用第二层乳剂的。
 - K75P → D50 用 CAT02；D50 保持严格单位矩阵，旧片库数值逐位不变。
 - CPU / D3D11 / Metal 三个后端同步；常量缓冲新增印片光源、归一化和两套 3×3 矩阵（顺手补 16 字节对齐）。
-- UI 片库：12 支负片（含 4 支 Vision3 + Verita）+ 6 相纸 + 2 电影印片；选 Vision3 自动选中 2383；印片下拉标注“（电影印片）”。
+- UI 片库：**16 支负片**（11 支静态 + 4 支 Vision3 + Verita）+ 6 相纸 + 2 电影印片；选 Vision3 自动选中 2383；印片下拉标注“（电影印片）”。
 
 ### 二、两条关键决策（详见 DECISIONS D064/D065）
 
