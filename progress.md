@@ -117,6 +117,7 @@
 | `--in-matrix auto` vs 显式 bt2020 | **逐位相同（inf）**；vs bt709 **44.02 dB**（矩阵确实在起作用） |
 | `demo-log-inputs` 九种输入 | 烘表 112–133 ms；GPU/CPU **118.08–119.52 dB** |
 | 回归 | 9/9 测试、M1 parity **88.07 dB**、`demo-m3` 239.7 ms/帧、`demo-m4` 续渲正常、`demo-exr` 读回 inf、UI 第二次预览 **57 ms** |
+| CI | run **93 / 95** Windows + macOS 双绿；新增一步“八种输入各烘一张 LUT + 两次光谱出图” |
 
 ### 四、怎么用
 
