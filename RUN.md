@@ -286,6 +286,14 @@ X:\agent\SpektraRoll\scripts\demo-cine.cmd
 
 > 反转片（Ektachrome / Velvia / Provia / Kodachrome）还没接：它们需要“正片直扫”路径，不是印片。
 
+不点鼠标的检查：
+
+```
+X:\agent\SpektraRoll\build-ui\spektra-roll-ui.exe --stocks-selftest
+```
+
+应输出 `stocks selftest: ok films=16 papers=8 vision3=1 verita=1 print=1/1 portra=1`。
+
 ## OpenColorIO（可选）
 
 双击：
