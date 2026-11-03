@@ -895,6 +895,33 @@
 
 ---
 
+## D056 · macOS 的 GPU 颜色（Metal）
+
+- **日期**：2026-11-03
+- **背景**：D046/D054 之后 Windows 的颜色和质感都在 GPU，macOS 还只有 CPU 光谱：2.6 MP 约 **1.08 s/帧**，比 Windows 的 50 ms 慢 20 倍。产品负责人有 MacBook Air M1，要求把 macOS 的 Metal 路径补上。
+- **范围**：这一步只搬**颜色（光谱 FilmModel）**，这是最大头；空间质感仍是 CPU（约 160 ms/帧），下一个 D057 再上 Metal。CLI/UI 的行为不变：`--engine spectral-gpu` 在 macOS 上从“回退 CPU”变成真的跑 Metal。
+- **实现**：
+  - 新增 `src/cli/gpu_film_metal.mm`（Objective-C++，仅 Apple 编译），替换 `gpu_film.cpp`；实现同一个 `GpuFilm` 接口，所以 CLI、预览服务端、UI、测试都不改调用方式。
+  - 着色器是 `gpu_film.cpp` 里 HLSL 的逐行 MSL 翻译；**运行时用 `newLibraryWithSource:` 编译**，不做 `.metallib` 构建步骤、不加第三方依赖。
+  - 常量缓冲用与 C++ `Params` 完全相同的**标量数组**布局（`float x[4]` 而不是 `float4`），避免 16 字节对齐带来的悄悄错位；`static_assert` 之外靠 parity 测试守住。
+  - 输入/输出/常量都用 `MTLResourceStorageModeShared`（Apple silicon 统一内存），`dispatchThreads` 一次提交，`waitUntilCompleted` 后直接 memcpy 读回，不需要 staging。
+  - CMake：Apple 上 `enable_language(OBJCXX)`、按平台选择 `gpu_film_metal.mm` / `gpu_film.cpp`、链接 Metal + Foundation、给 `.mm` 加 `-fobjc-arc`。
+  - 没有 Metal 设备时 `available()` 返回 false，调用方照旧回退 CPU 光谱，不硬失败。
+- **踩到的坑（重点）**：
+  - **Metal 默认开 fast math**，编译器会假设没有 NaN，把光谱求和里 `density != density` 的 NaN 保护直接优化掉。光谱表里有几条波长的密度本来就是 NaN（CPU 和 D3D11 都靠这个判断跳过），结果**整帧变 NaN**：普通输出是 NaN，负片路径被 `clamp` 变成全 0。修法是编译 Metal 库时 `MTLCompileOptions.fastMathEnabled = NO`。
+  - 这个坑在 Windows 上完全复现不了，只能靠 macOS CI 的 `gpu_film` 失败输出定位；测试现在会在失败时打印逐像素 GPU/CPU 值并显式检测 NaN。
+  - `test_gpu_chain`（融合提交）在没有 Metal 质感后端时会 attach 失败；现在先查 `GpuTexture::available()`，没有就 skip（D057 之后会自动开始跑）。
+- **实测**：
+  - macOS CI（run **80**）：`gpu_film` 从“3.1 s、NaN/偏差 1.0 失败”变成通过；`gpu_texture` / `gpu_chain` 按预期 skip；Windows 全绿。
+  - 本机（Windows）不受影响：9/9 测试、GPU 测试仍真跑。
+  - **Mac 上的真实 ms/帧还没有数字**：CI 只跑 17 个像素的 parity。`scripts/verify-macos.command` 新增了 CPU vs Metal 的 PSNR 检查；实际速度要用 `video` 命令在 MacBook 上量。
+- **后果**：
+  - macOS 的 `--engine spectral-gpu` 现在是真的 GPU 颜色；UI 里“光谱 GPU（物理，快）”在 Mac 上不再是 CPU 回退。
+  - 质感仍在 CPU，所以 Mac 的整帧时间 ≈ Metal 颜色 + 160 ms 质感；D057 把质感搬上去之后才是完整对齐 Windows。
+  - Metal 着色器没有 `.metallib` 缓存，首次 configure 会编译一次（几分之一秒），之后复用 pipeline。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

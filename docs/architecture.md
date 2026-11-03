@@ -99,6 +99,15 @@ PQ/HLG code values), not scene-linear light, and the reader accepts the same
 subset. Compression (ZIP/PIZ) and an explicit linear option are deliberately
 still open.
 
+The per-pixel chain has two GPU implementations behind one `GpuFilm` interface:
+a D3D11 compute shader on Windows (D046) and a Metal kernel on macOS (D056).
+The Metal kernel is compiled from source at runtime and uses shared buffers, so
+a frame never leaves unified memory; it must be built with `fastMathEnabled =
+NO`, because the spectral tables contain NaN densities that the CPU chain skips
+with `density != density` and fast math would delete that guard. Both backends
+fall back to the CPU spectral engine when no device exists. Spatial texture is
+still CPU on macOS (D057).
+
 Video (D022) is a child-process integration: `spektra-roll-cli video` runs
 ffprobe once for geometry and rotation, then pipes raw RGB48 frames from an
 ffmpeg decoder through the LUT into an ffmpeg encoder, mapping the source audio

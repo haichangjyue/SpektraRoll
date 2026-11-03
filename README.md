@@ -98,13 +98,16 @@ frame** (12 threads). It is the fully physical option for short/final renders;
 the LUT stays the default for interactive preview and long clips. On the same
 frame the 33³ LUT and the physical path agree at **62.2 dB PSNR**.
 
-`--engine spectral-gpu` runs that same chain as a D3D11 compute shader (Windows;
-the UI lists it as **光谱 GPU**). A 2.6 MP still takes **50 ms** end to end
-(upload, 81-wavelength scan, readback) and video dropped from 1427 to
-**379 ms/frame**, so colour is no longer the bottleneck there. The GPU output
-matches the CPU reference at **82–119 dB PSNR** (several configs bit-identical)
-and `ctest` enforces that parity; without a D3D11 device the CLI falls back to
-the CPU engine with a warning.
+`--engine spectral-gpu` runs that same chain as a compute shader: D3D11 on
+Windows and **Metal on macOS** (the UI lists it as **光谱 GPU**). On Windows a
+2.6 MP still takes **50 ms** end to end (upload, 81-wavelength scan, readback)
+and video dropped from 1427 to **379 ms/frame**, so colour is no longer the
+bottleneck there. The GPU output matches the CPU reference at **82–119 dB PSNR**
+(several configs bit-identical) and `ctest` enforces that parity; without a GPU
+device the CLI falls back to the CPU engine with a warning.
+The Metal kernel is compiled at runtime and must keep IEEE semantics
+(`fastMathEnabled = NO`): the spectral tables contain NaN densities that the CPU
+chain skips explicitly (D056).
 
 Spatial texture (grain, halation, glare, diffusion) can also run on the GPU:
 `--texture-engine auto|cpu|gpu` (auto turns it on with `--engine spectral-gpu`;
@@ -114,6 +117,8 @@ from about 160 to **38 ms/frame**, which took a full-frame render from 382 to
 including the separable convolution's summation order, so the two agree at
 **149–178 dB PSNR** (worst deviation 3e-7); `ctest` enforces that too, and a
 device failure falls back to the CPU chain instead of failing the render.
+This backend is still D3D11-only: macOS runs colour on Metal but texture on the
+CPU until the Metal port lands (D057).
 
 Since D054 the three spatial effects are sized on the film instead of on the
 frame: `--halation-spread` / `--glare-spread` / `--diffusion-spread` are effective
@@ -282,6 +287,8 @@ docs/           architecture and licensing notes
   offset in nominal frames, so they can drift by a few frames per hour.
 - EXR is uncompressed scanline RGB (float or half) and carries display-encoded
   values, not scene-linear light; there is no OpenImageIO and no zip/PIZ yet.
+- macOS runs the spectral colour chain on Metal (D056) but grain/halation/glare/
+  diffusion still on the CPU until the Metal texture port (D057).
 - Mallett 2019 spectral upsampling only; hanatos2025 is a later option.
 - `.cube` only; `.3dl` and OCIO configs come later.
 - Windows UI does not exist; the CLI is the first deliverable.

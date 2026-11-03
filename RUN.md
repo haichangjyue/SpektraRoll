@@ -173,6 +173,8 @@ X:\agent\SpektraRoll\scripts\demo-gpu-texture.cmd
 
 没有 D3D11 显卡（比如 Mac）时，命令会自动退回 CPU，不会失败。
 
+macOS 上现在颜色走 **Metal**（D056），但质感（颗粒 / 光晕 / 眩光 / 扩散）还在 CPU；在这一块补上之前，Mac 的“GPU 质感”勾选框会自动用 CPU 链，不会报错。Mac 上的验证请双击 `scripts\verify-macos.command`，它会额外跑一次 CPU 光谱 vs Metal 光谱的 PSNR。
+
 ## 看空间扩散（旧盒状模糊 vs 新物理核）
 
 双击：
@@ -249,7 +251,7 @@ X:\agent\SpektraRoll\scripts\build-ui.cmd
 
 - **LUT（快）**：默认；每帧查 33³ 表，4 秒 99 帧约 35 秒
 - **光谱（物理，慢）**：逐像素跑完整底片/相纸物理链，不查 LUT；2.6 MP 约 **1.1 秒/帧**，4 秒 99 帧约 **2 分钟**
-- **光谱 GPU（物理，快）**：同一条物理链在显卡上跑，2.6 MP 约 **50 毫秒/帧**；没有 D3D11 显卡时自动退回 CPU 光谱
+- **光谱 GPU（物理，快）**：同一条物理链在显卡上跑（Windows 用 D3D11，Mac 用 Metal），2.6 MP 约 **50 毫秒/帧**（Windows）；没有可用 GPU 时自动退回 CPU 光谱
 
 引擎下面还有一个 **GPU 质感** 勾选框（默认开），控制颗粒、光晕、眩光、扩散是否也放到显卡上。2.6 MP 全质感视频从约 237 ms/帧降到约 **83 ms/帧**；取消勾选就用 CPU 参考链，两条链的画面区别小到测不出来（PSNR 150 dB 以上）。
 
@@ -284,7 +286,8 @@ SpektraRoll/scripts/verify-macos.command
 ```
 
 它会编译、跑单元测试、烘一张 Portra 400 LUT 并和参考对比；如果装了 `ffmpeg`，
-还会顺带测一遍视频路径。第一次双击如果被系统拦下，右键 → 打开即可。
+还会顺带测一遍视频路径。最后会跑一次 **CPU 光谱 vs Metal 光谱** 的对比（D056），
+打印 PSNR——如果这台 Mac 没有可用 Metal 设备，会看到 CPU 回退的提示。第一次双击如果被系统拦下，右键 → 打开即可。
 
 需要先装两样东西（都是免费的）：
 

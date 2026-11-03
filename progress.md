@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-03（D049–D055 已整理成交接摘要）
-> **当前里程碑**：**M5 进行中 · 颜色 / 质感 / 空间扩散都在 GPU，交付到浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half EXR，D041–D055）
+> **最后更新**：2026-11-03（D049–D056 已整理成交接摘要）
+> **当前里程碑**：**M5 进行中 · Windows 颜色/质感全在 GPU，macOS 颜色上 Metal**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half EXR + Metal 光谱，D041–D056）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -33,7 +33,63 @@
 
 ---
 
-## 零之一、最近一次会话：D055（浮点 / EXR）
+## 零之一、最近一次会话：D056（macOS Metal 光谱）
+
+会话目标：产品负责人指出 macOS 的 GPU 进度落后，要求先做 Metal。macOS 目前只有 CPU 光谱（2.6 MP 约 1.08 s/帧），Windows 已经是 50 ms。
+
+### 一、已完成的事项
+
+**D056 · macOS 颜色走 Metal**
+- 新增 `src/cli/gpu_film_metal.mm`（Objective-C++，仅 Apple 编译），实现同一个 `GpuFilm` 接口；CLI / 预览 / UI / 测试的调用方式不变。
+- 着色器是 D3D11 版 HLSL 的逐行 MSL 翻译，**运行时 `newLibraryWithSource:` 编译**，没有 `.metallib` 步骤、没有新依赖。
+- 常量缓冲用和 C++ 完全相同的标量数组布局；输入/输出/常量都是 `MTLResourceStorageModeShared`，`dispatchThreads` + `waitUntilCompleted` 后直接 memcpy。
+- CMake：Apple 上启用 OBJCXX、按平台选源文件、链接 Metal + Foundation、`.mm` 用 ARC。
+- 无 Metal 设备时 `available()` 返回 false，自动回退 CPU 光谱。
+- 测试：`gpu_film` 在 macOS CI 上**真跑**（17 个样本 vs CPU 参考）；`gpu_chain` 先查 `GpuTexture::available()`，没有 Metal 质感就 skip。
+- `scripts/verify-macos.command` 新增第 5 步：CPU 光谱 vs Metal 光谱出图并打 PSNR。
+
+### 二、一条关键决策（详见 DECISIONS D056）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D056 | macOS GPU 颜色 | Metal 移植光谱链；fast math 必须关；质感留到 D057 |
+
+### 三、踩过并修掉的坑（重点）
+
+1. **Metal 默认开 fast math**，编译器按“没有 NaN”优化，把 `density != density` 的保护删掉。光谱表里有几条波长密度是 NaN，于是整帧 NaN：普通路径直接把 NaN 输出，负片路径被 `clamp` 成 0。修法：`MTLCompileOptions.fastMathEnabled = NO`。
+2. 这个坑 Windows 复现不了，只能靠 macOS CI 的失败输出定位；`test_gpu_film` 现在失败时会打印逐样本 GPU/CPU 值并显式检查 NaN。
+3. 融合提交测试在没有 Metal 质感后端时会 attach 失败；先探测 `GpuTexture::available()` 再决定 skip。
+
+### 四、实测 / 状态
+
+| 项 | 结果 |
+|---|---|
+| macOS CI（run 80） | `gpu_film` 通过；`gpu_texture` / `gpu_chain` skip；Windows 全绿 |
+| Windows 本机 | 9/9 测试通过，GPU 测试仍真跑 |
+| Mac 实际速度 | **还没有数字**；CI 只跑 17 像素 parity，速度要在 MacBook 上量（见 §六） |
+
+### 五、未完成的待办
+
+- [ ] **D057：Metal 质感**（颗粒 / 光晕 / 眩光 / 扩散），把 `gpu_texture.cpp` 的 MSL 版补齐，融合提交再打开
+- [ ] **Mac 实测**：`verify-macos.command` 跑一遍，记录 Metal 光谱的 ms/帧与 PSNR
+- [ ] **线性 / OCIO**、**EXR 压缩**、**代理清理 / 4K 预览**（沿用上一轮）
+
+### 六、复现 / 验收（在 Mac 上）
+
+```bash
+# 一键：编译 + 测试 + LUT parity + 视频 + CPU vs Metal PSNR
+scripts/verify-macos.command
+
+# 单独量 Metal 光谱
+./build/spektra-roll-cli lut apply --engine spectral-gpu --scan negative \
+  --couplers on --gamut oklch --in out/frame.png --out out/metal.png
+SPEKTRA_VIDEO_DEBUG=1 ./build/spektra-roll-cli video --engine spectral-gpu \
+  --input apple-log --exposure 0.7 --scan negative --in clip.mov --out out/mac.mov --duration 2
+```
+
+---
+
+## 零之二、上一次会话：D055（浮点 / EXR）
 
 会话目标：D054 之后按清单做 **浮点 / EXR**（D017 欠账）。动手前先确认 CI：run **75**（D054 代码）和 **76**（文档）在 Windows + macOS 都绿。
 
@@ -100,7 +156,7 @@ scripts\demo-exr.cmd            # PNG16 / float EXR / half EXR + 读回比对 + 
 
 ---
 
-## 零之二、上一次会话：D054（真实点扩散核）
+## 零之三、上一次会话：D054（真实点扩散核）
 
 会话目标：按建议做 **A（真实点扩散核）**。动手前先跑完健康检查：9/9 测试、M1 parity 88.07 dB、`demo-m3` 220.8 ms/帧、`demo-m4` 续渲正常、Qt 界面能编译、预览第二次 45 ms。
 
@@ -168,7 +224,7 @@ scripts\demo-spread.cmd            # 左旧 / 右新，打印 PSNR 与 ms/帧
 
 ---
 
-## 零之三、上一次会话：D049–D053（融合提交 → 管道 → 并行 → 预览代理）
+## 零之四、上一次会话：D049–D053（融合提交 → 管道 → 并行 → 预览代理）
 
 会话目标：产品负责人依次选了 **B（融合提交）→ B2（视频管道）→ 并行分段 → 预览代理**。下面按交付编号整理，所有数字都是本机（i5-10600KF / Arc A750 / 32 GB）实测。
 
@@ -249,7 +305,7 @@ $env:SPEKTRA_VIDEO_DEBUG="1"   # 再跑一次，打印 wait/convert/process/pack
 
 ---
 
-## 零之四、上一次会话：预览实时化（D048）
+## 零之五、上一次会话：预览实时化（D048）
 
 会话目标：按建议先做 **A（预览实时化）**。先把旧预览链拆开量，再决定改法。
 
@@ -319,7 +375,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之五、上一次会话：空间质感上 GPU（D047）
+## 零之六、上一次会话：空间质感上 GPU（D047）
 
 会话目标：D046 之后颜色只剩约 50 ms/帧，视频却仍要约 380 ms/帧。先把时间花在哪量清楚，再决定要不要移植。
 
@@ -392,7 +448,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之六、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
+## 零之七、更早一次会话：颜色改成物理计算并上 GPU（D044–D046）
 
 会话目标：按你的要求，**能物理算的地方不要再靠 LUT 采样**，并且用满本机（i5-10600KF / 32 GB / Arc A750）。
 
@@ -447,7 +503,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ---
 
-## 零之七、更早的一次会话（M3 阶段）做了什么
+## 零之八、更早的一次会话（M3 阶段）做了什么
 
 一次会话把项目从"M2 尾声"推到"M3 完成"，按时间顺序：
 
@@ -608,6 +664,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **长片预览代理（D053）** | 30 秒素材代理 8.7 s / 30.6 MB；预览 **960×540 · 100 ms/帧**（原先约 640 px）；重开 48 ms；4 秒素材不变 |
 | **物理点扩散核（D054）** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**（+3.8%）；LUT+CPU 质感 231.8 → 251.4 ms/帧；`demo-gpu-texture` CPU 236.7 / GPU **82.6（2.87×）**，编码后 85.6 dB；parity 149–178 dB |
 | **浮点 EXR（D055）** | 2.6 MP：float **30.0 MB** / half **15.0 MB** / PNG16 15.0 MB；读写耗时与 PNG 相当；读回 **PSNR = inf**；ffmpeg 独立解码 92.6 dB（half 82.8）；+3 EV 时 **32.97%** 像素 >1（max 5.34）保留 |
+| **Metal 光谱（D056）** | macOS CI run 80 双绿，`gpu_film` 真跑；`gpu_texture` / `gpu_chain` 按预期 skip；Mac 实际 ms/帧待测 |
 | **预览帧缓存** | 99 帧 × 8.6 MB ≈ **853 MB**（默认上限 1024 MB） |
 | **GPU vs CPU 光谱 PSNR** | 负片 119.1 dB、印片 inf、PQ 82.9 dB、HLG 90.1 dB、strength 0.6 时 121.3 dB、视频 86.1 dB |
 | 颗粒场缓存 | 每 3 帧只生成 1 个新场（原来每帧 2 个）；占用约 21 MB |
@@ -730,6 +787,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 | **D053** | 长片预览代理 | **整段进内存会把最长边压到 960 px 以下时，生成 960 px 全 I 帧代理（`out/ui-proxy/`），按需取帧；失败回退内存缓存** | 30 秒素材 960×540 **100 ms/帧**（原先约 640 px）；重开 48 ms；4 秒素材不变 |
 | **D054** | 真实点扩散核 | **光晕/眩光/扩散改用底片微米 + 双高斯重尾核（窄芯 + 宽裙），按 `--frame-width-mm` 换算；CPU 生成权重、GPU structured buffer 上传；`--spread-model box` 保留旧盒状模糊** | 同帧 box vs physical **57.03 dB**；GPU 视频 **82.2 ms/帧**；LUT+CPU 质感 +8.5%；parity **149–178 dB**；`test_texture` 新增物理核检查 |
 | **D055** | 浮点交付 | **自带最小 OpenEXR（scanline、NONE、RGB、float/half）；`.exr` 即浮点且不钳制；支持 EXR 读入与 `--out-ext exr` 序列；`--bits 32` 配 PNG 报错** | float 30 MB / half 15 MB（2.6 MP）；读回 **PSNR = inf**；+3 EV 时 33% 像素 >1 保留；CI 双平台 EXR 冒烟 |
+| **D056** | macOS GPU 颜色 | **Metal 移植光谱链（运行时编译，shared buffer）；无设备回退 CPU；质感留到 D057** | macOS CI `gpu_film` 真跑并通过；**fast math 必须关**，否则 NaN 保护被优化掉、整帧 NaN |
 | **D009** | Windows / 桌面 UI 技术栈 | **Qt 6（Qt Widgets）**（你已拍板） | 不装 MSVC，用 Qt 官方 MinGW；同一套 UI 以后可编到 macOS；动态链接 Qt 与 GPL-3.0 兼容 |
 | **待定 D010** | 是否做 OFX 插件 | 建议**做，放第二期** | 尚未确认 |
 | **待定 D011** | Apple Developer 什么时候买 | 建议**等有 Mac 再说** | $99/年，现在不花 |
@@ -747,19 +805,20 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 
 ### 🔴 下一步（按建议顺序）
 
-1. **线性 / OCIO 交付**：EXR 现在是 display-encoded（sRGB / PQ 码值），不是场景线性；加 `--exr-linear` 或接 OCIO。
-2. **EXR 压缩**：NONE 压缩在 2.6 MP 是 30 MB/帧，ZIP/PIZ 能小 3–5 倍。
-3. **macOS 的 GPU 路线**：Metal；目前 macOS 只有 CPU 光谱 / LUT。
-4. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积（可加 LRU 或按钮）；4K 素材可考虑 1280 px 代理。
+1. **D057 · macOS 质感上 Metal**：把 `gpu_texture.cpp` 的 11 个 pass 翻成 MSL，融合提交在 Mac 上重新打开；这是 macOS 与 Windows 对齐的最后一块。
+2. **Mac 实测**：用 `scripts/verify-macos.command` 记录 Metal 光谱的 ms/帧与 PSNR（CI 只有 17 像素 parity）。
+3. **线性 / OCIO 交付**：EXR 现在是 display-encoded（sRGB / PQ 码值），不是场景线性。
+4. **EXR 压缩**：NONE 在 2.6 MP 是 30 MB/帧，ZIP/PIZ 能小 3–5 倍。
+5. **代理清理 / 4K 预览**：`out/ui-proxy/` 会按素材累积；4K 素材可考虑 1280 px 代理。
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱。
 
 ### 🟡 中期路线（M4–M5）
 
 | 阶段 | 内容 |
 |---|---|
 | **M4** | ✅ 颗粒场缓存、✅ 分段/续渲/时间码、✅ GPU 颜色/质感、✅ 融合提交、✅ 并行分段、✅ 预览代理、✅ 真实点扩散核、✅ 浮点 EXR；待做：线性/OCIO、EXR 压缩 |
-| **M5** | ✅ Qt 6 桌面界面主体、✅ 预览实时化；待做：macOS 同套 Qt、OFX 插件、渲染农场命令行 |
+| **M5** | ✅ Qt 6 桌面界面主体、✅ 预览实时化、✅ macOS Metal 光谱；待做：macOS Metal 质感、OFX 插件、渲染农场命令行 |
 
 ### 🟢 还没开始、但必须记住的欠账
 
@@ -772,7 +831,7 @@ $env:SPEKTRA_PREVIEW_DEBUG="1"; .\build-ui\spektra-roll-ui.exe --preview-selftes
 - [x] ~~空间质感还没上 GPU~~ → `--texture-engine gpu`（D047），视频 382.7 → 245.6 ms/帧；与 CPU 参考 143–166 dB
 - [x] ~~颜色与质感仍是两次 GPU 提交~~ → D049 融合提交，207.1 ms/帧；D050/D051 修完管道到 **79.2 ms/帧**
 - [ ] **CI 上没有真实 GPU** → `gpu_film` / `gpu_texture` / `gpu_chain` 在公有 runner 上会 skip，着色器退化只能在本机或真机 CI 发现
-- [ ] **macOS 没有 GPU 物理路径** → 只能 CPU 光谱 / LUT（Metal 未做）
+- [x] ~~**macOS 没有 GPU 物理路径**~~ → D056 Metal 光谱已上；质感待 D057
 - [ ] **没有色彩管理** → 没有 OCIO、没有 ACES 输入变换；Apple Log 是手写解码，不是 OCIO 配置
 - [x] ~~**浮点 / EXR**~~ → D055 已完成（float / half EXR，读回逐位一致，不钳制）
 - [x] ~~**空间效果不是物理核**~~ → D054 微米 + 双高斯重尾核；box 模型保留对照
@@ -966,6 +1025,8 @@ X:\agent\SpektraRoll\
 - ❌ **不要在 CLI / UI 里另写一份质感顺序**：`sr::applyTexture()` 是唯一 CPU 参考链，GPU parity 测试也拿它当基准（D047）
 - ❌ **不要把盒状模糊改成并行前缀和或换累加顺序**：GPU 现在逐位对齐 CPU 靠的就是“一行一列顺序累加”，换了就过不了 parity（D047；物理核时代实测 149–178 dB，见 D054）
 - ❌ **不要把 `--texture-engine gpu` 改成硬失败**：编译失败、无设备、运行时错误都要回退 CPU 并只 warning 一次（D047）
+- ❌ **不要在 Metal 里用默认的 fast math**：`MTLCompileOptions.fastMathEnabled` 默认 YES，会把 `density != density` 的 NaN 保护优化掉，光谱里几条 NaN 波长直接让整帧变 NaN（D056）；D3D11 复现不了
+- ❌ **不要把 Metal 的 `Params` 改成 `float4` 数组**：现在用 `float[4]` 是为了和 C++ 结构逐字节一致；换 `float4` 会引入 16 字节对齐规则，错位后整帧都是垃圾（D056）
 - ❌ **不要在 GPU 质感里省略颗粒的两场交叉淡化或 `norm`**：那是 D036 防闪烁的根，改了颗粒会重新沸腾（D047）
 - ❌ **不要把 `--texture-engine` 漏出分段签名**：否则 CPU/GPU 质感的分段会被混着续渲（D047）
 - ❌ **不要在 UI 预览里恢复“每帧一个 ffmpeg + 一个 CLI 进程”**：那条链 1.7–2.2 s/帧，现在由 `preview` 常驻进程 + 整段缓存接管（D048）
@@ -1001,6 +1062,7 @@ AI 就应该：
 10. 预览路径改过就跑 `.\build-ui\spektra-roll-ui.exe --preview-selftest`：第二次预览应 <100 ms（短片 47 ms；长片走 960 px 代理约 100 ms）
 11. 视频管道改过就设 `SPEKTRA_VIDEO_DEBUG=1` 跑一次 2 秒渲染：应看到 `wait / convert / process / pack` 四项，总时长约 79–82 ms/帧
 12. 分段改过就删掉 `.parts` 里的中间段再 `--resume` 一次，确认只补缺失段（并行下同样成立）
-13. 看 §三 的"下一步"（当前最该做：线性 / OCIO 或 macOS Metal）
+13. macOS / Metal 改过就在 Mac 上跑 `scripts/verify-macos.command`：`gpu_film` 应真跑（不是 skip），第 5 步应打印 CPU vs Metal 的 PSNR；`gpu_texture` / `gpu_chain` 在 D057 之前会 skip
+14. 看 §三 的"下一步"（当前最该做：macOS Metal 质感 D057）
 
 约束：每次改完都要重跑 `lut compare`（不能掉到 88 dB 以下）和 9 个测试程序。
