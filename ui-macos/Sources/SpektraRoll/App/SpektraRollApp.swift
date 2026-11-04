@@ -6,8 +6,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private var attempts = 0
 
+    private func debugLog(_ message: String) {
+        let url = URL(fileURLWithPath: "/tmp/spektra-debug.log")
+        let line = message + "\n"
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(line.data(using: .utf8) ?? Data())
+            handle.closeFile()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard ProcessInfo.processInfo.environment["SPEKTRA_ALL_SPACES"] == "1" else { return }
+        let enabled = ProcessInfo.processInfo.environment["SPEKTRA_ALL_SPACES"] == "1"
+        debugLog("launch: allSpaces=\(enabled) windows=\(NSApp.windows.count)")
+        guard enabled else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
             guard let self else {
                 timer.invalidate()
@@ -15,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.attempts += 1
             let windows = NSApp.windows
-            NSLog("SpektraRoll debug: attempt %d, windows %d", self.attempts, windows.count)
+            self.debugLog("attempt \(self.attempts): windows=\(windows.count)")
             for window in windows {
                 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
                 window.level = .floating
