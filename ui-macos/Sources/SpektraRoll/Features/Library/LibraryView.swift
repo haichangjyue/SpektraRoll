@@ -20,10 +20,10 @@ struct LibraryView: View {
                     app.presentImportPanel()
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.text)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.primaryText)
                         .frame(width: 24, height: 24)
-                        .background(Circle().fill(Theme.surfaceRaised))
+                        .background(Circle().fill(Theme.primary))
                 }
                 .buttonStyle(.plain)
             }
@@ -70,7 +70,7 @@ struct LibraryView: View {
                             Label("导入素材", systemImage: "plus")
                                 .font(Theme.caption)
                         }
-                        .buttonStyle(PillButtonStyle(filled: false))
+                        .buttonStyle(PillButtonStyle())
                         .padding(.top, 2)
                     }
                 }

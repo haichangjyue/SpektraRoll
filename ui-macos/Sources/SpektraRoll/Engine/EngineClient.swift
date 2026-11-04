@@ -50,7 +50,7 @@ private final class DataBox: @unchecked Sendable {
     }
 }
 
-final class EngineClient {
+final class EngineClient: @unchecked Sendable {
     let cliURL: URL?
     let ffmpegURL: URL?
     let ffprobeURL: URL?

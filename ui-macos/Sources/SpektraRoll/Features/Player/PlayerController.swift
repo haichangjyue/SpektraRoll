@@ -13,6 +13,7 @@ final class PlayerController: ObservableObject {
 
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
+    private var durationObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
 
     init() {
@@ -51,12 +52,20 @@ final class PlayerController: ObservableObject {
     }
 
     func load(url: URL) {
-        let item = AVPlayerItem(url: url)
-        player.replaceCurrentItem(with: item)
+        durationObservation?.invalidate()
         player.pause()
         currentTime = 0
         duration = 0
         isPlaying = false
+        let item = AVPlayerItem(url: url)
+        player.replaceCurrentItem(with: item)
+        durationObservation = item.observe(\.duration, options: [.initial, .new]) { [weak self] item, _ in
+            let length = item.duration.seconds
+            guard length.isFinite, length > 0 else { return }
+            Task { @MainActor in
+                self?.duration = length
+            }
+        }
     }
 
     func toggle() {

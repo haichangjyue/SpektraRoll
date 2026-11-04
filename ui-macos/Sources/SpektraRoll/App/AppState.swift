@@ -102,6 +102,9 @@ final class AppState: ObservableObject {
                 settings.ocioEnabled = false
             }
             normalizeSelection()
+            if let path = ProcessInfo.processInfo.environment["SPEKTRA_AUTOLOAD"], !path.isEmpty {
+                await debugAutoImport(URL(fileURLWithPath: path))
+            }
         } catch {
             statusMessage = "引擎未连接"
             errorMessage = error.localizedDescription
@@ -462,6 +465,31 @@ final class AppState: ObservableObject {
             outputDirectory = URL(fileURLWithPath: state.outputDirectory)
         }
         selectedAssetID = assets.first?.id
+    }
+
+    private func debugAutoImport(_ url: URL) async {
+        guard var asset = await MediaProbe.probe(url: url, engine: engine) else { return }
+        asset.input = .sLog3
+        asset.ocioEnabled = false
+        if let thumb = await MediaProbe.makeThumbnail(url: url,
+                                                      cacheDirectory: engine.cacheDirectory) {
+            asset.thumbnailPath = thumb
+        }
+        assets.append(asset)
+        selectedAssetID = asset.id
+        settings.input = .sLog3
+        statusMessage = "已导入 \(asset.displayName)"
+        save()
+
+        if ProcessInfo.processInfo.environment["SPEKTRA_AUTOPREVIEW"] == "1" {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            setFilmPreview(true, at: 0)
+        }
+        if ProcessInfo.processInfo.environment["SPEKTRA_AUTORENDER"] == "1" {
+            outputName = "spektra-debug-render"
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            render()
+        }
     }
 
     private func normalizeSelection() {
