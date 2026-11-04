@@ -1421,7 +1421,7 @@
 - **验证**：
   - Windows 本机不能编译 SwiftUI；用 Windows 上的 Swift 6.4 做了 `-parse`，Foundation 引擎层 `-typecheck` 通过。
   - macOS CI run **#128**（commit `0f7b593`）`swift build` 通过；此前 #125/#126 失败于 `AppState` 缺 `inspectorTab`，已修；#127 起 CI 会把 Swift 错误打成 annotation。
-  - **Mac 本机验收（2026-11-05）**：`swift build` 6 秒通过；`scripts/build-macos-ui.sh` 组出约 167 MB 的 `.app`；启动、三栏、字体、缩略图、AVPlayer 播放、时长 00:03、INFO、胶片效果、UI 渲染全部正常；渲染输出 640×360 / 3.00 s / H.264 / yuv420p。
+  - **Mac 本机验收（2026-11-05）**：`swift build` 6 秒通过；`scripts/build-macos-ui.sh` 组出约 167 MB 的 `.app`；启动、三栏、字体、缩略图、AVPlayer 播放、时长、INFO、胶片效果、UI 渲染全部正常；真实 `C0113.MP4`（4K50 / 312 帧）缩略图/播放/INFO/4K 胶片预览正常；合成 3 秒测试片渲染输出 640×360 / 3.00 s / H.264 / yuv420p。
   - 远程验收坑：SSH 在 `Background` launchd domain，`screencapture` 抓不到 GUI 窗口；用 app 内 `SPEKTRA_CAPTURE=1` 自截图。Stage Manager 会隐藏窗口，验收时临时关闭、结束后恢复。见 `docs/macos-dev-notes.md`。
   - OCIO 暂不可用：Homebrew `opencolorio` 在 macOS 14 上无 bottle，源码构建 `python@3.15` 被 clang tail-call 错误挡住；cmake 已从手动 4.4.4 切到 Homebrew 4.4.5（手动目录备份在 `/opt/homebrew/opt/cmake-manual-4.4.4`）。首版用内置 10 种 Log 输入。
 - **后果**：

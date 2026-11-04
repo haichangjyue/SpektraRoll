@@ -54,7 +54,8 @@ open -F \
 ## 已验证
 
 - `.app` 启动、三栏、字体、导入缩略图、AVPlayer 播放、空格、INFO、胶片效果、渲染。
-- UI 渲染输出：640×360 / 3.00 s / H.264 / yuv420p；LUT 烘焙/预览走同一 CLI。
+- 真实 `C0113.MP4`：3840×2160 / 50p / 312 帧 / 00:06；缩略图、播放、INFO、4K 胶片预览（`~/Library/Caches/SpektraRoll/preview/graded.png`）正常。
+- 合成 3 秒测试片：渲染输出 640×360 / 3.00 s / H.264 / yuv420p。
 - 字体：`NotoSansCJKsc-Regular/Bold.otf` 已打包（OFL）。
 
 ## 未完成 / 已知问题

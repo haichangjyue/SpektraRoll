@@ -38,9 +38,9 @@
 | SwiftUI 源码 | 已写；Windows 本机不能编译 SwiftUI，但 macOS 本机 `swift build` 通过 |
 | macOS 编译 | **✅ CI #128 + Mac 本机 `swift build` 通过**；#125/#126 因缺 `inspectorTab` 失败，已修 |
 | `.app` 双击验收 | **✅ 已在 Mac 上构建并启动**（Stage Manager 暂时关闭用于截屏，已恢复） |
-| 导入/缩略图 | **✅** 自动导入 3 秒测试片，缩略图/文件名/分辨率正常 |
-| 播放/空格 | **✅** AVPlayer 播放；时长 00:03；空格由菜单快捷键处理 |
-| INFO / 胶片效果 | **✅** INFO 元数据正常；胶片效果单帧渲染正常（Portra 400 负片观感） |
+| 导入/缩略图 | **✅** 3 秒测试片 + 真实 `C0113.MP4`（3840×2160 / 50p / 312 帧）均正常 |
+| 播放/空格 | **✅** AVPlayer 播放；真实素材时长 00:06；空格由菜单快捷键处理 |
+| INFO / 胶片效果 | **✅** 4K50 INFO 元数据正常；胶片效果单帧渲染成功（4K graded.png） |
 | 渲染 | **✅** UI 触发渲染 → 640×360 / 3.00 s / H.264 / yuv420p，输出到 `~/Movies/SpektraRoll` |
 | 字体 | **✅** Noto Sans CJK SC Regular/Bold 已下载并打包（OFL；思源黑体同设计） |
 | ffmpeg | **✅** Homebrew ffmpeg/ffprobe 9.0.2 已打包 |
