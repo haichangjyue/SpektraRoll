@@ -80,6 +80,16 @@ on the scan's own 18% grey and scales all channels together, so it adds punch
 without shifting hue; negative scans default to 1.15 (D026), and 1.0 keeps the
 flat film curve for grading later.
 
+`--scan slide` (D067) handles reversal (positive) films. Their characteristic
+curves already produce a positive image, so there is no inversion and no paper:
+the developed dye densities are scanned directly, **including the film base**
+(which the negative path removes), under the film's viewing illuminant. The scan
+is then balanced between clear base (white) and maximum dye (black), and 18%
+grey is neutralised with the same per-channel power as the negative scan.
+Positive stocks default to this mode; `--scan print` or `--scan negative` on a
+positive profile is rejected. The balance is a scanner-style engineering step,
+so this path has no upstream parity target.
+
 Out-of-gamut output is rolled back in with an OkLCh chroma knee (D027). The
 print path from Apple Log can produce negative linear values; the negative scan
 is bounded by construction, so the compression is a no-op there. It defaults on

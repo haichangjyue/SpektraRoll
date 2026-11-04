@@ -284,7 +284,24 @@ X:\agent\SpektraRoll\scripts\demo-cine.cmd
 - Vision3 200T / 500T 是 **T 型灯**，2383 的观看光源是 **K75P**（放映机），模型会自动用对，不用手动设。
 - 视频渲染记得给无标签的 FX30 文件加 `--in-matrix bt709`。
 
-> 反转片（Ektachrome / Velvia / Provia / Kodachrome）还没接：它们需要“正片直扫”路径，不是印片。
+## 反转片直扫（Ektachrome / Velvia / Provia / Kodachrome，D067）
+
+双击：
+
+```
+X:\agent\SpektraRoll\scripts\demo-slide.cmd
+```
+
+同一帧 S-Log3 素材出四张：Ektachrome 100、Velvia 100、Provia 100F、Kodachrome 64。
+
+自己用的时候：
+
+- 反转片显影后就是正像，**不印到相纸、也不倒相**；`--scan slide` 直接扫描已显影的染料。
+- 负片扫描会去掉片基，反转片保留片基；扫描再按“清澈片基 → 最深染料”做黑白平衡，中灰保持中性。
+- `--film data\profiles\kodak_ektachrome_100.json --scan slide`（不写 `--scan` 也会自动直扫）。
+- 反转片默认 `--contrast 1.0`；想要更硬可以往上加，但反转片本身宽容度比负片低。
+- 正片配 `--scan print` / `--scan negative`，或负片配 `--scan slide`，CLI 会明确报错。
+- 界面里选带“（反转片）”的胶片会自动切到“扫描反转片（直扫）”，相纸下拉会停用。
 
 不点鼠标的检查：
 
@@ -292,7 +309,7 @@ X:\agent\SpektraRoll\scripts\demo-cine.cmd
 X:\agent\SpektraRoll\build-ui\spektra-roll-ui.exe --stocks-selftest
 ```
 
-应输出 `stocks selftest: ok films=16 papers=8 vision3=1 verita=1 print=1/1 portra=1`。
+应输出 `stocks selftest: ok films=20 papers=8 vision3=1 verita=1 print=1/1 portra=1 slide=1`。
 
 ## OpenColorIO（可选）
 
@@ -437,4 +454,9 @@ ctest --test-dir build --output-on-failure
 # 扫描负片（高光/暗部都留住，画面偏平）
 .\build\spektra-roll-cli.exe lut bake --input apple-log --exposure 0.7 --scan negative --out out\negative.cube
 .\build\spektra-roll-cli.exe lut apply --lut out\negative.cube --in frame.png --out frame_negative.png
+
+# 反转片直扫（Ektachrome / Velvia / Provia / Kodachrome；不写 --scan 也会自动直扫）
+.\build\spektra-roll-cli.exe lut bake --film data\profiles\kodak_ektachrome_100.json `
+  --input s-log3 --scan slide --exposure 0.7 --out out\ektachrome.cube
+.\build\spektra-roll-cli.exe lut apply --lut out\ektachrome.cube --in frame.png --out frame_ektachrome.png
 ```

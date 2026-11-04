@@ -9,8 +9,9 @@ Status: **M5 in progress** — the M1 spectral chain bakes a real **Kodak Portra
 **PSNR 88 dB** (ΔE76 max 0.0065), accepts **Apple Log**, **Sony S-Log3**
 (S-Gamut3.Cine or S-Gamut3), **Canon C-Log3**, **Panasonic V-Log**,
 **ARRI LogC3 / LogC4**, **Blackmagic Film Gen 5** and **DaVinci Intermediate**
-footage as input, can either print it
-(`--scan print`) or scan the negative (`--scan negative`, much more latitude),
+footage as input, can print it (`--scan print`), scan the negative
+(`--scan negative`, much more latitude), or scan a reversal film directly
+(`--scan slide`, Ektachrome / Velvia / Provia / Kodachrome),
 writes SDR or **HDR (PQ/HLG)** as 16-bit PNG or unclipped **float/half EXR**,
 and renders clips in resumable segments while keeping the camera timecode. A
 **Qt 6 desktop UI** wraps the same pipeline. Colour management is optional:
@@ -340,11 +341,11 @@ docs/           architecture and licensing notes
   not final.
 - SDR output is the default; HDR (PQ/HLG, `--hdr`, D029) works and the demo
   writes an HEVC Main10 HDR clip, but seeing it needs an HDR display.
-- The catalogue is negative-only. Vision3 50D/250D/200T/500T and Verita print on
-  2383/2393 with the T/K75P illuminants (D065); the four slide films
-  (Ektachrome, Velvia, Provia, Kodachrome) still need a direct positive scan and
-  are not wired. The cinema print path has no pre-flash or Y/M dichroic shifts
-  yet.
+- Vision3 50D/250D/200T/500T and Verita print on 2383/2393 with the T/K75P
+  illuminants (D065). The four slide films (Ektachrome, Velvia, Provia,
+  Kodachrome) scan directly with `--scan slide` (D067); that path has no
+  upstream parity because the scanner-style black/white balance is our own.
+  The cinema print path has no pre-flash or Y/M dichroic shifts yet.
 - No video file I/O in the library yet: `video` drives `ffmpeg` as a child process
   (D022), so a clip can be graded, trimmed, rendered as ProRes or HDR, and
   resumed from completed segments in one command.

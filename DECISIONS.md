@@ -1210,6 +1210,31 @@
 
 ---
 
+## D067 · 反转片直扫（Ektachrome / Velvia / Provia / Kodachrome）
+
+- **日期**：2026-11-04
+- **背景**：D065 之后片库里只剩 4 支反转片没接（`type=positive`）。反转片显影后本身就是正像，不能印到负片相纸上，也不需要“负片倒相”；正确路径是**直接扫描已显影的染料**。
+- **实现**：
+  - `ScanMode` 追加 `Positive`；CLI `--scan slide`（也接受 `positive` / `reversal`）。片库里的 `type=positive` 胶片在不写 `--scan` 时自动走直扫。
+  - 负片扫描会去掉片基（橙 mask 随之消失）；反转片直扫**保留片基**，因为透明片基是画面的一部分。
+  - 扫描后按 `--scan slide` 自己的“清澈片基 → 最深染料”做黑白平衡，并用 18% 中灰按通道 power 中和染料串色；`--contrast` 以中灰为支点（反转片默认 **1.0**）。
+  - 正片 + `--scan print` / `--scan negative`，或负片 + `--scan slide`，都在 CLI 里明确报错，不会静默出怪图。
+  - CPU 与 D3D11 / Metal 同步：常量缓冲新增 `positiveWhite/Black/Gamma` 与 `positiveGreyLuma`，`scanNegative` 枚举改为三态 `scanMode`；两个着色器都实现“带片基扫描”。
+  - UI 片库纳入 4 支反转片（显示“（反转片）”）；选反转片自动切到“扫描反转片（直扫）”并停用相纸下拉，切回负片时恢复。`--stocks-selftest` 增加 `slide=1`。
+- **验证**：
+  - `test_film_model` 新增：Ektachrome 配置、黑白端点、中灰中性、单调性、0.5 / 1.0 锚点；另外三支反转片都能配置并到白。
+  - `test_gpu_film` 新增 Ektachrome + slide + couplers + gamut：CPU vs D3D11 worst **6e-6**；`ctest` **10/10**。
+  - 4K50 FX30 单帧：光谱 CPU **2685.6 ms** vs 光谱 GPU **261.3 ms**，两者 **119.09 dB**（ffmpeg PSNR）。
+  - `spektra-roll-ui.exe --stocks-selftest`：**films=20 / papers=8**，`slide=1`。
+  - `scripts\demo-slide.cmd -NoOpen`：四支反转片都正常烘表 + 出 4K 图（33³ 约 100–110 ms）。
+  - `verify-m1` 仍是 **88.07 dB**；M1/负片/印片路径数值未变。
+- **后果**：
+  - 界面可用 profile **24 → 28**（20 底片 + 6 相纸 + 2 电影印片）；所有随仓库提供的 stock 都已接通。
+  - 反转片直扫的黑白平衡是**扫描仪式**的工程处理，和上游默认的“原始密度扫描”不同；上游没有正片直扫的 parity 目标。
+  - 仍未做：印片机 Y/M 微调 / 预闪 / 光源选择、扫描仪 unsharp、空间物理模型、光谱 GPU 的 OCIO。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

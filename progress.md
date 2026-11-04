@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D063–D066：UI OCIO + FX30 素材 + 电影片库 + 回退提示）
-> **当前里程碑**：**M5 进行中 · 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 电影片库（Vision3/2383）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393，D041–D066）
+> **最后更新**：2026-11-04（D067：反转片直扫 Ektachrome / Velvia / Provia / Kodachrome）
+> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫，D041–D067）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -37,9 +37,55 @@
 
 ---
 
-## 零之一、本次对话（D063–D066）交接摘要
+## 零之零、本次对话（D067）交接摘要
 
-> **新开对话先读这一节**；更早的 D056–D062 在下一节，细节按决策编号往下（最新在前）。
+> **新开对话先读这一节**；D063–D066 在下一节，细节按决策编号往下（最新在前）。
+
+### 这次完成了什么
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **D067** | 反转片直扫 | Ektachrome 100 / Velvia 100 / Provia 100F / Kodachrome 64；`--scan slide` 保留片基、按“清澈片基 → 最深染料”黑白平衡、中灰按通道中和；正片自动直扫，错误组合明确报错；CPU / D3D11 / Metal 同步；4K 单帧 CPU 2685.6 ms vs GPU 261.3 ms（**119.09 dB**）；界面片库 **20 支底片**（`stocks selftest: ok films=20 papers=8 ... slide=1`） |
+
+- 本机：`ctest` **10/10**；`verify-m1` **88.07 dB**；`test_gpu_film` 新增 slide + couplers worst **6e-6**。
+- 双击验收：`scripts\demo-slide.cmd`（四支反转片各出一张 4K 图）。
+- 最新代码提交：`b08f40f`（D067）；之后只有文档更新（DECISIONS / STATUS / RUN / README / 本文件）。
+
+### 关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D067 | 反转片直扫 | `ScanMode::Positive`；保留片基；扫描仪黑白平衡 + 中灰中性；正片默认直扫；CPU/GPU 三态 `scanMode` |
+
+### 未完成的待办（按建议顺序）
+
+1. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪 unsharp
+2. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散滤镜、镜头/扫描仪 blur
+3. **光谱 GPU 的 OCIO**：现在 `--ocio-input` 会回退 CPU 光谱（4K 约 3.5 s/帧）
+4. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
+
+### 新对话第一步
+
+1. `ctest --test-dir build --output-on-failure`（10/10）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `scripts\demo-slide.cmd -NoOpen`（四支反转片；4K 图正常）
+4. `build-ui\spektra-roll-ui.exe --stocks-selftest`（应含 `films=20 ... slide=1`）
+5. `scripts\demo-cine.cmd -NoOpen`、`scripts\demo-ocio.cmd -NoOpen`（旧路径不回归）
+6. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
+
+### 当前已知限制 / 坑
+
+- 反转片直扫的黑白平衡是扫描仪式工程处理，**没有上游 parity**；上游默认只做原始密度扫描。
+- 正片宽容度比负片低：`--exposure` 仍默认 0.7 EV，亮部容易顶到；想要更平就降曝光或降反差。
+- 片基密度在反转片直扫里保留（和负片扫描相反），换片基/扫描光会改变白点。
+- UI 选反转片会自动切“扫描反转片（直扫）”并停用相纸；切回负片恢复“扫描负片”。
+
+---
+
+## 零之一、上一轮（D063–D066）交接摘要
+
+> 这里是上一轮的摘要；新对话优先读上面的 D067。
 
 ### 这次完成了什么
 
@@ -65,14 +111,14 @@
 
 ### 未完成的待办（按建议顺序）
 
-1. **反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome（4 支，正片直扫路径还没接）
+1. [x] ~~**反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome~~ → D067 已完成（`--scan slide`）
 2. **光谱 GPU 的 OCIO**：现在 `--ocio-input` 会回退 CPU 光谱（4K 约 3.5 s/帧）
 3. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪白/黑校正 + unsharp
 4. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散滤镜、镜头/扫描仪 blur
 5. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 6. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
 
-> 我的建议顺序：先做**反转片直扫**（4 支，约 1 个 D），再做**空间物理**（染料云颗粒 + 逐通道光晕，2–3 个 D），然后是**印片机/扫描仪控制**；光谱 GPU 的 OCIO 可以等。
+> 我的建议顺序：反转片直扫已在 D067 完成；下一步做**空间物理**（染料云颗粒 + 逐通道光晕，2–3 个 D），然后是**印片机/扫描仪控制**；光谱 GPU 的 OCIO 可以等。
 
 ### 新对话第一步
 
@@ -128,6 +174,66 @@
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 
 > 本次对话（D063–D066）的完成、决策和待办见前面的「零之一」；下面是更早阶段的记录。
+
+---
+
+## 会话 D067 · 反转片直扫（Ektachrome / Velvia / Provia / Kodachrome）
+
+会话目标：D065 之后片库里只剩 4 支反转片没接。反转片显影后本身就是正像，不能印到负片相纸，也不该走“负片倒相”；这一轮把“正片直扫”路径接通。
+
+### 一、已完成的事项
+
+**D067 · 正片直扫**
+- `ScanMode` 追加 `Positive`；CLI 新增 `--scan slide`（也接受 `positive` / `reversal`）。片库里的 `type=positive` 胶片在不写 `--scan` 时自动直扫。
+- 负片扫描会去掉片基（橙 mask 随之消失）；反转片直扫**保留片基**，扫描后再按“清澈片基 → 最深染料”做黑白平衡，并用 18% 中灰按通道 power 中和染料串色。
+- `--contrast` 仍以中灰为支点；反转片默认 **1.0**（负片仍 1.15，印片仍 1.0）。
+- 错误组合明确报错：正片 + `--scan print` / `--scan negative`，负片 + `--scan slide`。
+- CPU / D3D11 / Metal 同步：常量缓冲新增 `positiveWhite/Black/Gamma` 与 `positiveGreyLuma`，`scanNegative` 改成三态 `scanMode`；两个着色器都实现“带片基扫描”。
+- UI：片库纳入 4 支反转片（下拉显示“（反转片）”）；选反转片自动切“扫描反转片（直扫）”、停用相纸；切回负片恢复。`--stocks-selftest` 增加 `slide`。
+- 新增 `scripts\demo-slide.cmd` / `.ps1`：同一帧出四张 4K 反转片。
+
+### 二、一条关键决策（详见 DECISIONS D067）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D067 | 反转片直扫 | `ScanMode::Positive`；保留片基；扫描仪黑白平衡 + 中灰中性；正片默认直扫；CPU/GPU 三态 `scanMode` |
+
+### 三、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| 4K50 FX30 单帧（Ektachrome） | 光谱 CPU **2685.6 ms** vs 光谱 GPU **261.3 ms** |
+| CPU vs D3D11 | ffmpeg PSNR **119.09 dB**（r 118.33 / g 119.29 / b 119.78） |
+| `test_gpu_film` | 新增 Ektachrome + slide + couplers + gamut，worst **6e-6** |
+| `test_film_model` | 黑白端点、中灰中性、单调性、0.5 / 1.0 锚点；另外三支反转片都能配置并到白 |
+| 角色反转错误 | 正片 + print/negative、负片 + slide 都返回明确错误 |
+| 界面片库 | `stocks selftest: ok films=20 papers=8 vision3=1 verita=1 print=1/1 portra=1 slide=1` |
+| `demo-slide` | 4 支反转片烘表 33³ 约 100–110 ms，4K 输出正常 |
+| 回归 | `ctest` **10/10**；`verify-m1` **88.07 dB**（旧路径数值未变） |
+
+### 四、怎么用
+
+```powershell
+# 单支反转片（不写 --scan 也会自动直扫）
+.\build\spektra-roll-cli.exe lut bake --film data\profiles\kodak_ektachrome_100.json `
+  --input s-log3 --scan slide --exposure 0.7 --out out\ektachrome.cube
+
+# 视频
+.\build\spektra-roll-cli.exe video --engine spectral-gpu --film data\profiles\fujifilm_velvia_100.json `
+  --scan slide --input s-log3 --in-matrix bt709 --in X:\agent\footage\C0113.MP4 `
+  --out out\slide-velvia.mov --duration 2 --codec prores
+
+# 双击验收
+scripts\demo-slide.cmd
+```
+
+界面：左栏“胶片”选带“（反转片）”的项，扫描方式会自动切到“扫描反转片（直扫）”，相纸下拉停用。
+
+### 五、未完成的待办
+
+- [ ] 印片机 Y/M 微调、预闪、光源选择；扫描仪 unsharp
+- [ ] 空间物理模型（染料云颗粒、逐通道 halation、具名扩散、镜头/扫描仪 blur）
+- [ ] 光谱 GPU 的 OCIO、PIZ/DWA、代理清理 / 4K 预览、macOS Qt 打包
 
 ---
 
@@ -227,8 +333,8 @@
 
 ### 五、未完成的待办
 
-- [ ] **反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome
-- [ ] 印片机 Y/M 微调、预闪、光源选择；扫描仪白/黑校正 + unsharp
+- [x] ~~**反转片直扫**：Ektachrome / Velvia / Provia / Kodachrome~~ → D067
+- [ ] 印片机 Y/M 微调、预闪、光源选择；扫描仪 unsharp
 - [ ] 空间物理模型（染料云颗粒、逐通道 halation、具名扩散、镜头/扫描仪 blur）
 - [ ] 光谱 GPU 的 OCIO、PIZ/DWA、代理清理 / 4K 预览、macOS Qt 打包
 
