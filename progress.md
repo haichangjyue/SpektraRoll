@@ -51,6 +51,7 @@
 - 音频：合成 AU 与 ProRes 视频封装成功（PCM 24-bit）；**样片 0 音频通道**，真实 R3D 音频未测。
 - `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
 - 双击验收：`scripts\demo-red.cmd`（5 步）；UI `--red-selftest` / `--red-render-selftest`。
+- CI：run **121** Windows + macOS 双绿。
 - 最新代码提交：`d6adb83`（D071）；之后只有文档更新。
 
 ### 关键决策

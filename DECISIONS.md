@@ -1347,6 +1347,7 @@
   - UI `--red-render-selftest`：`ok: 渲染完成`，输出 3024×1701 / 2 帧 ProRes 422 HQ。
   - 合成 AU + ffmpeg：ProRes 视频 + PCM 24-bit 音轨封装成功；真实 R3D 音频未测（样片 0 通道）。
   - `ctest` 11/11；`verify-m1` 88.07 dB。
+  - CI：run **121** Windows + macOS 双绿（真实音频仍只在有样片时验证）。
 - **后果**：
   - R3D 现在是“CLI 一条命令 + UI 单条预览/渲染”都可用；分段/续渲/并行也支持。
   - 还没做：真实 R3D 音频验证、UI 批量 R3D、GPU/并行解码、6K 全分辨率性能。
