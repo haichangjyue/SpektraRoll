@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let windows = NSApp.windows
             self.debugLog("attempt \(self.attempts): windows=\(windows.count)")
             for window in windows {
+                let content = window.contentView
+                self.debugLog("  title=\(window.title) frame=\(window.frame) visible=\(window.isVisible) alpha=\(window.alphaValue) opaque=\(window.isOpaque) content=\(String(describing: content)) subviews=\(content?.subviews.count ?? -1)")
                 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
                 window.level = .floating
                 window.setFrame(NSRect(x: 80, y: 80, width: 1200, height: 780), display: true)
