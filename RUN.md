@@ -347,6 +347,37 @@ X:\agent\SpektraRoll\scripts\demo-ocio-ui.cmd
 
 **要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。
 
+## RED R3D / R3D NE（自带 SDK，D068）
+
+> **重要**：官方包**不带** RED SDK，也不能解码 R3D。这一节是给“自己有 RED SDK、愿意本地编译”的人看的。官方 `build\` 只会识别 `.r3d` 并提示下一步。
+
+先检查你的 SDK：
+
+```powershell
+.\scripts\build-red.cmd -Check -SdkRoot D:\RED_SDK
+```
+
+再本地编译（独立到 `build-red\`，不影响官方 `build\`）：
+
+```powershell
+$env:SR_REDSDK_ROOT = "D:\RED_SDK"
+.\scripts\build-red.cmd
+.\build-red\spektra-roll-cli.exe red-info --in D:\footage\A001.R3D --json
+```
+
+现在能做什么：
+
+- 读 R3D 元数据：分辨率、帧数、帧率、音频通道、timecode
+- 还不能渲染 R3D 帧（D068 骨架）；界面里选 `.r3d` 会显示提示
+
+现在要渲染 R3D：
+
+1. 用 **REDCINE-X Pro** 导出 ProRes 4444 / 4444 XQ，色彩空间 **REDWideGamutRGB**，Gamma **Log3G10**
+2. `lut bake --ocio-input "Log3G10 REDWideGamutRGB" --scan negative ...`
+3. `video --lut ... --in 导出的.mov ...`
+
+**许可证**：不要把 SDK 或带 RED 的二进制当作官方包分发；`build-red\` 只限自用。细节见 `docs/red-sdk.md`。
+
 ## 用图形界面（Qt 6）
 
 双击：
@@ -362,7 +393,7 @@ X:\agent\SpektraRoll\scripts\build-ui.cmd
 - **左栏**：素材（视频、画面类型、ffmpeg）、色彩管理（OCIO：配置文件 / 色彩空间）、胶片与相纸（LUT、烘焙）、输出（文件、编码、起始、帧数、分段）
 - **中间**：画布；下面是素材信息条、时间线、状态条（进度条）
 - **右栏**：按冲印流程分四页：
-  - **显影前**：曝光、**胶片选择**（16 支彩色负片：11 支静态 + Vision3/Verita）、DIR 耦合剂、颗粒/稳定度/光晕
+  - **显影前**：曝光、**胶片选择**（20 支底片：11 支静态负片 + Vision3/Verita + 4 支反转片）、DIR 耦合剂、颗粒/稳定度/光晕
   - **显影后**：**相纸选择**（6 种相纸 + 2 种电影印片 2383/2393）、扫描方式、反差、OkLCh 色域压缩、眩光/扩散、预览时间
   - **队列**、**日志**
 - **顶栏**：预览一帧、按住看原片、渲染整段、加入队列、取消、输出文件夹；右上角是文件名和 FIT 徽章

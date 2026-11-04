@@ -1236,6 +1236,34 @@
 
 ---
 
+## D068 · RED R3D / R3D NE：自带 SDK 的本地骨架
+
+- **日期**：2026-11-04
+- **背景**：产品负责人问能否支持 Nikon ZR 的 **R3D NE**（REDCODE RAW 的 Nikon 变体），并选择 **A：先做 BYO SDK 骨架**。R3D 是私有 RAW，`ffmpeg` 主线不能解码；RED SDK 是闭源、EULA 要求不能分发头文件/静态库，和本项目的 GPL-3.0-or-later 官方发布方式冲突。
+- **实现**：
+  - 新增 `sr/red.hpp` 纯接口 + `red_stub.cpp`（默认）+ `red_sdk.cpp`（仅 `-DSR_WITH_REDSDK=ON`）。
+  - CMake：`SR_WITH_REDSDK` 默认 OFF；ON 时要求 `SR_REDSDK_ROOT` 指向用户自己的 SDK，找不到 `R3DSDK.h` / `R3DSDK` 库就明确报错并指向 `docs/red-sdk.md`。
+  - CLI 新增 `red-info [--in <clip.r3d>] [--json]`：报告是否编译、SDK 版本、运行时库目录；有 SDK 时读尺寸/帧数/帧率/音频/timecode。`video` / `preview open` 遇到 `.r3d` 给出“BYO SDK / REDCINE-X ProRes 4444”路径，不再掉进 ffprobe。
+  - UI 识别 `.r3d` 扩展名：调 `red-info --json`；没有 SDK 就显示指引，有 SDK 就显示元数据并说明“解码待接入（D068）”。文件选择/拖放接受 `.r3d`，单条预览/渲染会在 `requireInput` 拦下并解释。
+  - 新增 `scripts/build-red.ps1` / `.cmd`（`-Check` 只检查文件，不启动 SDK）和 `docs/red-sdk.md`（BYO SDK 步骤、运行时 `SPEKTRA_RED_SDK`、许可证边界）。
+  - 新增 `test_red`：默认构建断言 `.r3d` 识别 + stub 行为；`ctest` **11/11**。CI 增加一步：官方构建必须 `built: false`，且 `video --in sample.r3d` 返回 RED 指引。
+- **边界**：
+  - **不随仓库/安装包分发 SDK**，官方 CI 和 `build\` 永远是 stub。
+  - 带 SDK 的 `build-red\` 只限本地自用；再分发要自己同时满足 GPL 与 RED EULA。
+  - D068 **不解码帧**：只读元数据。真正渲染 R3D 需要下一阶段（帧源抽象、音频、timecode、预览），而且只能在有 SDK 的机器上测。
+  - 现行的 R3D 渲染路线：REDCINE-X 导出 ProRes 4444（RWG/Log3G10）→ `lut bake --ocio-input "Log3G10 REDWideGamutRGB"` → `video --lut`。
+- **验证**：
+  - 默认构建 `red-info`：`built=false`，错误信息清楚；`video --in sample.r3d` 返回 RED 指引。
+  - `test_red`：`.r3d` / `.R3D` / `.R3d` 识别，`.mov` / 无扩展名 / `.r3d.tmp` 拒绝；stub probe 报明确错误。
+  - `CMake -DSR_WITH_REDSDK=ON` 无 SDK 时在配置阶段报错，不会生成半成品。
+  - `red_sdk.cpp` 用最小假头文件做过 `-Wall -Wextra -Wpedantic` 语法/接口检查；并用假 `libR3DSDK.a` 完整走通 `-DSR_WITH_REDSDK=ON` 的配置、编译和 `red-info --in`（fake 4096×2160 / 120 帧），真实 SDK 仍需用户机器验证。
+  - `ctest` **11/11**；`verify-m1` 88.07 dB 不变；UI `stocks selftest` 正常。
+- **后果**：
+  - 官方包仍无 RED 支持；有 SDK 的用户可以本地编译并先用 `red-info` 验证文件和 SDK。
+  - 下一步若继续：把 `red_sdk.cpp` 接上 `Clip::DecodeVideoFrame` / 新 SDK 解码，抽象 `video` 的帧源（ffmpeg / RED），再处理音频、timecode、预览代理；约 1.5–2.5 D，CI 只能测 stub。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

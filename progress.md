@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D067：反转片直扫 Ektachrome / Velvia / Provia / Kodachrome）
-> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫，D041–D067）
+> **最后更新**：2026-11-04（D068：RED R3D / R3D NE 的 BYO-SDK 骨架）
+> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + RED R3D 可选骨架**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 元数据，D041–D068）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -37,9 +37,57 @@
 
 ---
 
-## 零之零、本次对话（D067）交接摘要
+## 零之零、本次对话（D068）交接摘要
 
-> **新开对话先读这一节**；D063–D066 在下一节，细节按决策编号往下（最新在前）。
+> **新开对话先读这一节**；D067 和更早的 D063–D066 在下面，细节按决策编号往下（最新在前）。
+
+### 这次完成了什么
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **D068** | RED R3D / R3D NE 的 BYO-SDK 骨架 | `SR_WITH_REDSDK` 默认 OFF；`red-info [--in] [--json]` 报告 SDK/读元数据；`.r3d` 在 CLI/UI 被识别并给出后续路径；`scripts\build-red` + `docs/red-sdk.md`；官方 CI 只测 stub；**帧解码未接** |
+
+- 本机：`ctest` **11/11**（新增 `test_red`）；`verify-m1` **88.07 dB** 不变；UI `stocks selftest` 正常。
+- `CMake -DSR_WITH_REDSDK=ON` 无 SDK 时在配置阶段明确报错；`red_sdk.cpp` 用最小假头文件通过 `-Wall -Wextra -Wpedantic` 语法/接口检查。
+- 假 `libR3DSDK.a` 走通 `-DSR_WITH_REDSDK=ON` 的配置 + 编译 + `red-info --in`（fake 4096×2160 / 120 帧 / 25 fps）。
+- 双击/命令行验收：`build\spektra-roll-cli.exe red-info`（应是 `not built`）；`red-info --in sample.r3d --json` 给出指引。
+- 最新代码提交：`4a5353b`（D068）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
+
+### 关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D068 | RED R3D | BYO SDK；官方包/CI 永远 stub；D068 只读元数据；渲染先用 REDCINE-X ProRes 4444（RWG/Log3G10）+ OCIO LUT |
+
+### 未完成的待办（按建议顺序）
+
+1. **R3D 帧解码**（BYO SDK）：把 `red_sdk.cpp` 接上解码，抽象 `video` 的帧源（ffmpeg / RED），处理音频、timecode、预览；只有带 SDK 的机器能测
+2. **印片机控制**：Y/M 二向色滤色片、预闪、光源；扫描仪 unsharp
+3. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散、镜头/扫描仪 blur
+4. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
+
+### 新对话第一步
+
+1. `ctest --test-dir build --output-on-failure`（11/11）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `build\spektra-roll-cli.exe red-info`（`not built`）与 `red-info --in x.r3d`（指引）
+4. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（D067/D065 不回归）
+5. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
+
+### 当前已知限制 / 坑
+
+- **官方包不能解码 R3D**：`build\` 永远是 stub；只有 `build-red\`（用户自己的 SDK）能初始化 SDK。
+- **D068 只读元数据**：`red-info --in` 能看尺寸/帧数/帧率/音频/timecode，但 `video` 会拒绝 `.r3d` 并给 REDCINE-X 路径。
+- **不要分发 SDK 或带 RED 的二进制**；`build-red\` 只限自用，再分发要同时处理 GPL 与 RED EULA。
+- R3D NE 需要较新的 SDK；旧 SDK 会报 unsupported clip format。
+- 运行时动态库路径不是 exe 旁边时，设 `SPEKTRA_RED_SDK` 指向 SDK 的 bin/lib 目录。
+
+---
+
+## 零之零点五、上一轮（D067）交接摘要
+
+> D067 的完整摘要；新对话优先读上面的 D068。
 
 ### 这次完成了什么
 
@@ -48,7 +96,7 @@
 | **D067** | 反转片直扫 | Ektachrome 100 / Velvia 100 / Provia 100F / Kodachrome 64；`--scan slide` 保留片基、按“清澈片基 → 最深染料”黑白平衡、中灰按通道中和；正片自动直扫，错误组合明确报错；CPU / D3D11 / Metal 同步；4K 单帧 CPU 2685.6 ms vs GPU 261.3 ms（**119.09 dB**）；界面片库 **20 支底片**（`stocks selftest: ok films=20 papers=8 ... slide=1`） |
 
 - 本机：`ctest` **10/10**；`verify-m1` **88.07 dB**；`test_gpu_film` 新增 slide + couplers worst **6e-6**。
-- CI：run **110** Windows + macOS 双绿（macOS 真跑 Metal 的 slide parity）。
+- CI：run **110** Windows + macOS 双绿（D067 代码）。
 - 双击验收：`scripts\demo-slide.cmd`（四支反转片各出一张 4K 图）。
 - 最新代码提交：`b08f40f`（D067）；之后只有文档更新（DECISIONS / STATUS / RUN / README / 本文件）。
 
@@ -175,6 +223,65 @@
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 
 > 本次对话（D063–D066）的完成、决策和待办见前面的「零之一」；下面是更早阶段的记录。
+
+---
+
+## 会话 D068 · RED R3D / R3D NE 的 BYO-SDK 骨架
+
+会话目标：产品负责人问能否支持 Nikon ZR 的 **R3D NE**，并选择 **A：先做 BYO SDK 骨架**。R3D 是私有 RAW，`ffmpeg` 主线不能解；RED SDK 闭源、EULA 不允许分发头文件/静态库，和 GPL 官方发布冲突。
+
+### 一、已完成的事项
+
+**D068 · 可选 RED SDK 骨架**
+- `sr/red.hpp` 纯接口；`red_stub.cpp` 默认构建；`red_sdk.cpp` 只在 `-DSR_WITH_REDSDK=ON` 时编译。
+- CMake：`SR_WITH_REDSDK` 默认 **OFF**；ON 时要求 `SR_REDSDK_ROOT`，找不到 `R3DSDK.h` / 库就配置阶段报错并指向 `docs/red-sdk.md`。
+- CLI：`red-info [--in <clip.r3d>] [--json]` 报告 built/available、SDK 版本、运行时库目录；带 SDK 时读尺寸/帧数/帧率/音频/timecode。
+- `.r3d` 识别（大小写不敏感）在**所有构建**都有效；`video` / `preview open` 遇到 `.r3d` 给 BYO SDK / REDCINE-X 指引，不再掉进 ffprobe。
+- UI：文件选择/拖放接受 `.r3d`；`probeInput` 调 `red-info --json`，没有 SDK 显示指引，有 SDK 显示元数据 + “解码待接入（D068）”；`requireInput` 拦住单条预览/渲染，`enqueueBatch` 拦住批量。
+- `scripts\build-red.ps1` / `.cmd`：`-Check` 只查 header/library/runtime；构建到独立 `build-red\`，不碰官方 `build\`。
+- `docs/red-sdk.md`：BYO SDK 步骤、`SPEKTRA_RED_SDK`、许可证边界、REDCINE-X ProRes 4444 现行路线。
+- `test_red`：默认构建断言 `.r3d` 识别 + stub 行为；CI 增加 `red-info` 必须 `built:false`，以及 `video --in sample.r3d` 必须返回 RED 指引。
+
+### 二、一条关键决策（详见 DECISIONS D068）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D068 | RED R3D | BYO SDK；官方包/CI 永远 stub；D068 只读元数据；渲染先用 REDCINE-X ProRes 4444（RWG/Log3G10）+ OCIO LUT |
+
+### 三、验证
+
+| 项 | 结果 |
+|---|---|
+| `ctest` | **11/11**（新增 `test_red`） |
+| `red-info`（默认构建） | `not built`，message 指向 `docs/red-sdk.md` |
+| `red-info --in sample.r3d --json` | `clipError` 明确说明没有 SDK；不会崩 |
+| `video --in sample.r3d` | 返回 RED 指引，退出非零；不会去跑 ffprobe |
+| `CMake -DSR_WITH_REDSDK=ON` 无 SDK | 配置阶段报错，提示 `SR_REDSDK_ROOT` / docs |
+| `red_sdk.cpp` 语法检查 | 用最小假 `R3DSDK.h` 通过 `-Wall -Wextra -Wpedantic`；真实 SDK 仍需用户机器验证 |
+| 假 SDK 全链路 | 用假 `libR3DSDK.a` 走通 `-DSR_WITH_REDSDK=ON` 配置 + 编译 + `red-info --in`（4096×2160 / 120 帧 / 25 fps） |
+| 回归 | `verify-m1` **88.07 dB**；UI `stocks selftest` 正常 |
+
+### 四、怎么用
+
+```powershell
+# 官方构建：没有 RED，但会识别 .r3d 并给出下一步
+.\build\spektra-roll-cli.exe red-info
+.\build\spektra-roll-cli.exe red-info --in D:\footage\A001.R3D --json
+
+# 你自己的 SDK（本地自用，官方包不带）
+$env:SR_REDSDK_ROOT = "D:\RED_SDK"
+.\scripts\build-red.cmd -Check
+.\scripts\build-red.cmd
+.\build-red\spektra-roll-cli.exe red-info --in D:\footage\A001.R3D --json
+```
+
+界面：选择/拖入 `.r3d` 后，素材信息条会显示 SDK 状态；没有 SDK 会提示用 REDCINE-X 导出 ProRes 4444（RWG/Log3G10）。
+
+### 五、未完成的待办
+
+- [ ] **R3D 帧解码**：`red_sdk.cpp` 接解码；`video` 帧源抽象（ffmpeg / RED）；音频、timecode、预览
+- [ ] 印片机 Y/M 微调、预闪、光源选择；扫描仪 unsharp
+- [ ] 空间物理模型、光谱 GPU 的 OCIO、PIZ/DWA、代理清理 / 4K 预览、macOS Qt 打包
 
 ---
 
