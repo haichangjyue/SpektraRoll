@@ -6,7 +6,7 @@
 >
 > 最后更新：2026-11-05（D073：macOS SwiftUI 三栏骨架已写）
 >
-> **注意**：D073 的 SwiftUI 代码已在 macOS CI run **#128** 通过 `swift build`；`.app` 双击验收仍待 Mac。表中标 🟡 的 macOS 项表示“代码已写、待 Mac 验收”。
+> **注意**：D073 已在 Mac 上构建并验收：核心流程（导入/缩略图/播放/INFO/胶片效果/渲染）通过；macOS CI run #128 `swift build` 通过。OCIO 当前不可用（Homebrew cmake 冲突），R3D 禁用。表中标 🟡 的项表示“代码已写、部分验收”。
 
 ## 1. 功能矩阵
 
@@ -43,9 +43,9 @@
 | 深浅色外观 | — | 仅深色 | 🟡 深色 | macOS v1 只做深色品牌 |
 | 无障碍 / VoiceOver | — | 🟡 | ⬜ | SwiftUI 优先补齐 |
 | 中英本地化 | — | 仅中文 | 🟡 仅中文 | schema 已带 zh/en 标签 |
-| 未签名 `.app` 本地验收 | — | — | 🟡 脚本已写 | 待 Mac 上首次跑 |
+| 未签名 `.app` 本地验收 | — | — | ✅ 已验收 | Mac 上构建并启动 |
 | 公证 / DMG | — | — | ⬜ | 需要 Apple Developer Program |
-| CI 编译 UI | — | ⬜（当前 CI 不编 Qt） | 🟡 已加 `swift build` | 首次推送后验证 |
+| CI 编译 UI | — | ⬜（当前 CI 不编 Qt） | ✅ run #128 | `swift build` 已绿 |
 | 自动更新 | — | ❌ | ❌ | 首版不做 |
 
 ## 2. v1 范围（macOS）

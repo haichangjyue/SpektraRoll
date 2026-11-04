@@ -54,6 +54,23 @@ build-ui-macos/SpektraRoll.app
 - 渲染 H.264 / HEVC / ProRes，SDR/PQ/HLG，进度 JSON、日志、取消。
 - 设置和素材库持久化到 `~/Library/Application Support/SpektraRoll/state.json`。
 
+## 已验证（2026-11-05，MacBook Air M1）
+
+- `.app` 启动、三栏、思源黑体/Noto Sans CJK SC、导入缩略图、AVPlayer 播放、空格、INFO、胶片效果、渲染。
+- 渲染输出：640×360 / 3.00 s / H.264 / yuv420p。
+- 远程验收见 `docs/macos-dev-notes.md`（SSH Background domain、自截图、Stage Manager）。
+
+## 调试开关
+
+仅环境变量生效，正常启动不受影响：
+
+```bash
+open -F --env SPEKTRA_ALL_SPACES=1 --env SPEKTRA_CAPTURE=1 \
+  build-ui-macos/SpektraRoll.app
+```
+
+`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTORENDER` 见 `docs/macos-dev-notes.md`。
+
 ## 已知限制（v1）
 
 - 没有时间线拖动/逐帧预览；`胶片效果` 是暂停时单帧渲染。
@@ -61,7 +78,7 @@ build-ui-macos/SpektraRoll.app
 - 防光晕层是 UI 级近似（开启后光晕 ×0.6），等引擎加独立参数。
 - 没有裁切、印片机 Y/M/预闪、扫描仪 unsharp、空间物理模型。
 - 未公证；首次打开需要右键 → 打开，或 `xattr -d com.apple.quarantine`。
-- OCIO 在本地用 Homebrew 动态库；正式分发前要静态链接或捆绑 dylib。
+- **OCIO 当前不可用**：Homebrew `opencolorio` 在 macOS 14 上需要源码构建 `python@3.15`，clang 报 tail-call 错误；首版用内置 10 种 Log 输入。正式分发前还要解决 OCIO/ffmpeg 动态依赖。
 
 ## 设计来源
 

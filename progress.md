@@ -35,29 +35,38 @@
 
 | 项 | 状态 |
 |---|---|
-| SwiftUI 源码 | 已写；Windows 本机不能编译 SwiftUI |
-| macOS 编译 | **✅ CI #128 `swift build` 通过**；#125/#126 因缺 `inspectorTab` 失败，已修 |
-| `.app` 双击验收 | **待 Mac 上跑** `scripts/build-macos-ui.sh` |
-| 字体 | 需先跑 `scripts/fetch-macos-fonts.sh`（或系统已有思源黑体） |
-| ffmpeg | 构建脚本会打包 `brew` 的 ffmpeg/ffprobe |
+| SwiftUI 源码 | 已写；Windows 本机不能编译 SwiftUI，但 macOS 本机 `swift build` 通过 |
+| macOS 编译 | **✅ CI #128 + Mac 本机 `swift build` 通过**；#125/#126 因缺 `inspectorTab` 失败，已修 |
+| `.app` 双击验收 | **✅ 已在 Mac 上构建并启动**（Stage Manager 暂时关闭用于截屏，已恢复） |
+| 导入/缩略图 | **✅** 自动导入 3 秒测试片，缩略图/文件名/分辨率正常 |
+| 播放/空格 | **✅** AVPlayer 播放；时长 00:03；空格由菜单快捷键处理 |
+| INFO / 胶片效果 | **✅** INFO 元数据正常；胶片效果单帧渲染正常（Portra 400 负片观感） |
+| 渲染 | **✅** UI 触发渲染 → 640×360 / 3.00 s / H.264 / yuv420p，输出到 `~/Movies/SpektraRoll` |
+| 字体 | **✅** Noto Sans CJK SC Regular/Bold 已下载并打包（OFL；思源黑体同设计） |
+| ffmpeg | **✅** Homebrew ffmpeg/ffprobe 9.0.2 已打包 |
+| OCIO | **❌ 当前不可用**：macOS 14 上 Homebrew 无 bottle，源码构建 `python@3.15` 失败；cmake 已切到 Homebrew 4.4.5。首版用内置 10 种 Log 输入 |
 | R3D | macOS v1 明确禁用 |
 
-### 三、Mac 上第一次验收
+### 三、Mac 上验收（2026-11-05 已完成）
 
 ```bash
-brew install cmake ffmpeg
-scripts/fetch-macos-fonts.sh          # 可选，但推荐
-scripts/build-macos-ui.sh             # 自动组装并打开
+export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+cd /Users/wenyutao/Documents/SpektraRoll
+scripts/fetch-macos-fonts.sh
+scripts/build-macos-ui.sh --no-open
+open build-ui-macos/SpektraRoll.app
 ```
 
-验收：双击左侧空白 → 选 `C0113.MP4` → 选 S-Log3 → 缩略图出现 → 双击缩略图 → 空格播放 → 暂停 → 开「胶片效果」→ 选 Portra 400 / Vision3 500T → 渲染。
+已验收：`.app` 启动 → 三栏 → 自动导入 3 秒测试片 → 缩略图 → 播放/时长 00:03 → INFO 元数据 → 胶片效果（Portra 400 负片观感）→ 渲染 H.264 640×360 / 3.00 s。
+
+远程验收注意：SSH 会话在 `Background` launchd domain，`screencapture` 抓不到 GUI 窗口；用 app 内 `SPEKTRA_CAPTURE=1` 自截图。Stage Manager 会隐藏窗口，验收时临时关闭、结束后恢复。细节见 `docs/macos-dev-notes.md`。
 
 ### 四、下一步
 
-1. 在 Mac 上首次编译，修 Swift 编译错误（CI 也会报）。
-2. 验证 `.app` 能双击启动、能找 CLI/data/ffmpeg。
-3. 调整视觉细节（间距、字号、按钮宽度）。
-4. 之后才做时间线逐帧预览、R3D macOS、公证。
+1. **OCIO**：解决 `/opt/homebrew/opt/cmake` 冲突后安装 `opencolorio`，或在 Mac 上自建静态 OCIO。
+2. 用真实 `C0113.MP4` 验收 4K50 / S-Log3 / 音频 / timecode 的导入、预览、渲染。
+3. 视觉细节：按钮宽度、间距、右栏密度、空状态。
+4. 之后才做时间线逐帧预览、渲染队列、R3D macOS、公证。
 
 ---
 
