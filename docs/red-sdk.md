@@ -1,4 +1,4 @@
-# RED R3D / R3D NE · 自带 SDK 的本地插件（D069）
+# RED R3D / R3D NE · 自带 SDK 的本地插件（D071）
 
 > **一句话**：SpektraRoll 不随仓库或安装包分发 RED SDK。你自己从 RED 获取 SDK、接受 EULA，用 MSVC 本地编译 `spektra-red.dll`；GPL 的 CLI 在运行时加载它。官方 `build\` 永远没有 RED 代码。
 >
@@ -111,13 +111,22 @@ build-red\
 .\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
   --in-dir out\red-seq --out-dir out\red-seq-graded --out-ext png
 
-# 4. 直接出视频（D070；无音频，不支持 --segment）
+# 4. 直接出视频（D071：音频会一起封装；支持 segment）
 .\build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube `
   --in D:\footage\A001.R3D --out out\red-clip.mov `
-  --frames 12 --red-scale half --codec prores
+  --frames 12 --red-scale half --codec prores `
+  --segment 0.2 --resume --jobs 2
+
+# 5. UI 自检（需要 build-ui）
+.\build-ui\spektra-roll-ui.exe --red-selftest
+.\build-ui\spektra-roll-ui.exe --red-render-selftest
 ```
 
 双击演示：`scripts\demo-red.cmd`。它会解一帧 sRGB、一帧 Log3G10、烘 Vision3 250D + 2383、套 LUT，最后直接渲染 3 帧视频。
+
+### 界面
+
+选 `.r3d` → 左栏“R3D 解码”选 full/half/quarter → 预览/渲染。R3D 会自动切 ProRes；LUT 引擎会用 `Log3G10 REDWideGamutRGB` 烘表，光谱引擎会把 R3D 解成 sRGB。单条“加入队列”可用；批量 R3D 还没接。
 
 ---
 
@@ -133,6 +142,9 @@ build-red\
 | 序列 | `red-decode --out-dir` + `lut apply --in-dir` 正常 |
 | 直读视频（D070） | `video --in clip.R3D`：half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧** |
 | 视频 timecode | `--start 1` 时 `11:09:14:03 → 11:09:15:03` |
+| segment / jobs / resume（D071） | 4 帧 / 2 段 / 2 workers 正常；删第 2 段后只补缺失段 |
+| UI 直连（D071） | `--red-selftest` 3024×1701 **7993 ms**；`--red-render-selftest` 2 帧 ProRes |
+| 音频（D071） | 插件写 AU；ffmpeg 封装 PCM（ProRes）/ AAC（H.264/HEVC）。样片 **0 音频通道**，真实 R3D 音频未测；合成 AU 封装已验证 |
 
 6K 全分辨率很吃 CPU；预览/批量先用 `--red-scale half`，成片再用 `full`。
 
@@ -140,9 +152,8 @@ build-red\
 
 ## 6. 还没做
 
-- 界面里预览/渲染 `.R3D`（目前只显示元数据和 `video`/`red-decode` 指引）
-- R3D 音频导出/封装（样片本身 0 通道；SDK 的音频 API 还没接）
-- R3D 的 `--segment/--resume/--jobs`（目前会明确报错）
+- **真实 R3D 音频样片验证**（代码已接通，样片 0 通道）
+- **UI 批量 R3D 入队**（单条预览/渲染已可用）
 - GPU 解码（CUDA / OpenCL / Metal）、并行解码
 - 6K 全分辨率的高性能路径
 

@@ -1323,6 +1323,37 @@
 
 ---
 
+## D071 · R3D 收尾：音频 + UI 直连 + segment
+
+- **日期**：2026-11-04
+- **背景**：D070 已经能 `video --in clip.R3D`，但还缺 R3D 音频、界面预览/渲染直连、`--segment/--resume/--jobs`。产品负责人选 **A**。
+- **音频**：
+  - 插件 C ABI 增加 `sr_red_has_audio` / `sr_red_write_audio`；`red_plugin_msvc.cpp` 按 SDK 的 `AudioBlockCountAndSize` + `DecodeAudioBlock` 写 **32-bit PCM Sun AU**（和 SDK 的 `ExtractAudioSample.cpp` 一致）。
+  - `RedReader::hasAudio/writeAudio`；`video` 在渲染前把 R3D 音频写成临时 `.au`，最后用 ffmpeg 封装：ProRes 用 **PCM 24-bit**，H.264/HEVC 用 **AAC 192k**；`--start/--frames` 会同步裁剪音频。
+  - 样片本身 **0 音频通道**，所以本机只能验证“无音频路径”和“合成 AU 的封装”；真实 R3D 音频仍需一条有声样片验证。
+- **segment / resume / jobs**：
+  - 移除 R3D 的 `--segment` 限制。`renderRange` 本来就为每个 part 新建 `RedReader`，所以每个分段独立打开 clip；`finishRedVideo` 用 concat 列表 + 可选 AU 一次性封装。
+  - `--resume` 的签名包含 `red/scale/format`，不会混用旧分段；`--jobs` 的 worker 各自持有 `RedReader`。
+- **UI 直连**：
+  - 左栏新增“R3D 解码：full / half / quarter”；`probeInput` 对 `.r3d` 用 ffprobe 读元数据 + `red-info` 判断插件可用性，时间线/预览时间可用。
+  - LUT 引擎：`bakeLut` 对 R3D **强制** `--ocio-config data/ocio/... --ocio-input "Log3G10 REDWideGamutRGB"`；`lookSignature` 加入 `r3d:<scale>`，换 R3D/scale 会重烘。
+  - 光谱引擎：`lookArgs` 对 R3D 不再传 `--input/--ocio-*`（插件解 sRGB）。
+  - 预览：`previewFromServer` 对 R3D 返回 false，`previewRedLegacy` 用 `red-decode` 出当前帧（LUT 用 log3g10、光谱用 srgb），再 `lut apply` / 光谱链；拖动时只在松手后渲染。
+  - 渲染：`buildVideoArgs` 加 `--red-scale`；选 R3D 自动把编码切到 ProRes（half 3024×1701 高度奇数）；单条渲染/入队可用。批量拖入 R3D 仍明确提示先用单条。
+  - 新增 `--red-selftest`（探测 + 烘 LUT + 预览）和 `--red-render-selftest`（真实 Render 按钮路径，2 帧）。
+- **验证**：
+  - CLI `--segment 0.1 --frames 4 --red-scale half`：2 段 × 2 帧，`--jobs` 2 个 worker 正常；删掉第 2 段后续渲只补缺失段。
+  - UI `--red-selftest`：`ok: 预览：3024 × 1701 @ 1.92 s · 7993 ms`。
+  - UI `--red-render-selftest`：`ok: 渲染完成`，输出 3024×1701 / 2 帧 ProRes 422 HQ。
+  - 合成 AU + ffmpeg：ProRes 视频 + PCM 24-bit 音轨封装成功；真实 R3D 音频未测（样片 0 通道）。
+  - `ctest` 11/11；`verify-m1` 88.07 dB。
+- **后果**：
+  - R3D 现在是“CLI 一条命令 + UI 单条预览/渲染”都可用；分段/续渲/并行也支持。
+  - 还没做：真实 R3D 音频验证、UI 批量 R3D、GPU/并行解码、6K 全分辨率性能。
+  - 官方包仍然不带 RED，`build-red\` 只限本地自用。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

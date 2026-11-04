@@ -347,7 +347,7 @@ X:\agent\SpektraRoll\scripts\demo-ocio-ui.cmd
 
 **要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。
 
-## RED R3D / R3D NE（自带 SDK，D070）
+## RED R3D / R3D NE（自带 SDK，D071）
 
 > **重要**：官方包**不带** RED SDK，也不能解码 R3D。这一节是给“自己有 RED SDK、愿意本地编译”的人看的。官方 `build\` 只带 loader，没有插件。
 
@@ -416,12 +416,30 @@ $env:SR_REDSDK_ROOT = "D:\RED_SDK"
 scripts\red-to-prores.cmd -Frames 12 -Scale half -Out out\red-clip.mov
 ```
 
+界面里直接用（D071）：
+
+1. 左栏“视频素材”选 `.r3d` → “R3D 解码”选 half/quarter/full
+2. 预览一帧 / 渲染整段；R3D 会自动切 ProRes，LUT 会用 Log3G10/RWG 烘
+3. 单条“加入队列”可用；批量拖入 R3D 仍提示先用单条
+4. 自检：`build-ui\spektra-roll-ui.exe --red-selftest` / `--red-render-selftest`
+
+音频：R3D 有音频时会自动解成 AU，最后封装成 PCM（ProRes）或 AAC（H.264/HEVC）。样片本身 0 音频通道，所以本机没有真实音频可验证。
+
+分段/续渲（D071）：
+
+```powershell
+.\build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube `
+  --in D:\footage\A001.R3D --out out\red-clip.mov `
+  --frames 12 --segment 0.1 --red-scale half --resume --jobs 2
+```
+
 现在能做什么：
 
 - 读元数据：分辨率、帧数、帧率、音频通道、timecode
 - 解码单帧/序列：Log3G10/RWG、Linear Rec.709、sRGB；full/half/quarter
-- `video --in clip.R3D` 直读：LUT / 光谱 GPU、`--start/--frames`、timecode、纹理
-- 还没做：R3D 音频封装、`--segment/--resume`、界面直接预览/渲染 `.R3D`
+- `video --in clip.R3D` 直读：LUT / 光谱 GPU、`--start/--frames`、timecode、纹理、音频（有的话）、`--segment/--resume/--jobs`
+- 界面预览 / 单条渲染 `.R3D`
+- 还没做：批量 R3D 入队、GPU/并行解码、6K 全分辨率性能
 
 **许可证**：不要把 SDK 或带 RED 的二进制当作官方包分发；`build-red\` 只限自用。细节见 `docs/red-sdk.md`。
 

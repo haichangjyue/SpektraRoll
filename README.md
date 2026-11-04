@@ -17,7 +17,7 @@ and renders clips in resumable segments while keeping the camera timecode. A
 **Qt 6 desktop UI** wraps the same pipeline. Colour management is optional:
 linking **OpenColorIO** turns any camera or ACES space into a valid LUT domain
 and enables ACES display views. **RED R3D / R3D NE** is a bring-your-own-SDK
-optional plugin (D069/D070); official builds stay loader-only.
+optional plugin (D069–D071); official builds stay loader-only.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
@@ -93,7 +93,7 @@ need the library. `data/ocio/` ships the ACES 2.0 studio config (Apache-2.0).
 `ocio-info --json` prints the same information for the Qt UI (D063), which lists
 the config's colour spaces in the OCIO section instead of linking the library.
 
-### RED R3D / R3D NE (optional, BYO SDK, D070)
+### RED R3D / R3D NE (optional, BYO SDK, D071)
 
 The RED R3D SDK is **not bundled** and official builds never include it. If you
 have accepted RED's EULA and have your own SDK, build the local `spektra-red`
@@ -113,10 +113,11 @@ linear Rec.709, or sRGB, at full/half/quarter scale. `video --in clip.R3D`
 reads R3D directly: the LUT engine decodes Log3G10/RWG (bake the table with
 `--ocio-input "Log3G10 REDWideGamutRGB"`), the spectral engine decodes sRGB,
 and the clip's timecode is carried to the output. Use `--red-scale half` for a
-6K clip on CPU. R3D output is video-only for now (audio not muxed) and
-`--segment` is not wired. Official `build/` keeps the loader + no-plugin
-message; the SDK, its headers, and any RED-linked binaries stay out of the
-repository. See `docs/red-sdk.md`.
+6K clip on CPU. R3D also supports `--segment/--resume/--jobs`; audio is decoded
+by the plugin to AU and muxed as PCM (ProRes) or AAC (H.264/HEVC). The Qt UI
+previews and renders a single `.R3D` (batch R3D is not wired). Official
+`build/` keeps the loader + no-plugin message; the SDK, its headers, and any
+RED-linked binaries stay out of the repository. See `docs/red-sdk.md`.
 
 ## Desktop UI (Qt 6)
 
@@ -345,7 +346,7 @@ src/core/       C++20 library, no UI, no I/O policy
   ocio          optional OpenColorIO bridge: config, input and display
                 processors, linear Rec.709 contract (D062)
   red           optional BYO-SDK RED R3D plugin loader (metadata + frame
-                decode); no plugin by default (D069)
+                decode + audio); no plugin by default (D071)
 src/cli/        headless entry point (render-farm friendly later)
 tests/          assert-based tests, no framework; frozen reference LUT
 data/profiles/  upstream CC BY-SA 4.0 film / paper data + NOTICE
@@ -374,11 +375,13 @@ docs/           architecture and licensing notes
   Kodachrome) scan directly with `--scan slide` (D067); that path has no
   upstream parity because the scanner-style black/white balance is our own.
   The cinema print path has no pre-flash or Y/M dichroic shifts yet.
-- RED R3D / R3D NE is a **BYO-SDK plugin** (D069/D070). Official builds do not
+- RED R3D / R3D NE is a **BYO-SDK plugin** (D069–D071). Official builds do not
   include the RED SDK. A local `build-red` decodes frames via `red-decode` or
-  `video --in clip.R3D` (CPU; Log3G10/RWG, linear or sRGB; full/half/quarter).
-  The Qt preview and `--segment` do not read `.R3D` yet. R3D audio is reported
-  but not muxed; the sample clip has no audio.
+  `video --in clip.R3D` (CPU; Log3G10/RWG, linear or sRGB; full/half/quarter),
+  supports `--segment/--resume/--jobs`, and the Qt UI previews/renders a single
+  `.R3D`. R3D audio is muxed as PCM/AAC, but the available sample has no audio
+  channels, so the audio path is not real-footage-tested. Batch R3D and GPU
+  decode are not wired.
 - No video file I/O in the library yet: `video` drives `ffmpeg` as a child process
   (D022), so a clip can be graded, trimmed, rendered as ProRes or HDR, and
   resumed from completed segments in one command.

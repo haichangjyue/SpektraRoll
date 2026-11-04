@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D070：R3D NE 直读视频）
-> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + R3D NE 本地解码/直读视频**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D`，D041–D070）
+> **最后更新**：2026-11-04（D071：R3D 音频 + UI 直连 + segment）
+> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + R3D NE 本地解码/直读视频/UI**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -37,9 +37,56 @@
 
 ---
 
-## 零之零、本次对话（D070）交接摘要
+## 零之零、本次对话（D071）交接摘要
 
-> **新开对话先读这一节**；D069 / D068 和更早的 D067 / D063–D066 在下面，细节按决策编号往下（最新在前）。
+> **新开对话先读这一节**；D070 / D069 / D068 和更早的 D067 / D063–D066 在下面，细节按决策编号往下（最新在前）。
+
+### 这次完成了什么
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **D071** | R3D 收尾 | 插件音频（AU→PCM/AAC）、`--segment/--resume/--jobs`、UI `.r3d` 预览/单条渲染；R3D 渲染在 UI 里也能直接走；**真实 R3D 音频、批量 R3D、GPU/并行解码仍未验证** |
+
+- 本机：`--red-selftest` → **3024×1701，7993 ms**；`--red-render-selftest` → 2 帧 ProRes 422 HQ；`--segment` 2 段 + `--jobs=2` + `--resume` 正常。
+- 音频：合成 AU 与 ProRes 视频封装成功（PCM 24-bit）；**样片 0 音频通道**，真实 R3D 音频未测。
+- `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
+- 双击验收：`scripts\demo-red.cmd`（5 步）；UI `--red-selftest` / `--red-render-selftest`。
+- 最新代码提交：`d6adb83`（D071）；之后只有文档更新。
+
+### 关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D071 | R3D 收尾 | 插件写 AU + ffmpeg 封装；segment 每段独立 RedReader；UI 强制 Log3G10/RWG LUT + red-decode 预览；选 R3D 自动 ProRes |
+
+### 未完成的待办（按建议顺序）
+
+1. **真实 R3D 音频样片验证**（当前只验证了无音频和合成 AU）
+2. **UI 批量 R3D 入队**（现在单条可用，批量提示先用单条/red-decode）
+3. **GPU/并行 R3D 解码**；6K 全分辨率性能
+4. 印片机控制、空间物理模型、光谱 GPU 的 OCIO、PIZ/DWA、macOS Qt 打包
+
+### 新对话第一步
+
+1. `ctest --test-dir build --output-on-failure`（11/11）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `scripts\demo-red.cmd -NoOpen`（5 步）
+4. `build-ui\spektra-roll-ui.exe --red-selftest` / `--red-render-selftest`
+5. R3D 分段：`video --in clip.R3D --lut ... --frames 4 --segment 0.1 --red-scale half --jobs 2`
+
+### 当前已知限制 / 坑
+
+- **R3D 音频代码已接通，但没有有声 R3D 样片**；样片 0 通道，只验证了无音频和合成 AU 封装。
+- **批量拖入 R3D 仍不支持**：单条渲染/入队可用；批量会提示先用单条或 `red-decode --out-dir`。
+- **UI 预览走 red-decode 单帧**：约 4–8 s/帧（含 SDK/LUT），拖动只在松手后更新。
+- **half 3024×1701 高度奇数**：选 R3D 自动切 ProRes；手动改 H.264/HEVC 会被 CLI 拒绝。
+- **官方包不带 RED**：只有 `build-red\` + 你的 SDK 能用；`build-red\` 只限自用。
+
+---
+
+## 零之零点五、上一轮（D070）交接摘要
+
+> D070 的完整摘要；新对话优先读上面的 D071。
 
 ### 这次完成了什么
 
@@ -322,6 +369,70 @@
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 
 > 本次对话（D063–D066）的完成、决策和待办见前面的「零之一」；下面是更早阶段的记录。
+
+---
+
+## 会话 D071 · R3D 收尾：音频 + UI 直连 + segment
+
+会话目标：D070 已经能 `video --in clip.R3D`；产品负责人选 A，补齐音频、UI 和 segment。
+
+### 一、已完成的事项
+
+**音频**
+- `red_plugin_api.h` ABI 升到 2；增加 `sr_red_has_audio` / `sr_red_write_audio`。
+- 插件用 `AudioBlockCountAndSize` + `DecodeAudioBlock` 写 **32-bit PCM Sun AU**（对齐 512 字节），和 SDK `ExtractAudioSample.cpp` 一致。
+- `RedReader::hasAudio/writeAudio`；`video` 渲染前写临时 `.au`，最后 ffmpeg 封装：ProRes → PCM 24-bit，H.264/HEVC → AAC 192k；`--start/--frames` 同步裁剪。
+- 样片 0 音频通道，所以无音频路径和合成 AU 封装已验证；真实 R3D 音频未测。
+
+**segment / resume / jobs**
+- 移除 R3D 的 segment 限制；`renderRange` 每段新建 `RedReader`；`finishRedVideo` 用 concat + AU 一次性封装。
+- `--resume` 签名包含 red/scale/format；`--jobs` 的 worker 各自打开 clip。
+
+**UI 直连**
+- 左栏“R3D 解码：full/half/quarter”；`probeInput` 用 ffprobe 元数据 + `red-info` 判断插件。
+- LUT：R3D 强制 `--ocio-input "Log3G10 REDWideGamutRGB"`，`lookSignature` 带 `r3d:<scale>`。
+- 光谱：`lookArgs` 对 R3D 不传 `--input/--ocio-*`。
+- 预览：`previewFromServer` 对 R3D 返回 false；`previewRedLegacy` 用 `red-decode` + `lut apply`/光谱；拖动只在松手后渲染。
+- 渲染：`buildVideoArgs` 加 `--red-scale`；选 R3D 自动切 ProRes；单条渲染/入队可用。
+- 新增 `--red-selftest`、`--red-render-selftest`；完成弹窗在 selftest 里抑制。
+
+### 二、一条关键决策（详见 DECISIONS D071）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D071 | R3D 收尾 | AU + ffmpeg 封装；每段独立 RedReader；UI 强制 Log3G10/RWG LUT + red-decode 预览；R3D 自动 ProRes |
+
+### 三、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| `--red-selftest` | `ok: 预览：3024 × 1701 @ 1.92 s · 7993 ms` |
+| `--red-render-selftest` | `ok: 渲染完成`，3024×1701 / 2 帧 ProRes 422 HQ |
+| segment/jobs | 4 帧 / 2 段 / 2 workers；删第 2 段后 `--resume` 只补缺失段 |
+| 音频封装 | 合成 AU + ProRes → PCM 24-bit 成功；真实 R3D 音频未测（样片 0 通道） |
+| `ctest` | 11/11；`verify-m1` 88.07 dB |
+
+### 四、怎么用
+
+```powershell
+# CLI：R3D 直读 + 分段
+.\build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube `
+  --in "X:\agent\footage\ZR_RED_Color_Science_Sunflower.R3D" `
+  --out out\red-clip.mov --frames 4 --segment 0.1 --red-scale half --jobs 2
+
+# UI 自检
+.\build-ui\spektra-roll-ui.exe --red-selftest
+.\build-ui\spektra-roll-ui.exe --red-render-selftest
+```
+
+UI：选 `.r3d` → 左栏“R3D 解码”选 half → 预览/渲染；R3D 会自动切 ProRes，LUT 用 Log3G10/RWG 烘。
+
+### 五、未完成的待办
+
+- [ ] 真实 R3D 音频样片验证
+- [ ] UI 批量 R3D 入队
+- [ ] GPU/并行解码、6K 性能
+- [ ] 印片机/扫描仪控制、空间物理模型、光谱 GPU 的 OCIO
 
 ---
 

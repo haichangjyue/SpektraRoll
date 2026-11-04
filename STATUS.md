@@ -1,10 +1,10 @@
 # STATUS
 
-**最后更新**：2026-11-04（D070 R3D NE 直读视频） · 里程碑 **M5 进行中（D009 = Qt 6）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-04（D071 R3D 音频 + UI + segment） · 里程碑 **M5 进行中（D009 = Qt 6）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
-`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。输入现在覆盖 **九种**：sRGB、Apple Log、Sony S-Log3（S-Gamut3.Cine / S-Gamut3）、Canon C-Log3、Panasonic V-Log、ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate；YUV→RGB 矩阵跟素材自己的 `color_space` 标签走。颜色和质感**合并成一次 GPU 提交**，管道也修掉了每帧 130 ms 的量化开销、并让解码/编码与处理重叠：2.6 MP 全质感视频 **79–82 ms/帧**（D046 时 379，累计约 4.7×），与旧路径逐位相同。三个空间效果自 D054 起是**按底片微米计的真实点扩散核**（窄芯 + 宽裙），1080p / 4K 观感一致。界面预览是**常驻进程 + 整段帧缓存**：短片拖动时间线 **38–64 ms/帧**（以前 1.7–2.2 s）；长片自动生成 960 px 代理，**100 ms/帧**。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。交付可以是 16-bit PNG，也可以是**不钳制的 float / half EXR**（D055，读回逐位一致）。macOS 的颜色和质感也都走 **Metal**（D056/D057），与 Windows 的 D3D11 路径对齐。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。颜色管理可以接 **OpenColorIO**（可选依赖，D062）：任意相机/ACES 空间都能当 LUT 的输入域，也能出 ACES 2.0 显示器变换；没有 OCIO 的构建行为完全不变。界面也能直接选 OCIO 色彩空间了（D063）：左栏“色彩管理（OCIO）”从配置里读名字，烘焙、光谱预览、渲染和“按住看原片”都走同一个 CLI。片库现在包括 **Vision3 50D/250D/200T/500T、Verita 200D 和 2383/2393 电影印片**（D065）：Vision3 的 T 型灯、2383 的 K75P 放映光源都进了模型，CPU 与两个 GPU 后端一致。测试素材统一为 Sony FX30 的 S-Log3 `C0113.MP4`（D064）。四支反转片（Ektachrome / Velvia / Provia / Kodachrome）也能直接扫描了（D067）：保留片基、按“清澈片基 → 最深染料”做黑白平衡，CPU / D3D11 / Metal 一致。RED R3D / R3D NE 有了 **BYO SDK** 的本地插件（D069）：官方包仍是 loader，用户自己的 SDK 用 MSVC 编 `spektra-red.dll`；`red-decode` 能解单帧/序列（默认 REDWideGamutRGB + Log3G10，也支持 linear/sRGB、full/half/quarter），再用 `lut apply` 上胶片。`video --in clip.R3D` 现在也能直接出片：LUT 引擎吃 Log3G10/RWG，光谱引擎吃 sRGB，timecode 自动带；输出视频-only，音频/UI 直连/GPU 解码还没接。
+`spektra-roll-cli video` 现在能直接吃 iPhone 的 **Apple Log** 视频：逐帧套 Portra 400 光谱 LUT，叠加颗粒、光晕、眩光、扩散，带原声输出 SDR 或 **HDR（PQ/HLG）**，也能直接出 ProRes 422 HQ。输入现在覆盖 **九种**：sRGB、Apple Log、Sony S-Log3（S-Gamut3.Cine / S-Gamut3）、Canon C-Log3、Panasonic V-Log、ARRI LogC3 / LogC4、Blackmagic Film Gen 5、DaVinci Intermediate；YUV→RGB 矩阵跟素材自己的 `color_space` 标签走。颜色和质感**合并成一次 GPU 提交**，管道也修掉了每帧 130 ms 的量化开销、并让解码/编码与处理重叠：2.6 MP 全质感视频 **79–82 ms/帧**（D046 时 379，累计约 4.7×），与旧路径逐位相同。三个空间效果自 D054 起是**按底片微米计的真实点扩散核**（窄芯 + 宽裙），1080p / 4K 观感一致。界面预览是**常驻进程 + 整段帧缓存**：短片拖动时间线 **38–64 ms/帧**（以前 1.7–2.2 s）；长片自动生成 960 px 代理，**100 ms/帧**。长片可以分段渲染，中断后只补缺失的段，输出保留相机 timecode。交付可以是 16-bit PNG，也可以是**不钳制的 float / half EXR**（D055，读回逐位一致）。macOS 的颜色和质感也都走 **Metal**（D056/D057），与 Windows 的 D3D11 路径对齐。Qt 6 桌面界面负责选素材、烘 LUT、调质感、预览和渲染。颜色管理可以接 **OpenColorIO**（可选依赖，D062）：任意相机/ACES 空间都能当 LUT 的输入域，也能出 ACES 2.0 显示器变换；没有 OCIO 的构建行为完全不变。界面也能直接选 OCIO 色彩空间了（D063）：左栏“色彩管理（OCIO）”从配置里读名字，烘焙、光谱预览、渲染和“按住看原片”都走同一个 CLI。片库现在包括 **Vision3 50D/250D/200T/500T、Verita 200D 和 2383/2393 电影印片**（D065）：Vision3 的 T 型灯、2383 的 K75P 放映光源都进了模型，CPU 与两个 GPU 后端一致。测试素材统一为 Sony FX30 的 S-Log3 `C0113.MP4`（D064）。四支反转片（Ektachrome / Velvia / Provia / Kodachrome）也能直接扫描了（D067）：保留片基、按“清澈片基 → 最深染料”做黑白平衡，CPU / D3D11 / Metal 一致。RED R3D / R3D NE 有了 **BYO SDK** 的本地插件（D069）：官方包仍是 loader，用户自己的 SDK 用 MSVC 编 `spektra-red.dll`；`red-decode` 能解单帧/序列（默认 REDWideGamutRGB + Log3G10，也支持 linear/sRGB、full/half/quarter），再用 `lut apply` 上胶片。`video --in clip.R3D` 现在也能直接出片：LUT 引擎吃 Log3G10/RWG，光谱引擎吃 sRGB，timecode 自动带；D071 又补了 R3D 音频（AU→PCM/AAC）、`--segment/--resume/--jobs` 和界面里的 `.r3d` 预览/单条渲染。真实 R3D 音频、批量 R3D、GPU 解码还没验证。
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
@@ -77,6 +77,7 @@
 - [x] **RED R3D / R3D NE 骨架**（D068）：`SR_WITH_REDSDK` 默认 OFF；`red-info [--in]` 读 SDK 版本与 R3D 元数据；`.r3d` 在 CLI/UI 都被识别并给出 REDCINE-X 指引；`scripts\build-red` + `docs/red-sdk.md`；官方 CI 只测 stub；**帧解码未接**
 - [x] **RED R3D NE 帧解码**（D069）：改为 **MSVC 插件 + C ABI**（SDK 只提供 MSVC 库，MinGW 不能直链）；`red-decode` 解单帧/序列，默认 **REDWideGamutRGB + Log3G10**，也支持 linear/sRGB、full/half/quarter；`scripts\build-red` 自动编插件并打包 `build-red\`；`scripts\demo-red.cmd` 用真实 ZR 样片出片；**`video`/UI 直连、音频、GPU 解码仍未接**
 - [x] **R3D 直读视频**（D070）：`video --in clip.R3D`；LUT 引擎解 Log3G10/RWG，光谱引擎解 sRGB；`--red-scale`；timecode/帧数来自插件；默认 ProRes 422 HQ；**音频、segment/resume、UI 直连仍未接**
+- [x] **R3D 收尾**（D071）：插件音频（AU → PCM/AAC）、`--segment/--resume/--jobs`、UI `.r3d` 预览/单条渲染；`--red-selftest` / `--red-render-selftest`；**真实 R3D 音频、批量 R3D、GPU 解码未验证**
 - [x] `scripts\demo-log-inputs.cmd`：九种输入各烘一张 LUT + GPU/CPU 对照表
 - [x] `scripts\demo-ocio.cmd`：配置信息 / Apple Log 双实现 / ACES 显示器变换 / LUT 对比
 - [x] `scripts\demo-ocio-ui.cmd`：界面自检（52 个空间）/ UI LUT vs CLI / 用 UI 的 LUT 渲一帧
@@ -155,6 +156,7 @@
 | RED R3D 骨架（D068） | `ctest` **11/11**（新增 `test_red`）；官方 `red-info` 必须 `built=false`；无 SDK 时配置阶段报错；假 `libR3DSDK.a` 走通 ON 配置 + 编译 + `red-info --in`（4096×2160/120 帧）；CI run **113** 双绿；**帧解码未接** |
 | RED R3D NE 解码（D069） | SDK 9.2.1 + Nikon ZR 样片：6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03；half 约 **3.8 s/帧**、full 6K 约 **14 s/帧**（CPU，含 16-bit PNG 写盘）；`red-decode` + `lut apply` 出 Vision3 250D + 2383 成片；`demo-red.cmd` 正常；CI run **116** 双绿 |
 | R3D 直读视频（D070） | half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧**；`--start` timecode 正确偏移；输出 ProRes 422 HQ，视频-only；CI run **119** 双绿 |
+| R3D 收尾（D071） | UI `--red-selftest` **7993 ms**（3024×1701）；`--red-render-selftest` 2 帧 ProRes；segment 2 段 + jobs=2 + resume 正常；合成 AU→PCM 封装成功；**真实 R3D 音频未测** |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
@@ -181,11 +183,11 @@
 
 1. **印片机控制**：Y/M 二向色滤色片、预闪、光源；扫描仪 unsharp
 2. **空间物理模型**：染料云颗粒、逐通道 halation、具名扩散、镜头/扫描仪 blur
-3. **R3D 收尾**（D070 之后）：音频封装、UI 预览/渲染直连、`--segment/--resume/--jobs`、GPU/并行解码
+3. **R3D 剩余**：真实音频样片验证、UI 批量 R3D、GPU/并行解码、6K 性能
 4. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
 5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB / PQ / HLG
 
-> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵、D062 OpenColorIO、D063 界面 OCIO、D064 FX30 S-Log3 素材、D065 电影片库、D066 回退提示、D067 反转片直扫、D068 RED R3D BYO-SDK 骨架、D069 R3D NE 帧解码、D070 R3D NE 直读视频。
+> 已完成：D047 GPU 质感、D048 预览实时化、D049 融合提交、D050 管道修复、D051 读写重叠、D052 并行分段、D053 预览代理、D054 真实点扩散核、D055 浮点 EXR、D056 Metal 光谱、D057 Metal 质感、D058 线性 EXR、D059 EXR ZIP、D060 多相机 Log、D061 更多相机 Log + 容器矩阵、D062 OpenColorIO、D063 界面 OCIO、D064 FX30 S-Log3 素材、D065 电影片库、D066 回退提示、D067 反转片直扫、D068 RED R3D BYO-SDK 骨架、D069 R3D NE 帧解码、D070 R3D NE 直读视频、D071 R3D 音频 + UI + segment。
 
 ## 需要你决定的事
 
