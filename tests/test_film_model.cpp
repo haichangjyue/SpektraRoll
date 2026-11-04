@@ -251,7 +251,8 @@ int main() {
         check(value >= previousSlide, "slide scan is monotonic");
         previousSlide = value;
     }
-    // Frozen anchors from the same arithmetic in tools/parity (float64).
+    // Frozen anchors from a float64 probe of the upstream model math plus the
+    // scanner-style slide balance (there is no upstream slide parity target).
     checkRgb(slide.transformFrom(slideOptions, {0.5f, 0.5f, 0.5f}),
              {0.56516f, 0.56440f, 0.56354f}, 5e-4, "slide probe 0.5");
     checkRgb(slide.transformFrom(slideOptions, {1.0f, 1.0f, 1.0f}),
