@@ -60,6 +60,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QUrl>
+#include <QVariant>
 #include <QVBoxLayout>
 #include <QVector>
 #include <QWheelEvent>
@@ -684,7 +685,8 @@ protected:
             if (path.isEmpty()) continue;
             const QString suffix = QFileInfo(path).suffix().toLower();
             if (suffix == QStringLiteral("mov") || suffix == QStringLiteral("mp4") ||
-                suffix == QStringLiteral("mxf") || suffix == QStringLiteral("mkv")) {
+                suffix == QStringLiteral("mxf") || suffix == QStringLiteral("mkv") ||
+                suffix == QStringLiteral("r3d")) {
                 videos << path;
             }
         }
@@ -1135,7 +1137,7 @@ private:
         materialSection->addWidget(labeledRow(
             QStringLiteral("视频素材"),
             pathRow(inputEdit_, QStringLiteral("选择视频"),
-                    QStringLiteral("视频 (*.mov *.mp4 *.mxf)"))));
+                    QStringLiteral("视频 (*.mov *.mp4 *.mxf *.r3d)"))));
         source_ = new QComboBox;
         source_->addItem(QStringLiteral("Apple Log（iPhone）"), QStringLiteral("apple-log"));
         source_->addItem(QStringLiteral("Sony S-Log3（S-Gamut3.Cine）"), QStringLiteral("s-log3"));
@@ -1652,7 +1654,7 @@ private:
             const QStringList files = QFileDialog::getOpenFileNames(
                 this, QStringLiteral("选择多个视频"),
                 QFileInfo(inputEdit_->text()).absolutePath(),
-                QStringLiteral("视频 (*.mov *.mp4 *.mxf *.mkv)"));
+                QStringLiteral("视频 (*.mov *.mp4 *.mxf *.mkv *.r3d)"));
             enqueueBatch(files);
         });
         connect(queueTable_, &QTableWidget::itemSelectionChanged, this,
@@ -1877,6 +1879,54 @@ private:
         if (index >= 0) combo->setCurrentIndex(index);
     }
 
+    // ---- RED R3D (D068) ---------------------------------------------------
+
+    static bool isRedPath(const QString& path) {
+        return QFileInfo(path).suffix().compare(QStringLiteral("r3d"), Qt::CaseInsensitive) == 0;
+    }
+
+    // `red-info --json` is the only thing the UI knows about RED: the SDK is
+    // never linked into the Qt binary. Without the optional local build it
+    // reports built=false and the UI explains the REDCINE-X route.
+    QJsonObject queryRedInfo(const QString& path = QString()) {
+        QJsonObject result;
+        if (cliPath_.trimmed().isEmpty() || !QFileInfo::exists(cliPath_)) return result;
+        QStringList args{QStringLiteral("red-info"), QStringLiteral("--json")};
+        if (!path.isEmpty()) args << QStringLiteral("--in") << path;
+        QString output;
+        if (!runSync(cliPath_, args, &output)) return result;
+        const qsizetype start = output.indexOf(QLatin1Char('{'));
+        if (start < 0) return result;
+        const QJsonDocument document = QJsonDocument::fromJson(output.mid(start).toUtf8());
+        if (!document.isObject()) return result;
+        return document.object();
+    }
+
+    QString redBlockMessage(const QString& path) {
+        const QJsonObject red = queryRedInfo(path);
+        const QString sdkMessage = red.value(QStringLiteral("message")).toString();
+        if (!red.value(QStringLiteral("available")).toBool()) {
+            return QStringLiteral("这个构建没有可用的 RED R3D 支持。\n%1\n\n"
+                                  "先用 REDCINE-X 导出 ProRes 4444（REDWideGamutRGB + "
+                                  "Log3G10），或按 docs/red-sdk.md 用你自己的 SDK 本地编译。")
+                .arg(sdkMessage.isEmpty()
+                         ? QStringLiteral("SDK 未编译或初始化失败。")
+                         : sdkMessage);
+        }
+        const QJsonObject clip = red.value(QStringLiteral("clip")).toObject();
+        if (!clip.isEmpty()) {
+            return QStringLiteral("R3D 元数据已读到（%1×%2，%3 帧），但 D068 骨架还没有接入"
+                                  "帧解码。\n先用 REDCINE-X 导出 ProRes 4444"
+                                  "（REDWideGamutRGB + Log3G10）再渲染。")
+                .arg(clip.value(QStringLiteral("width")).toInt())
+                .arg(clip.value(QStringLiteral("height")).toInt())
+                .arg(clip.value(QStringLiteral("frames")).toVariant().toLongLong());
+        }
+        return QStringLiteral("RED SDK 已启用，但读不到这个 R3D：%1\n"
+                              "先用 REDCINE-X 确认文件，或导出 ProRes 4444 再渲染。")
+            .arg(red.value(QStringLiteral("clipError")).toString());
+    }
+
     // ---- actions ---------------------------------------------------------
 
     bool requireInput() {
@@ -1889,6 +1939,10 @@ private:
             QMessageBox::critical(
                 this, QStringLiteral("找不到 CLI"),
                 QStringLiteral("找不到 spektra-roll-cli。\n请先双击 scripts\\build-ui.cmd 重新编译。"));
+            return false;
+        }
+        if (isRedPath(inputEdit_->text().trimmed())) {
+            status_->setText(redBlockMessage(inputEdit_->text().trimmed()));
             return false;
         }
         return true;
@@ -2032,6 +2086,47 @@ private:
             clipInfoLabel_->setText(QStringLiteral("未选择素材（可以把视频拖进窗口）"));
             timeline_->setRange(0, 0);
             timeLabel_->setText(QStringLiteral("--"));
+            return;
+        }
+        // D068: `.r3d` cannot be probed with ffprobe. Ask the CLI whether this
+        // build has the optional RED SDK and show metadata or the next step.
+        if (isRedPath(path)) {
+            clipInfo_ = ClipInfo{};
+            lastProbePath_.clear();
+            stopPreviewServer();
+            clipNameLabel_->setText(QFileInfo(path).fileName());
+            clipNameLabel_->setToolTip(path);
+            timeline_->setRange(0, 0);
+            timeLabel_->setText(QStringLiteral("--"));
+            const QJsonObject red = queryRedInfo(path);
+            QString label;
+            if (red.value(QStringLiteral("available")).toBool()) {
+                const QJsonObject clip = red.value(QStringLiteral("clip")).toObject();
+                if (!clip.isEmpty()) {
+                    label = QStringLiteral("R3D %1×%2 · %3 fps · %4 帧")
+                                .arg(clip.value(QStringLiteral("width")).toInt())
+                                .arg(clip.value(QStringLiteral("height")).toInt())
+                                .arg(number(clip.value(QStringLiteral("fps")).toDouble(), 3))
+                                .arg(clip.value(QStringLiteral("frames")).toVariant().toLongLong());
+                    const QString timecode = clip.value(QStringLiteral("timecode")).toString();
+                    if (!timecode.isEmpty()) label += QStringLiteral(" · TC ") + timecode;
+                    label += QStringLiteral(" · 元数据已读；解码待接入（D068）");
+                } else {
+                    label = QStringLiteral("R3D：SDK 已启用，但读不到元数据：") +
+                            red.value(QStringLiteral("clipError")).toString();
+                }
+            } else {
+                label = QStringLiteral("R3D：此构建没有 RED SDK。用 REDCINE-X 导出 ProRes 4444"
+                                       "（REDWideGamutRGB + Log3G10），或按 docs/red-sdk.md "
+                                       "用你自己的 SDK 本地编译。");
+                const QString message = red.value(QStringLiteral("message")).toString();
+                if (!message.isEmpty()) {
+                    appendLog(QStringLiteral("RED: ") + message + QLatin1Char('\n'));
+                }
+            }
+            clipInfoLabel_->setText(label);
+            status_->setText(label);
+            appendLog(QStringLiteral("R3D: ") + QDir::toNativeSeparators(path) + QLatin1Char('\n'));
             return;
         }
         const ClipInfo info = probeClip(path);
@@ -2940,6 +3035,13 @@ private:
 
     void enqueueBatch(const QStringList& videos) {
         if (videos.isEmpty()) return;
+        for (const QString& video : videos) {
+            if (isRedPath(video)) {
+                QMessageBox::information(this, QStringLiteral("R3D 还没接入渲染"),
+                                         redBlockMessage(video));
+                return;
+            }
+        }
         if (rendering_) {
             QMessageBox::information(this, QStringLiteral("正在渲染"),
                                      QStringLiteral("等当前单条渲染结束再入队。"));

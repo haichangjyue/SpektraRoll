@@ -36,6 +36,7 @@
 #include "sr/metrics.hpp"
 #include "sr/parallel.hpp"
 #include "sr/profile.hpp"
+#include "sr/red.hpp"
 #include "sr/texture.hpp"
 
 #include "gpu_film.hpp"
@@ -242,6 +243,14 @@ void printUsage() {
         "      to. Without --ocio-config the $OCIO environment variable is used.\n"
         "      --json prints the same as JSON (used by the Qt UI).\n"
         "\n"
+        "  spektra-roll-cli red-info [--in <clip.r3d>] [--json]\n"
+        "      Report whether this build has the optional RED R3D SDK (D068),\n"
+        "      the SDK version, and (with --in) the clip metadata. The SDK is\n"
+        "      not bundled: build with -DSR_WITH_REDSDK=ON and SR_REDSDK_ROOT\n"
+        "      pointing at your own SDK. See docs/red-sdk.md. Frame decoding is\n"
+        "      not wired in the D068 skeleton; `video` explains the REDCINE-X\n"
+        "      ProRes 4444 (RWG/Log3G10) route instead.\n"
+        "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
         "  * The film model is a pure per-pixel function (no grain, halation,\n"
@@ -294,6 +303,35 @@ Args parse(int argc, char** argv) {
 int fail(const std::string& message) {
     std::fprintf(stderr, "error: %s\n", message.c_str());
     return 1;
+}
+
+// D068: `.r3d` is recognized in every build, but only a BYO-SDK build can even
+// read its metadata. Frame decoding is the next delivery, so `video`/`preview`
+// point at the REDCINE-X ProRes 4444 route instead of half-working.
+std::string redGuidance(const std::string& path) {
+    const sr::RedRuntime runtime = sr::redRuntime();
+    std::string message;
+    if (!runtime.built) {
+        message = "this build has no RED R3D support (" + runtime.message + ")";
+    } else if (!runtime.available) {
+        message = "the RED SDK is built in but could not initialize: " + runtime.message;
+    } else {
+        sr::RedClip clip;
+        std::string error;
+        if (sr::redProbeClip(path, clip, error)) {
+            message = "RED R3D was recognized (" + std::to_string(clip.width) + "x" +
+                      std::to_string(clip.height) + ", " + std::to_string(clip.frames) +
+                      " frames, " + std::to_string(clip.fps) + " fps), but frame decoding is "
+                      "not wired in the D068 skeleton";
+        } else {
+            message = "RED R3D probe failed: " + error;
+        }
+    }
+    message +=
+        "; for now export ProRes 4444 from REDCINE-X with REDWideGamutRGB + "
+        "Log3G10, then use `video --lut` with a `lut bake --ocio-input "
+        "\"Log3G10 REDWideGamutRGB\"` LUT (see docs/red-sdk.md)";
+    return message;
 }
 
 int requestedBits(const Args& args, int fallback) {
@@ -730,6 +768,68 @@ int cmdOcioInfo(const Args& args) {
         std::printf("  %s\n", entry.first.c_str());
         for (const std::string& view : entry.second) {
             std::printf("    %s\n", view.c_str());
+        }
+    }
+    return 0;
+}
+
+int cmdRedInfo(const Args& args) {
+    const sr::RedRuntime runtime = sr::redRuntime();
+    const std::string in = args.get("in");
+    sr::RedClip clip;
+    std::string clipError;
+    bool haveClip = false;
+    if (!in.empty()) {
+        if (!sr::redIsRedFile(in)) {
+            clipError = "not an .r3d file: " + in;
+        } else {
+            haveClip = sr::redProbeClip(in, clip, clipError);
+        }
+    }
+
+    if (args.has("json")) {
+        std::printf("{\n");
+        std::printf("  \"built\": %s,\n", runtime.built ? "true" : "false");
+        std::printf("  \"available\": %s,\n", runtime.available ? "true" : "false");
+        std::printf("  \"sdkVersion\": %s,\n", jsonQuote(runtime.sdkVersion).c_str());
+        std::printf("  \"libraryPath\": %s,\n", jsonQuote(runtime.libraryPath).c_str());
+        std::printf("  \"message\": %s", jsonQuote(runtime.message).c_str());
+        if (haveClip) {
+            std::printf(",\n  \"clip\": {\n");
+            std::printf("    \"width\": %d,\n", clip.width);
+            std::printf("    \"height\": %d,\n", clip.height);
+            std::printf("    \"frames\": %lld,\n", clip.frames);
+            std::printf("    \"fps\": %.6f,\n", clip.fps);
+            std::printf("    \"audioChannels\": %d,\n", clip.audioChannels);
+            std::printf("    \"minimumColorVersion\": %d,\n", clip.minimumColorVersion);
+            std::printf("    \"timecode\": %s\n", jsonQuote(clip.timecode).c_str());
+            std::printf("  }");
+        }
+        if (!clipError.empty()) {
+            std::printf(",\n  \"clipError\": %s", jsonQuote(clipError).c_str());
+        }
+        std::printf("\n}\n");
+        return 0;
+    }
+
+    std::printf("RED R3D SDK:   %s\n",
+                runtime.available ? "available"
+                                  : (runtime.built ? "built but not initialized" : "not built"));
+    if (!runtime.sdkVersion.empty()) std::printf("SDK version:   %s\n", runtime.sdkVersion.c_str());
+    if (!runtime.libraryPath.empty()) std::printf("library path:  %s\n", runtime.libraryPath.c_str());
+    std::printf("note:          %s\n", runtime.message.c_str());
+    if (!in.empty()) {
+        if (haveClip) {
+            std::printf("clip:          %s\n", in.c_str());
+            std::printf("  %dx%d, %lld frames, %.3f fps, %d audio channels\n", clip.width,
+                        clip.height, clip.frames, clip.fps, clip.audioChannels);
+            std::printf("  minimum color version: %d\n", clip.minimumColorVersion);
+            if (!clip.timecode.empty()) std::printf("  timecode: %s\n", clip.timecode.c_str());
+            std::printf(
+                "  frame decoding is not wired in the D068 skeleton; use the "
+                "REDCINE-X ProRes 4444 route for rendering\n");
+        } else {
+            std::printf("clip error:    %s\n", clipError.c_str());
         }
     }
     return 0;
@@ -1823,6 +1923,7 @@ int cmdVideo(const Args& args) {
     if (!spectral && lutPath.empty()) return fail("video requires --lut <file.cube>");
     if (inPath.empty()) return fail("video requires --in <clip>");
     if (outPath.empty()) return fail("video requires --out <clip>");
+    if (sr::redIsRedFile(inPath)) return fail(redGuidance(inPath));
 
     sr::Lut3D lut;
     FilmRecipe recipe;
@@ -3036,6 +3137,8 @@ int run(const Args& startup) {
         if (command == "open") {
             if (tokens.size() < 2) {
                 std::printf("error open needs a clip path\n");
+            } else if (sr::redIsRedFile(tokens[1])) {
+                std::printf("error %s\n", redGuidance(tokens[1]).c_str());
             } else {
                 const auto started = std::chrono::steady_clock::now();
                 if (!openClip(server, tokens[1], error)) {
@@ -3124,6 +3227,7 @@ int main(int argc, char** argv) {
     if (command == "video") return cmdVideo(args);
     if (command == "preview") return cmdPreview(args);
     if (command == "ocio-info") return cmdOcioInfo(args);
+    if (command == "red-info") return cmdRedInfo(args);
 
     if (command == "gpu-info") {
         std::printf("%s", sr::GpuFilm::deviceInfo().c_str());

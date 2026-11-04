@@ -16,6 +16,10 @@ endif()
 option(SR_BUILD_TESTS "Build the test binaries" ON)
 option(SR_BUILD_QT_UI "Build the Qt 6 desktop UI (D009)" OFF)
 option(SR_WITH_OCIO "Link OpenColorIO when it can be found (D062)" ON)
+# D068: the RED R3D SDK is never bundled or shipped. A user who accepted RED's
+# EULA points this at their own SDK; official builds and CI leave it OFF and
+# compile the stub. See docs/red-sdk.md.
+option(SR_WITH_REDSDK "Build the optional RED R3D reader from a local SDK (D068)" OFF)
 
 # --- OpenColorIO (D062) -----------------------------------------------------
 # Two ways in: a normal CMake package (Homebrew on macOS, an SDK on Windows) or
@@ -54,6 +58,45 @@ if(SR_WITH_OCIO)
     endif()
 endif()
 
+# --- RED R3D SDK (D068) -----------------------------------------------------
+# BYO SDK only. We never vendor headers or libraries: with SR_WITH_REDSDK=OFF
+# (the default) red_stub.cpp is compiled. With it ON, the SDK must already be
+# installed and SR_REDSDK_ROOT must point at it.
+set(SR_REDSDK_FOUND OFF)
+if(SR_WITH_REDSDK)
+    set(SR_REDSDK_ROOT "$ENV{SR_REDSDK_ROOT}" CACHE PATH
+        "RED R3D SDK prefix (contains include/ and the R3DSDK library)")
+    if(NOT SR_REDSDK_ROOT)
+        message(FATAL_ERROR
+            "SR_WITH_REDSDK=ON requires -DSR_REDSDK_ROOT=<sdk prefix> "
+            "(or the SR_REDSDK_ROOT environment variable). See docs/red-sdk.md.")
+    endif()
+    file(TO_CMAKE_PATH "${SR_REDSDK_ROOT}" SR_REDSDK_ROOT_CMAKE)
+    find_path(SR_REDSDK_INCLUDE_DIR NAMES R3DSDK.h
+        HINTS "${SR_REDSDK_ROOT_CMAKE}/include" "${SR_REDSDK_ROOT_CMAKE}/include/red")
+    find_library(SR_REDSDK_LIBRARY NAMES R3DSDK
+        HINTS "${SR_REDSDK_ROOT_CMAKE}/lib" "${SR_REDSDK_ROOT_CMAKE}/lib/win64"
+              "${SR_REDSDK_ROOT_CMAKE}/lib/macos" "${SR_REDSDK_ROOT_CMAKE}/bin")
+    if(NOT SR_REDSDK_INCLUDE_DIR OR NOT SR_REDSDK_LIBRARY)
+        message(FATAL_ERROR
+            "SR_WITH_REDSDK=ON but R3DSDK.h or the R3DSDK library was not found "
+            "under ${SR_REDSDK_ROOT_CMAKE}. Run scripts/build-red.ps1 -Check to "
+            "inspect the SDK, and see docs/red-sdk.md.")
+    endif()
+    # InitializeSdk takes the folder that contains the dynamic library, not the
+    # import library. Prefer bin/ (Windows) and lib/ (macOS/Linux).
+    set(SR_REDSDK_RUNTIME_DIR "${SR_REDSDK_ROOT_CMAKE}")
+    foreach(_red_dir "${SR_REDSDK_ROOT_CMAKE}/bin" "${SR_REDSDK_ROOT_CMAKE}/lib")
+        if(EXISTS "${_red_dir}/R3DSDK.dll" OR EXISTS "${_red_dir}/libR3DSDK.dylib"
+           OR EXISTS "${_red_dir}/libR3DSDK.so")
+            set(SR_REDSDK_RUNTIME_DIR "${_red_dir}")
+        endif()
+    endforeach()
+    file(TO_CMAKE_PATH "${SR_REDSDK_RUNTIME_DIR}" SR_REDSDK_RUNTIME_DIR)
+    set(SR_REDSDK_FOUND ON)
+    message(STATUS "RED R3D SDK: ${SR_REDSDK_ROOT_CMAKE} (BYO SDK, D068)")
+endif()
+
 # The GPU backends are per-platform: D3D11 on Windows, Metal on macOS (D056).
 # Each platform compiles exactly one implementation of GpuFilm / GpuTexture.
 if(APPLE)
@@ -82,6 +125,17 @@ add_library(sr_core
     src/core/src/transfer.cpp
     src/core/src/gamut.cpp
     src/core/src/texture.cpp)
+
+if(SR_REDSDK_FOUND)
+    target_sources(sr_core PRIVATE src/core/src/red_sdk.cpp)
+    target_include_directories(sr_core PRIVATE "${SR_REDSDK_INCLUDE_DIR}")
+    target_link_libraries(sr_core PUBLIC ${SR_REDSDK_LIBRARY})
+    target_compile_definitions(sr_core PUBLIC SR_HAVE_REDSDK=1)
+    target_compile_definitions(sr_core PRIVATE
+        SR_REDSDK_DEFAULT_LIB_DIR="${SR_REDSDK_RUNTIME_DIR}")
+else()
+    target_sources(sr_core PRIVATE src/core/src/red_stub.cpp)
+endif()
 
 if(SR_OCIO_FOUND)
     target_sources(sr_core PRIVATE src/core/src/ocio.cpp)
@@ -222,6 +276,14 @@ if(SR_BUILD_TESTS)
     set_tests_properties(gpu_chain PROPERTIES SKIP_RETURN_CODE 77)
 
     # OpenColorIO (D062) skips itself when the build has no OCIO (exit 77).
+    # Optional RED R3D reader (D068): the stub path is part of the default build.
+    add_executable(test_red tests/test_red.cpp)
+    target_link_libraries(test_red PRIVATE sr_core)
+    if(MINGW)
+        target_link_options(test_red PRIVATE -static)
+    endif()
+    add_test(NAME red COMMAND test_red)
+
     add_executable(test_ocio tests/test_ocio.cpp)
     target_link_libraries(test_ocio PRIVATE sr_core)
     target_compile_definitions(test_ocio PRIVATE
