@@ -347,34 +347,65 @@ X:\agent\SpektraRoll\scripts\demo-ocio-ui.cmd
 
 **要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。
 
-## RED R3D / R3D NE（自带 SDK，D068）
+## RED R3D / R3D NE（自带 SDK，D069）
 
-> **重要**：官方包**不带** RED SDK，也不能解码 R3D。这一节是给“自己有 RED SDK、愿意本地编译”的人看的。官方 `build\` 只会识别 `.r3d` 并提示下一步。
+> **重要**：官方包**不带** RED SDK，也不能解码 R3D。这一节是给“自己有 RED SDK、愿意本地编译”的人看的。官方 `build\` 只带 loader，没有插件。
 
-先检查你的 SDK：
+双击演示（会用你自己的 SDK 编译插件）：
 
-```powershell
-.\scripts\build-red.cmd -Check -SdkRoot D:\RED_SDK
+```
+X:\agent\SpektraRoll\scripts\demo-red.cmd
 ```
 
-再本地编译（独立到 `build-red\`，不影响官方 `build\`）：
+手动步骤：
 
 ```powershell
+# 1. 检查 SDK + MSVC
+.\scripts\build-red.cmd -Check -SdkRoot D:\RED_SDK
+
+# 2. 本地编译插件（独立到 build-red\，不影响官方 build\）
 $env:SR_REDSDK_ROOT = "D:\RED_SDK"
 .\scripts\build-red.cmd
+
+# 3. 看元数据
 .\build-red\spektra-roll-cli.exe red-info --in D:\footage\A001.R3D --json
+
+# 4. 解一帧（默认 Log3G10/RWG；srgb 是直接看的）
+.\build-red\spektra-roll-cli.exe red-decode --in D:\footage\A001.R3D `
+  --frame 0 --scale half --format srgb --out out\red-original.png
+.\build-red\spektra-roll-cli.exe red-decode --in D:\footage\A001.R3D `
+  --frame 0 --scale half --format log3g10 --out out\red-log3g10.png
+
+# 5. 烘 Log3G10/RWG 的胶片 LUT，再套上去
+.\build-red\spektra-roll-cli.exe lut bake `
+  --ocio-config data\ocio\studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio `
+  --ocio-input "Log3G10 REDWideGamutRGB" `
+  --film data\profiles\kodak_vision3_250d.json --paper data\profiles\kodak_2383.json `
+  --scan print --exposure 0.7 --out out\red-vision3-2383.cube
+.\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
+  --in out\red-log3g10.png --out out\red-graded.png
+```
+
+整段序列：
+
+```powershell
+.\build-red\spektra-roll-cli.exe red-decode --in D:\footage\A001.R3D `
+  --out-dir out\red-seq --start 0 --frames 12 --scale half --format log3g10
+.\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
+  --in-dir out\red-seq --out-dir out\red-seq-graded --out-ext png
+```
+
+短片段直接出 ProRes（无音频；R3D 音频封装还没接）：
+
+```powershell
+scripts\red-to-prores.cmd -Frames 12 -Scale half -Out out\red-clip.mov
 ```
 
 现在能做什么：
 
-- 读 R3D 元数据：分辨率、帧数、帧率、音频通道、timecode
-- 还不能渲染 R3D 帧（D068 骨架）；界面里选 `.r3d` 会显示提示
-
-现在要渲染 R3D：
-
-1. 用 **REDCINE-X Pro** 导出 ProRes 4444 / 4444 XQ，色彩空间 **REDWideGamutRGB**，Gamma **Log3G10**
-2. `lut bake --ocio-input "Log3G10 REDWideGamutRGB" --scan negative ...`
-3. `video --lut ... --in 导出的.mov ...`
+- 读元数据：分辨率、帧数、帧率、音频通道、timecode
+- 解码单帧/序列：Log3G10/RWG、Linear Rec.709、sRGB；full/half/quarter
+- 还不能 `video --in clip.R3D` 直读，也不能在界面里预览/渲染 `.R3D`；先用 `red-decode` + `lut apply`（下一阶段接）
 
 **许可证**：不要把 SDK 或带 RED 的二进制当作官方包分发；`build-red\` 只限自用。细节见 `docs/red-sdk.md`。
 

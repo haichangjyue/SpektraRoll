@@ -1,172 +1,169 @@
-# RED R3D（含 R3D NE）· 自带 SDK 的本地构建（D068）
+# RED R3D / R3D NE · 自带 SDK 的本地插件（D069）
 
-> **一句话**：SpektraRoll 不随仓库或安装包分发 RED SDK，也不提供带 RED 支持的官方二进制。你自己从 RED 获取 SDK、接受 EULA，然后本地编译一个只给自己用的版本。
+> **一句话**：SpektraRoll 不随仓库或安装包分发 RED SDK。你自己从 RED 获取 SDK、接受 EULA，用 MSVC 本地编译 `spektra-red.dll`；GPL 的 CLI 在运行时加载它。官方 `build\` 永远没有 RED 代码。
 >
-> 当前是 **D068 骨架**：能报告 SDK 版本、能读 `.R3D` 的元数据（尺寸/帧数/帧率/音频/timecode），**还不能渲染 R3D 帧**。渲染先用 REDCINE-X 导出 ProRes 4444。
-
-> 代码按 R3D SDK 7.x 的公开 API 写（`InitializeSdk` / `Clip::LoadFrom` / 元数据访问）。更新版本的 SDK 如果改了签名，可能需要在 `src/core/src/red_sdk.cpp` 里做小调整；官方构建不包含这段代码，所以不会影响普通用户。
+> 当前能做到：**读元数据 + 解码 R3D / R3D NE 帧**（CPU）。`red-decode` 输出 16-bit 帧，默认 **REDWideGamutRGB + Log3G10**，可以直接接 `lut apply`；`video` / 界面预览的直连是下一阶段。
 
 ---
 
-## 1. 为什么是“自带 SDK”
+## 1. 为什么是插件
 
-RED R3D SDK 是闭源、需要同意 RED EULA 的 SDK：
+RED 的 Windows SDK 9.2 只提供 MSVC 静态库（`R3DSDK-2017MD.lib` 等），而 SpektraRoll 的主程序是 MinGW 构建，C++ ABI 不兼容。直接链接会失败，也会把闭源 SDK 混进 GPL 二进制。
 
-- 不能把它的头文件、静态库、文档、示例源码放进仓库。
-- 动态库只能按 RED 的条款随“你的程序”分发；和本项目的 GPL-3.0-or-later 发布方式混在一起风险很高。
-- R3D NE（Nikon ZR 的 REDCODE RAW 变体）需要较新的 SDK；旧 SDK 会拒绝这类文件。
+所以分成两层：
 
-所以官方构建（CI、安装包、`build\`）**永远编译 stub**：
+- **核心 CLI（GPL，MinGW）**：只负责找插件、调用 C ABI，不包含任何 RED 头文件。
+- **`spektra-red.dll`（本地构建，MSVC）**：唯一包含 `R3DSDK.h` 的部分，直接使用你提供的 SDK。
 
-```text
-red-info -> "this build was compiled without the RED R3D SDK"
-```
-
-只有你自己运行 `scripts\build-red.ps1` 才会得到带 SDK 的本地版本。这个版本**只限自用**；如果你要再分发，需要自己同时满足 GPL 和 RED EULA。
+官方 CI 和 `build\` 只编译核心 loader；没有插件时 `red-info` 会明确说“RED plugin not found”。
 
 ---
 
 ## 2. 你需要准备什么
 
-1. 从 RED 官方获取 **R3D SDK**，并接受它的 EULA。
-2. 一个 SDK 目录，里面至少有：
-   - `include/R3DSDK.h`（有的包是 `include/red/R3DSDK.h`）
-   - Windows：`R3DSDK.lib` + `R3DSDK.dll`
-   - macOS：`libR3DSDK.dylib`
-3. Windows 上用和项目一致的 MinGW 构建，或自己用 MSVC 也能编（CMake 会自动选编译器）。
+- RED **R3D SDK 9.2.1**（Windows x64）。其他版本只要 API 兼容也可以试；R3D NE 需要较新的 SDK。
+- **Visual Studio Build Tools 2022**（C++ 工作负载）。SDK 文档说明 2019/2022 可以使用 2017 库。
+- SDK 目录里至少有：
+  - `Include\R3DSDK.h`
+  - `Lib\win64\R3DSDK-2017MD.lib`
+  - `Redistributable\win\REDR3D-x64.dll`（以及同目录其他 DLL）
 
-> SDK 版本要支持 R3D NE。拿不准时，用 REDCINE-X Pro 打开你的 `.R3D` 确认它能读；能读的同一套 SDK 再拿来编译。
+> 本机验证用的 SDK 是 `X:\agent\footage\R3DSDKv9_2_1`，样片是 `ZR_RED_Color_Science_Sunflower.R3D`（Nikon ZR，R3D NE，6048×3402，249 帧，23.976，TC 11:09:14:03）。这些路径只在本机脚本里作为默认值，不进入仓库。
 
 ---
 
-## 3. 检查 SDK
+## 3. 检查与构建
 
 ```powershell
 .\scripts\build-red.cmd -Check -SdkRoot D:\RED_SDK
 ```
 
-或者：
-
-```powershell
-$env:SR_REDSDK_ROOT = "D:\RED_SDK"
-.\scripts\build-red.cmd -Check
-```
-
-它会打印找到的 header / library / runtime 路径。三项都找到才继续。
-
----
-
-## 4. 本地编译
+它会打印 header / library / runtime / MSVC 四项。然后：
 
 ```powershell
 $env:SR_REDSDK_ROOT = "D:\RED_SDK"
 .\scripts\build-red.cmd
 ```
 
-产物：
+产物是一个独立目录：
 
 ```text
-build-red\spektra-roll-cli.exe
+build-red\
+  spektra-roll-cli.exe   (普通 MinGW CLI 的副本)
+  spektra-red.dll        (MSVC 插件)
+  REDR3D-x64.dll ...     (SDK 的 Redistributable DLL，本地复制)
+  obj\                   (编译中间文件)
 ```
 
-这个构建和普通 `build\` 相互独立；官方 `build\` 不受影响。
+`build-red\` 在 `.gitignore` 的 `build-*/` 范围内，不会被提交。脚本不会复制 SDK 头文件或静态库。
 
-### 运行时动态库
-
-SDK 的 `InitializeSdk` 需要一个**包含动态库的目录**。默认使用 CMake 找到的 SDK 运行时目录；如果运行时报“SDK initialization failed”，显式指定：
+自检：
 
 ```powershell
-$env:SPEKTRA_RED_SDK = "D:\RED_SDK\bin"
-.\build-red\spektra-roll-cli.exe red-info
-```
-
-macOS 同理，指向 `libR3DSDK.dylib` 所在目录。
-
----
-
-## 5. 自检
-
-```powershell
-.\build-red\spektra-roll-cli.exe red-info
 .\build-red\spektra-roll-cli.exe red-info --json
-.\build-red\spektra-roll-cli.exe red-info --in "D:\footage\A001_C001.R3D" --json
+.\build-red\spektra-roll-cli.exe red-info --in "D:\footage\A001.R3D" --json
 ```
-
-没有 SDK 的普通构建会显示：
-
-```text
-RED R3D SDK:   not built
-note:          this build was compiled without the RED R3D SDK; ...
-```
-
-带 SDK 的本地构建会显示 SDK 版本，`--in` 还会打印：
-
-- 分辨率、帧数、帧率
-- 音频通道数
-- minimum color version
-- timecode
 
 ---
 
-## 6. 当前能做什么、不能做什么
+## 4. 解码帧
 
-| 能力 | D068 骨架 |
-|---|---|
-| 识别 `.R3D` 扩展名 | 所有构建都支持 |
-| 读 R3D 元数据 | 仅带 SDK 的本地构建 |
-| 直接渲染 `.R3D` 帧 | **还没有**（下一阶段） |
-| 预览 `.R3D` | **还没有**；UI 会提示先用 REDCINE-X |
-| 官方包带 RED | 不会 |
-
-### 现在渲染 R3D 的推荐路线
-
-1. 用 **REDCINE-X Pro** 导出：
-   - ProRes 4444 / 4444 XQ
-   - 色彩空间 **REDWideGamutRGB**
-   - Gamma **Log3G10**
-   - 保留音频和 timecode
-2. 把解码烘进 LUT：
+### 单帧
 
 ```powershell
-.\build\spektra-roll-cli.exe lut bake `
+.\build-red\spektra-roll-cli.exe red-decode `
+  --in "D:\footage\ZR_RED_Color_Science_Sunflower.R3D" `
+  --frame 0 --scale half --format srgb --out out\red-original.png
+```
+
+- `--format log3g10`（默认）：REDWideGamutRGB + Log3G10，LUT 的输入域
+- `--format linear`：线性 Rec.709
+- `--format srgb`：Rec.709 + sRGB，直接看
+- `--scale full|half|quarter`：6K 全分辨率、半分辨率、四分之一
+
+### 序列
+
+```powershell
+.\build-red\spektra-roll-cli.exe red-decode `
+  --in "D:\footage\ZR_RED_Color_Science_Sunflower.R3D" `
+  --out-dir out\red-seq --start 0 --frames 12 `
+  --scale half --format log3g10 --out-ext png
+```
+
+文件名是 `<输入名>_0000.png`…。也支持 `--out-ext exr`（浮点，不钳制）。
+
+### 接到胶片
+
+```powershell
+# 1. 把 Log3G10/RWG 解码烘进 LUT（只需一次）
+.\build-red\spektra-roll-cli.exe lut bake `
   --ocio-config data\ocio\studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio `
   --ocio-input "Log3G10 REDWideGamutRGB" `
-  --scan negative --exposure 0.7 --out out\red-log3g10.cube
+  --film data\profiles\kodak_vision3_250d.json `
+  --paper data\profiles\kodak_2383.json `
+  --scan print --exposure 0.7 --out out\red-vision3-2383.cube
+
+# 2. 单帧
+.\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
+  --in out\red-log3g10.png --out out\red-graded.png
+
+# 3. 序列
+.\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
+  --in-dir out\red-seq --out-dir out\red-seq-graded --out-ext png
 ```
 
-3. 渲染导出的 ProRes：
+双击演示：`scripts\demo-red.cmd`。它会解一帧 sRGB、一帧 Log3G10、烘 Vision3 250D + 2383、套 LUT，最后打开原图和成片。
 
-```powershell
-.\build\spektra-roll-cli.exe video --lut out\red-log3g10.cube `
-  --in clip-raw.mov --out out\graded.mov --codec prores
-```
+---
 
-内置 ACES 配置已经包含 `Log3G10 REDWideGamutRGB`，所以不需要额外装 OCIO 配置。
+## 5. 实测（本机，Nikon ZR R3D NE）
+
+| 项 | 结果 |
+|---|---|
+| 元数据 | 6048×3402，249 帧，23.976 fps，TC 11:09:14:03，音频 0 通道 |
+| half 解码 | 3024×1701，16-bit PNG；约 **3.8 s/帧**（含 SDK 初始化与约 30 MB PNG 写盘） |
+| full 解码 | 6048×3402，16-bit PNG；约 **14 s/帧**（含约 100 MB PNG 写盘） |
+| 解码后端 | **CPU**（`OPTION_RED_NONE`）；GPU 解码（CUDA/OpenCL/Metal）还没接 |
+| 格式 | Log3G10/RWG、Linear Rec.709、sRGB Rec.709 |
+| 序列 | `red-decode --out-dir` + `lut apply --in-dir` 正常 |
+
+6K 全分辨率很吃 CPU；预览/批量先用 `--scale half`，成片再用 `full`。
+
+---
+
+## 6. 还没做
+
+- `video --in clip.R3D` 直读（帧源抽象、编码、音频、timecode 复制）
+- 界面里预览/渲染 `.R3D`（目前只显示元数据和 `red-decode` 指引）
+- R3D 音频导出/封装（样片本身 0 通道；SDK 的音频 API 还没接）
+- GPU 解码（CUDA / OpenCL / Metal）
+- 并行解码多帧
+
+这些是下一阶段的 D070 候选。
 
 ---
 
 ## 7. 常见问题
 
-**CMake 报 `SR_WITH_REDSDK=ON requires -DSR_REDSDK_ROOT`**
-：没设路径。用 `-SdkRoot` 或 `SR_REDSDK_ROOT`。
+**`red-info` 显示 `built: false`**
+：插件没找到。确认 `build-red\spektra-red.dll` 和 `spektra-roll-cli.exe` 在同一目录，或设 `SPEKTRA_RED_PLUGIN` 指向 DLL 的完整路径。
 
-**CMake 报 `R3DSDK.h or the R3DSDK library was not found`**
-：SDK 目录结构不同。先用 `-Check` 看三项路径；必要时手动指定 `-DSR_REDSDK_ROOT` 到真正的前缀目录。
+**`RED SDK initialization failed`**
+：SDK 的 Redistributable DLL 没在插件旁边。把它们复制到 `build-red\`，或设 `SPEKTRA_RED_SDK` 指向 DLL 目录。
 
-**`red-info` 显示 built but not initialized**
-：动态库没找到或版本不匹配。设置 `SPEKTRA_RED_SDK` 指向动态库目录；确认 SDK 版本支持你的 R3D NE 文件。
+**`R3D load failed: not an R3D file` / `unsupported clip format`**
+：SDK 太旧，或文件不是 R3D NE。用 REDCINE-X 确认；R3D NE 需要支持它的 SDK。
 
-**`red-info --in` 报 `not an R3D file` / `unsupported clip format`**
-：SDK 太旧，或文件不是 R3D NE。用 REDCINE-X 确认；必要时升级 SDK。
+**CMake / 主程序要不要加 `SR_WITH_REDSDK`**
+：不要。D069 起主程序始终只编译 loader；插件由 `scripts\build-red.cmd` 单独构建。旧版 D068 的 `SR_WITH_REDSDK` 已移除。
 
-**官方 `build\` 里没有 RED**
-：这是设计。只有 `build-red\` 是你自己编的。
+**能把 `build-red\` 发给别人吗**
+：不要。它包含 RED 的 DLL 和带 SDK 的插件，只限你自己使用。官方包永远不带这些。
 
 ---
 
-## 8. 分发提醒
+## 8. 许可证
 
-- `build-red\` 只适合自己用。
-- 不要把 SDK 的头文件、静态库、动态库复制进仓库。
-- 不要把带 RED 的二进制当作 SpektraRoll 官方包发布。
-- 如果确实要发布带 RED 的版本，先让律师看 RED EULA 和 GPLv3 的组合，或单独做一个非 GPL 的发行版。
+- RED SDK 是闭源、需要接受 RED EULA 的软件；头文件、静态库、示例源码不能放进仓库。
+- `build-red\` 只适合本地自用；再分发要同时满足 GPL 和 RED EULA。
+- 官方 `build\` / CI 不包含 RED 代码，也不会加载插件。

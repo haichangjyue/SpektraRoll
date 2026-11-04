@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D068：RED R3D / R3D NE 的 BYO-SDK 骨架）
-> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + RED R3D 可选骨架**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 元数据，D041–D068）
+> **最后更新**：2026-11-04（D069：RED R3D NE 帧解码）
+> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + R3D NE 本地解码**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码，D041–D069）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -37,9 +37,58 @@
 
 ---
 
-## 零之零、本次对话（D068）交接摘要
+## 零之零、本次对话（D069）交接摘要
 
-> **新开对话先读这一节**；D067 和更早的 D063–D066 在下面，细节按决策编号往下（最新在前）。
+> **新开对话先读这一节**；D068 和更早的 D067 / D063–D066 在下面，细节按决策编号往下（最新在前）。
+
+### 这次完成了什么
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **D069** | RED R3D NE 帧解码 | 核心 GPL CLI + 本地 **MSVC 插件** `spektra-red.dll`（C ABI）；`red-decode` 解单帧/序列，默认 **REDWideGamutRGB + Log3G10**，也支持 linear/sRGB、full/half/quarter；`build-red` 自动编插件并打包；`demo-red.cmd` 用真实 Nikon ZR 样片出 Vision3 250D + 2383 成片；**官方包/CI 仍不带 RED** |
+
+- 本机：SDK **9.2.1**，样片 6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03；half 约 **3.8 s/帧**，full 6K 约 **14 s/帧**（CPU，含 16-bit PNG 写盘）。
+- `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
+- 双击验收：`scripts\demo-red.cmd`。
+- 最新代码提交：`8c3f03b`（D069）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
+
+### 关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D069 | R3D 解码架构 | Windows SDK 是 MSVC-only → 不做 MinGW 直链；核心 loader + MSVC 插件 C ABI；插件输出 Log3G10/RWG 16-bit；官方包不带 SDK |
+
+### 未完成的待办（按建议顺序）
+
+1. **R3D 直读 `video` / UI**：帧源抽象、音频、timecode、预览；GPU/并行解码
+2. **印片机控制**：Y/M 二向色滤色片、预闪、光源；扫描仪 unsharp
+3. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散、镜头/扫描仪 blur
+4. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
+5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
+
+### 新对话第一步
+
+1. `ctest --test-dir build --output-on-failure`（11/11）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `scripts\demo-red.cmd -NoOpen`（需要 `build-red\`、SDK 和 ZR 样片）
+4. `build\spektra-roll-cli.exe red-info`（无插件时应是 `built=false`）
+5. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（旧路径不回归）
+6. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
+
+### 当前已知限制 / 坑
+
+- **官方包不能解 R3D**：`build\` 只有 loader；必须用 `build-red\`（本地 MSVC 插件 + 你的 SDK）。
+- **没有 `video --in clip.R3D` / UI 直连**：先用 `red-decode` 出帧，再 `lut apply`（单帧或 `--in-dir` 序列）。
+- **解码是 CPU**：half 约 3.8 s/帧、full 6K 约 14 s/帧；GPU 解码没接。
+- **音频/timecode 只在元数据里**：样片 0 音频通道；视频封装要等下一阶段。
+- **不要把 SDK/插件/`build-red\` 当官方包分发**；`build-red\` 只限自用。
+- 插件用 MSVC 编译（VS Build Tools 2022 + SDK 2017 库）；MinGW 不能直链 SDK。
+
+---
+
+## 零之零点五、上一轮（D068）交接摘要
+
+> D068 的完整摘要；新对话优先读上面的 D069。
 
 ### 这次完成了什么
 
@@ -224,6 +273,76 @@
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 
 > 本次对话（D063–D066）的完成、决策和待办见前面的「零之一」；下面是更早阶段的记录。
+
+---
+
+## 会话 D069 · RED R3D NE 帧解码（MSVC 插件）
+
+会话目标：用户提供了 Nikon ZR 的 R3D NE 样片和 RED R3D SDK 9.2.1，要求继续把 D068 骨架变成真正可解码。
+
+### 一、关键发现
+
+- Windows SDK 9.2.1 只有 **MSVC 静态库**（`R3DSDK-2017MD.lib` 等），没有 MinGW 可用的 import lib；主程序是 MinGW，C++ ABI 不兼容。
+- 直接链进 GPL 二进制也不合适（闭源 SDK + GPL 发布）。
+- 结论：**核心 loader + 本地 MSVC 插件（C ABI）**。插件是唯一包含 `R3DSDK.h` 的文件；官方 `build\` 不含 RED 代码。
+
+### 二、已完成的事项
+
+**D069 · R3D 插件 + 解码**
+- `src/red-plugin/red_plugin_api.h`：纯 C ABI（open/decode/close/info）。
+- `src/red-plugin/red_plugin_msvc.cpp`：MSVC 编译；`InitializeSdk(..., OPTION_RED_NONE)`；`Clip::DecodeVideoFrame`；16-bit interleaved RGB。
+- `src/core/src/red_plugin.cpp`：MinGW loader；`LoadLibrary`/`dlopen`；找 `spektra-red.dll`（或 `SPEKTRA_RED_PLUGIN`）；把 16-bit 转 float。
+- `sr::RedReader`：一次 open、多帧 decode、复用 SDK 缓冲。
+- CLI `red-decode`：单帧 `--out` / 序列 `--out-dir`；`--format log3g10|linear|srgb`；`--scale full|half|quarter`；PNG/EXR。
+- 默认 `Primary_Development_Only` → **REDWideGamutRGB + Log3G10**（`lut bake --ocio-input "Log3G10 REDWideGamutRGB"` 的输入域）；`Full_Graded` → Linear Rec.709 / sRGB。
+- `scripts/build-red.ps1` 重写：用 MSVC 编插件、复制普通 CLI + SDK Redistributable DLL 到 `build-red\`；`-Check` 检查 header/lib/runtime/MSVC。
+- `scripts/demo-red.ps1` / `.cmd`：真样片 → sRGB 原图 + Log3G10 中间帧 → Vision3 250D + 2383 → 成片。
+- `red-info` 现在报告插件路径/SDK 版本/R3D 元数据；`video`/`preview` 仍拒绝 `.r3d`，但指向 `red-decode`。
+
+### 三、一条关键决策（详见 DECISIONS D069）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D069 | R3D 解码架构 | MSVC-only SDK → 内核 loader + 插件 C ABI；输出 Log3G10/RWG；官方包不带 SDK |
+
+### 四、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| SDK / 样片 | RED R3D SDK **9.2.1**；Nikon ZR R3D NE 6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03 / 0 音频通道 |
+| `red-info --in` | 元数据正确；插件 `available=true` |
+| half 解码 | 3024×1701；约 **3.8 s/帧**（含 SDK 初始化 + 30 MB PNG） |
+| full 6K 解码 | 6048×3402；约 **14 s/帧**（含 100 MB PNG） |
+| sRGB / Log3G10 | 两种输出都正常；Log3G10 经 OCIO 显示变换颜色正常 |
+| 胶片 | `lut bake --ocio-input "Log3G10 REDWideGamutRGB"` + Vision3 250D + 2383 → 成片正常 |
+| 序列 | `red-decode --out-dir` 3 帧 + `lut apply --in-dir` 正常；`red-to-prores` 出 3 帧 ProRes 422 HQ（3024×1701，无音频） |
+| `ctest` | **11/11**（官方构建无插件，`test_red` 走 stub 分支） |
+| 回归 | `verify-m1` 88.07 dB；`stocks selftest` 正常 |
+
+### 五、怎么用
+
+```powershell
+$env:SR_REDSDK_ROOT = "X:\agent\footage\R3DSDKv9_2_1"
+.\scripts\build-red.cmd -Check
+.\scripts\build-red.cmd
+
+.\build-red\spektra-roll-cli.exe red-info --in "X:\agent\footage\ZR_RED_Color_Science_Sunflower.R3D" --json
+.\build-red\spektra-roll-cli.exe red-decode --in "X:\agent\footage\ZR_RED_Color_Science_Sunflower.R3D" `
+  --frame 0 --scale half --format log3g10 --out out\red-log3g10.png
+.\build-red\spektra-roll-cli.exe lut bake --ocio-config data\ocio\studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio `
+  --ocio-input "Log3G10 REDWideGamutRGB" --film data\profiles\kodak_vision3_250d.json `
+  --paper data\profiles\kodak_2383.json --scan print --exposure 0.7 --out out\red-vision3-2383.cube
+.\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
+  --in out\red-log3g10.png --out out\red-graded.png
+```
+
+双击：`scripts\demo-red.cmd`。
+
+### 六、未完成的待办
+
+- [ ] `video --in clip.R3D` / UI 预览/渲染直连（帧源抽象、音频、timecode）
+- [ ] GPU 解码（CUDA/OpenCL/Metal）、并行解码
+- [ ] 印片机/扫描仪控制、空间物理模型、光谱 GPU 的 OCIO
 
 ---
 

@@ -93,24 +93,28 @@ need the library. `data/ocio/` ships the ACES 2.0 studio config (Apache-2.0).
 `ocio-info --json` prints the same information for the Qt UI (D063), which lists
 the config's colour spaces in the OCIO section instead of linking the library.
 
-### RED R3D / R3D NE (optional, BYO SDK, D068)
+### RED R3D / R3D NE (optional, BYO SDK, D069)
 
 The RED R3D SDK is **not bundled** and official builds never include it. If you
-have accepted RED's EULA and have your own SDK, build a local copy:
+have accepted RED's EULA and have your own SDK, build the local `spektra-red`
+plugin with MSVC:
 
 ```powershell
 $env:SR_REDSDK_ROOT = "D:\RED_SDK"
 .\scripts\build-red.cmd -Check
 .\scripts\build-red.cmd
 .\build-red\spektra-roll-cli.exe red-info --in clip.R3D --json
+.\build-red\spektra-roll-cli.exe red-decode --in clip.R3D --frame 0 --scale half \
+    --format srgb --out frame.png
 ```
 
-This first delivery is a **metadata-only skeleton**: it initializes the SDK and
-reads size/frames/fps/audio/timecode, but does not decode frames yet. Until the
-frame path lands, export ProRes 4444 from REDCINE-X with REDWideGamutRGB +
-Log3G10 and use `lut bake --ocio-input "Log3G10 REDWideGamutRGB"` + `video --lut`.
-Official `build/` keeps the stub; `.R3D` files are recognized and receive a
-clear next-step message. See `docs/red-sdk.md`.
+`red-decode` writes 16-bit frames in **Log3G10 + REDWideGamutRGB** (default),
+linear Rec.709, or sRGB, at full/half/quarter scale. Bake a LUT with
+`--ocio-input "Log3G10 REDWideGamutRGB"` and grade the log frames with
+`lut apply`, or a whole decoded sequence with `lut apply --in-dir`. Direct
+`video` / UI preview integration is the next delivery. Official `build/` keeps
+the loader + no-plugin message; the SDK, its headers, and any RED-linked
+binaries stay out of the repository. See `docs/red-sdk.md`.
 
 ## Desktop UI (Qt 6)
 
@@ -338,8 +342,8 @@ src/core/       C++20 library, no UI, no I/O policy
                 (M2, D060/D061)
   ocio          optional OpenColorIO bridge: config, input and display
                 processors, linear Rec.709 contract (D062)
-  red           optional BYO-SDK RED R3D metadata reader; stub by default
-                (D068)
+  red           optional BYO-SDK RED R3D plugin loader (metadata + frame
+                decode); no plugin by default (D069)
 src/cli/        headless entry point (render-farm friendly later)
 tests/          assert-based tests, no framework; frozen reference LUT
 data/profiles/  upstream CC BY-SA 4.0 film / paper data + NOTICE
@@ -368,10 +372,11 @@ docs/           architecture and licensing notes
   Kodachrome) scan directly with `--scan slide` (D067); that path has no
   upstream parity because the scanner-style black/white balance is our own.
   The cinema print path has no pre-flash or Y/M dichroic shifts yet.
-- RED R3D / R3D NE is a **BYO-SDK metadata skeleton** (D068). Official builds
-  do not include the RED SDK and cannot decode R3D frames; the optional local
-  `build-red` can initialize the SDK and read clip metadata only. Use
-  REDCINE-X to export ProRes 4444 (RWG/Log3G10) for rendering.
+- RED R3D / R3D NE is a **BYO-SDK plugin** (D069). Official builds do not
+  include the RED SDK. A local `build-red` can decode frames via
+  `red-decode` (CPU; Log3G10/RWG, linear or sRGB; full/half/quarter), but
+  `video` and the Qt preview do not read `.R3D` directly yet. Audio and
+  timecode are reported by the SDK but not muxed; the sample clip has no audio.
 - No video file I/O in the library yet: `video` drives `ffmpeg` as a child process
   (D022), so a clip can be graded, trimmed, rendered as ProRes or HDR, and
   resumed from completed segments in one command.

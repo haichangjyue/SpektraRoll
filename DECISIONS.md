@@ -1265,6 +1265,34 @@
 
 ---
 
+## D069 · RED R3D / R3D NE：本地 MSVC 插件 + 帧解码
+
+- **日期**：2026-11-04
+- **背景**：用户提供了 Nikon ZR 的 R3D NE 样片（`ZR_RED_Color_Science_Sunflower.R3D`，6048×3402 / 249 帧 / 23.976）和 RED R3D SDK 9.2.1。D068 的静态链接骨架在 Windows 上不可用：SDK 只提供 MSVC 静态库（`R3DSDK-2017MD.lib`），主程序是 MinGW，C++ ABI 不兼容；直接把闭源 SDK 链接进 GPL 二进制也不合适。
+- **架构**：
+  - 核心 CLI（GPL、MinGW）只编译 `red_plugin.cpp` loader；运行时 `LoadLibrary`/`dlopen` 找 `spektra-red.dll`（或 `SPEKTRA_RED_PLUGIN`）。
+  - `src/red-plugin/red_plugin_api.h` 是纯 C ABI；`src/red-plugin/red_plugin_msvc.cpp` 是唯一包含 RED 头文件的文件，由 MSVC 编译成插件。
+  - 插件返回 16-bit interleaved RGB；默认 `Primary_Development_Only` → **REDWideGamutRGB + Log3G10**，也可 `Full_Graded` → Linear Rec.709 / sRGB。
+  - 解码后端是 **CPU**（`OPTION_RED_NONE`）；GPU 解码未接。
+  - `scripts/build-red.ps1` 用 MSVC 编插件，复制普通 CLI 和 SDK Redistributable DLL 到 `build-red\`（git 忽略）；官方 `build\`/CI 不受影响。
+  - CLI 新增 `red-decode`：单帧 / `--out-dir` 序列，`--format log3g10|linear|srgb`，`--scale full|half|quarter`，PNG/EXR。
+  - `scripts/red-to-prores.ps1`：`red-decode` → `lut apply --in-dir` → ffmpeg ProRes 的短片桥；无音频。
+  - `red-info` 现在能报告插件路径、SDK 版本和 R3D 元数据；`.r3d` 的 `video`/`preview` 仍被拦截并指向 `red-decode`。
+- **验证**：
+  - 本机加载 SDK 9.2.1：`red-info --in` 返回 6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03 / 音频 0 通道。
+  - `red-decode --scale half --format srgb` 出 3024×1701 图，颜色正常；`log3g10` 经 OCIO 显示变换正常。
+  - `lut bake --ocio-input "Log3G10 REDWideGamutRGB"` + `lut apply` 出 Vision3 250D + 2383 成片；`demo-red.cmd` 正常。
+  - `red-to-prores` 出 3 帧 ProRes 422 HQ（3024×1701，~23.976 fps，无音频）。
+  - 性能：half 约 **3.8 s/帧**（含 SDK 初始化 + 30 MB PNG），full 6K 约 **14 s/帧**（含 100 MB PNG）。
+  - `ctest` **11/11**；官方构建（无插件）`red-info` 仍是 `built=false`，CI 断言改为“plugin not found”。
+  - 用假 `R3DSDK.h` 做过 `-Wall -Wextra -Wpedantic` 检查；真实 SDK 用 MSVC 完整编译并实际解码通过。
+- **后果**：
+  - R3D NE 从“只读元数据”升级为“可解码帧”；用户可以用 `red-decode` + `lut apply` 完成整段序列的胶片模拟。
+  - 还没做：`video --in clip.R3D` 直读、音频/timecode 封装、UI 预览/渲染直连、GPU 解码、并行解码。
+  - 官方包仍然不带 RED 支持；`build-red\` 只限本地自用，不能分发 SDK/插件。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
