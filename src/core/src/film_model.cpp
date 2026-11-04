@@ -374,6 +374,36 @@ bool FilmModel::configure(const Profile& film, const Profile& paper,
         }
     }
 
+    // D067: reversal (slide) direct scan. A developed transparency already
+    // carries a positive image, so its own dye densities are scanned directly
+    // (base density included) and balanced between "clear base" and "maximum
+    // dye" — the scanner's white/black correction. Mid-grey gets the same
+    // per-channel neutralisation as the negative scan.
+    {
+        const double noDye[3] = {0.0, 0.0, 0.0};
+        const double maxDye[3] = {filmMaxCmy_[0], filmMaxCmy_[1], filmMaxCmy_[2]};
+        scanDye(noDye, true, positiveWhite_);
+        scanDye(maxDye, true, positiveBlack_);
+
+        const double greyLinear[3] = {0.184, 0.184, 0.184};
+        double cmyGrey[3];
+        filmCmy(greyLinear, cmyGrey);
+        double rgbGrey[3];
+        scanDye(cmyGrey, true, rgbGrey);
+        for (int c = 0; c < 3; ++c) {
+            const double span = positiveWhite_[c] - positiveBlack_[c];
+            rgbGrey[c] = span > 1e-9 ? (rgbGrey[c] - positiveBlack_[c]) / span : 0.0;
+        }
+        const double greyLuma =
+            0.2126 * rgbGrey[0] + 0.7152 * rgbGrey[1] + 0.0722 * rgbGrey[2];
+        positiveGreyLuma_ = std::min(1.0, std::max(1e-4, greyLuma));
+        for (int c = 0; c < 3; ++c) {
+            const double value = std::min(1.0, std::max(1e-4, rgbGrey[c]));
+            const double target = std::min(1.0, std::max(1e-4, greyLuma));
+            positiveGamma_[c] = std::log(target) / std::log(value);
+        }
+    }
+
     // Print exposure factor: expose mid-grey through the print illuminant and
     // normalise the geometric mean of the paper's raw response to 1.
     double midgrayDensity[kN];
@@ -517,7 +547,11 @@ bool FilmModel::gpuData(GpuFilmData& out) const {
         out.negativeWhite[c] = static_cast<float>(negativeWhite_[c]);
         out.negativeBlack[c] = static_cast<float>(negativeBlack_[c]);
         out.negativeGamma[c] = static_cast<float>(negativeGamma_[c]);
+        out.positiveWhite[c] = static_cast<float>(positiveWhite_[c]);
+        out.positiveBlack[c] = static_cast<float>(positiveBlack_[c]);
+        out.positiveGamma[c] = static_cast<float>(positiveGamma_[c]);
     }
+    out.positiveGreyLuma = static_cast<float>(positiveGreyLuma_);
     out.couplersActive = couplersActive_;
     out.filmIsPositive = filmIsPositive_;
     return true;
@@ -576,10 +610,11 @@ void FilmModel::filmCmy(const double linear[3], double cmy[3]) const {
     }
 }
 
-void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const {
+void FilmModel::scanDye(const double cmy[3], bool includeBase,
+                        double linearSrgb[3]) const {
     double xyz[3] = {0.0, 0.0, 0.0};
     for (int l = 0; l < kN; ++l) {
-        double density = 0.0;
+        double density = includeBase ? filmBaseDensity_[static_cast<size_t>(l)] : 0.0;
         for (int c = 0; c < 3; ++c) {
             density += cmy[c] * filmChannelDensity_[static_cast<size_t>(l)][static_cast<size_t>(c)];
         }
@@ -601,9 +636,47 @@ void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const
     }
 }
 
+void FilmModel::scanPositiveDye(const double cmy[3], double linearSrgb[3]) const {
+    // The negative scan removes the film base so the orange mask falls away;
+    // the slide scan keeps it because the base is part of the transparency.
+    scanDye(cmy, false, linearSrgb);
+}
+
 Rgb FilmModel::transformLinear(const double linear[3], const BakeOptions& options) const {
     double cmyFilm[3];
     filmCmy(linear, cmyFilm);
+
+    if (options.scan == ScanMode::Positive) {
+        // D067: a slide is already a positive image; scan its dyes as they are
+        // (with the film base), then apply the scanner's black/white balance.
+        double rgb[3];
+        scanDye(cmyFilm, true, rgb);
+        for (int c = 0; c < 3; ++c) {
+            const double span = positiveWhite_[c] - positiveBlack_[c];
+            rgb[c] = span > 1e-9 ? (rgb[c] - positiveBlack_[c]) / span : 0.0;
+        }
+        if (options.gamutCompress) {
+            const Rgb mapped = compressGamutOklch(Rgb{static_cast<float>(rgb[0]),
+                                                      static_cast<float>(rgb[1]),
+                                                      static_cast<float>(rgb[2])});
+            rgb[0] = mapped.r;
+            rgb[1] = mapped.g;
+            rgb[2] = mapped.b;
+        }
+        for (int c = 0; c < 3; ++c) {
+            const double clamped = std::min(1.0, std::max(0.0, rgb[c]));
+            rgb[c] = std::pow(clamped, positiveGamma_[c]);
+        }
+        if (options.contrast != 1.0) {
+            const double luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+            if (luma > 1e-9) {
+                const double scale =
+                    std::pow(luma / positiveGreyLuma_, options.contrast - 1.0);
+                for (int c = 0; c < 3; ++c) rgb[c] = std::min(1.0, rgb[c] * scale);
+            }
+        }
+        return encodeOutput(rgb, options);
+    }
 
     if (options.scan == ScanMode::Negative) {
         const double positive[3] = {filmMaxCmy_[0] - cmyFilm[0], filmMaxCmy_[1] - cmyFilm[1],

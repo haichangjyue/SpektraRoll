@@ -126,7 +126,7 @@ void printUsage() {
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
         "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
         "                            [--input srgb|apple-log|<camera log>] [--exposure EV]\n"
-        "                            [--scan print|negative] [--contrast 1.15]\n"
+        "                            [--scan print|negative|slide] [--contrast 1.15]\n"
         "                            [--gamut oklch|off] [--couplers on|off]\n"
         "                            [--hdr pq|hlg] [--peak 1000]\n"
         "                            [--threads N] [--title <text>]\n"
@@ -157,8 +157,13 @@ void printUsage() {
         "      needs no OCIO at all.\n"
         "      --scan negative scans the negative itself (inverted against the film\n"
         "      base, no paper): more highlight/shadow latitude, flatter image.\n"
+        "      --scan slide scans a reversal (positive) film directly: the developed\n"
+        "      dyes already form the positive image, so no paper and no inversion;\n"
+        "      the scan is balanced between clear base and maximum dye. Selecting a\n"
+        "      positive stock (Ektachrome / Velvia / Provia / Kodachrome) without\n"
+        "      --scan defaults to this mode (D067).\n"
         "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
-        "      pass 1.0 for the flat film curve only).\n"
+        "      slide scans to 1.0; pass 1.0 for the flat film curve only).\n"
         "      --gamut oklch maps out-of-gamut colour back into sRGB by reducing\n"
         "      OkLCh chroma; negative scans default to it, print keeps it off.\n"
         "      --couplers on adds DIR interlayer inhibition (Apple Log defaults\n"
@@ -557,14 +562,40 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
     recipe.options.exposureEv = args.getDouble("exposure", 0.0);
     recipe.options.threads = args.getInt("threads", 0);
 
+    // D067: a reversal stock cannot be printed onto negative paper. Default it
+    // to the direct slide scan, and reject the two nonsensical combinations
+    // instead of silently producing a negative-looking image.
+    const bool filmPositive = recipe.film.info.type == "positive";
     if (args.has("scan")) {
         const std::string mode = args.get("scan");
         if (mode == "negative" || mode == "film") {
             recipe.options.scan = sr::ScanMode::Negative;
+        } else if (mode == "slide" || mode == "positive" || mode == "reversal") {
+            recipe.options.scan = sr::ScanMode::Positive;
         } else if (mode != "print") {
-            error = "--scan expects 'print' or 'negative'";
+            error = "--scan expects 'print', 'negative' or 'slide'";
             return false;
         }
+    } else if (filmPositive) {
+        recipe.options.scan = sr::ScanMode::Positive;
+    }
+
+    if (filmPositive && recipe.options.scan == sr::ScanMode::Print) {
+        error = "'" + recipe.film.info.name +
+                "' is a reversal (positive) stock; use --scan slide, or omit "
+                "--scan to scan it directly";
+        return false;
+    }
+    if (filmPositive && recipe.options.scan == sr::ScanMode::Negative) {
+        error = "'" + recipe.film.info.name +
+                "' is a reversal (positive) stock; --scan negative is for "
+                "colour negative films, use --scan slide";
+        return false;
+    }
+    if (!filmPositive && recipe.options.scan == sr::ScanMode::Positive) {
+        error = "--scan slide expects a positive (reversal) film profile; '" +
+                recipe.film.info.name + "' is " + recipe.film.info.type;
+        return false;
     }
     recipe.options.contrast = args.getDouble(
         "contrast", recipe.options.scan == sr::ScanMode::Negative ? 1.15 : 1.0);
@@ -729,7 +760,10 @@ int cmdLutBake(const Args& args) {
     if (options.exposureEv != 0.0) std::printf(" (%+.2f EV)", options.exposureEv);
     std::printf("\n");
     std::printf("scan:              %s\n",
-                options.scan == sr::ScanMode::Negative ? "negative (no paper)" : "print");
+                options.scan == sr::ScanMode::Negative
+                    ? "negative (no paper)"
+                    : (options.scan == sr::ScanMode::Positive ? "slide (direct positive, no paper)"
+                                                              : "print"));
     if (options.contrast != 1.0) std::printf("contrast:          %.2f\n", options.contrast);
     std::printf("gamut:             %s\n", options.gamutCompress ? "oklch" : "off");
     std::printf("couplers:          %s\n", recipe.couplers ? "on" : "off");

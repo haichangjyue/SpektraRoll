@@ -151,6 +151,27 @@ jobs:
           "$exe" lut info --lut cine-500t.cube
           ls -l cine-500t.cube cine-250d.cube
 
+      - name: Reversal direct scan (D067)
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          for film in kodak_ektachrome_100 fujifilm_velvia_100 \
+                      fujifilm_provia_100f kodak_kodachrome_64; do
+            "$exe" lut bake --film "data/profiles/$film.json" --scan slide \
+              --out "slide-$film.cube"
+          done
+          # A positive stock defaults to the direct scan when --scan is omitted.
+          "$exe" lut bake --film data/profiles/kodak_ektachrome_100.json --out slide-auto.cube
+          "$exe" lut info --lut slide-kodak_ektachrome_100.cube
+          # The nonsensical combinations must be rejected, not silently rendered.
+          if "$exe" lut bake --film data/profiles/kodak_ektachrome_100.json \
+               --scan print --out slide-bad.cube; then exit 1; fi
+          if "$exe" lut bake --film data/profiles/kodak_portra_400.json \
+               --scan slide --out slide-bad.cube; then exit 1; fi
+          ls -l slide-*.cube
+
       - name: Bake the M1 film LUT and compare with the frozen reference
         shell: bash
         run: |

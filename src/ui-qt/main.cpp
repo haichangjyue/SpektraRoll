@@ -578,8 +578,13 @@ public:
         const bool print2393 = has(paperCombo_, QStringLiteral("2393"));
         const bool portra = has(filmCombo_, QStringLiteral("Portra 400")) &&
                             has(paperCombo_, QStringLiteral("Portra Endura"));
-        const bool ok = vision3 && verita && print2383 && print2393 && portra;
-        return QStringLiteral("%1 films=%2 papers=%3 vision3=%4 verita=%5 print=%6/%7 portra=%8")
+        const bool slide = has(filmCombo_, QStringLiteral("Ektachrome")) &&
+                           has(filmCombo_, QStringLiteral("Velvia")) &&
+                           has(filmCombo_, QStringLiteral("Provia")) &&
+                           has(filmCombo_, QStringLiteral("Kodachrome"));
+        const bool ok = vision3 && verita && print2383 && print2393 && portra && slide;
+        return QStringLiteral(
+                   "%1 films=%2 papers=%3 vision3=%4 verita=%5 print=%6/%7 portra=%8 slide=%9")
             .arg(ok ? QStringLiteral("ok") : QStringLiteral("error"))
             .arg(filmCombo_->count())
             .arg(paperCombo_->count())
@@ -587,7 +592,8 @@ public:
             .arg(verita)
             .arg(print2383)
             .arg(print2393)
-            .arg(portra);
+            .arg(portra)
+            .arg(slide);
     }
 
     // `--ocio-selftest` (D063): read the bundled config through the CLI, pick
@@ -787,16 +793,16 @@ private:
         return QFileInfo::exists(known) ? known : QString();
     }
 
-    // Colour negative stocks and second mediums the engine supports (D065):
-    // D55 still stocks plus T/D55 Vision3, printed on a paper or on a cinema
-    // print film (2383/2393). Slide films (positive) still need the direct-scan
-    // path, so they stay out of the catalogue.
+    // Film stocks and second mediums the engine supports (D065/D067): D55/T
+    // negative stocks printed on a paper or a cinema print film (2383/2393),
+    // plus the reversal stocks that are scanned directly (D067).
     void populateStocks() {
         struct Stock {
             QString path;
             QString name;
             QString target;
             bool printFilm = false;
+            bool positive = false;
         };
         QVector<Stock> films;
         QVector<Stock> papers;
@@ -819,14 +825,15 @@ private:
                 info.value(QStringLiteral("reference_illuminant")).toString();
             Stock stock{entry.absoluteFilePath(),
                         info.value(QStringLiteral("name")).toString(entry.completeBaseName()),
-                        info.value(QStringLiteral("target_print")).toString(), false};
-            const bool filmingNegative =
+                        info.value(QStringLiteral("target_print")).toString(), false, false};
+            const bool filming =
                 support == QStringLiteral("film") && stage == QStringLiteral("filming") &&
-                type == QStringLiteral("negative") &&
+                (type == QStringLiteral("negative") || type == QStringLiteral("positive")) &&
                 (illuminant == QStringLiteral("D55") || illuminant == QStringLiteral("T"));
             const bool printFilm =
                 support == QStringLiteral("film") && stage == QStringLiteral("printing");
-            if (filmingNegative) {
+            if (filming) {
+                stock.positive = type == QStringLiteral("positive");
                 films.append(stock);
             } else if (support == QStringLiteral("paper") || printFilm) {
                 stock.printFilm = printFilm;
@@ -847,8 +854,12 @@ private:
                 }
             }
             if (!targetAvailable) continue;
-            filmCombo_->addItem(stock.name, stock.path);
+            filmCombo_->addItem(
+                stock.positive ? stock.name + QStringLiteral("（反转片）") : stock.name,
+                stock.path);
             filmCombo_->setItemData(filmCombo_->count() - 1, stock.target, Qt::UserRole + 1);
+            filmCombo_->setItemData(filmCombo_->count() - 1, stock.positive,
+                                    Qt::UserRole + 2);
         }
         for (const Stock& stock : papers) {
             paperCombo_->addItem(
@@ -1347,7 +1358,10 @@ private:
 
         scan_ = new QComboBox;
         scan_->addItem(QStringLiteral("扫描负片（推荐）"), QStringLiteral("negative"));
+        scan_->addItem(QStringLiteral("扫描反转片（直扫）"), QStringLiteral("slide"));
         scan_->addItem(QStringLiteral("印片"), QStringLiteral("print"));
+        scan_->setToolTip(
+            QStringLiteral("负片：倒相扫描；反转片：直扫已显影的正像；印片：负片印到相纸/电影印片。"));
         auto* contrastRow = new SliderRow(QStringLiteral("反差"), 0.5, 2.0, 0.05, 2, 1.15);
         contrast_ = contrastRow->spin();
         gamut_ = new QCheckBox(QStringLiteral("输出色域压缩（OkLCh）"));
@@ -1371,7 +1385,8 @@ private:
 
         auto* negativeSection = new CollapsibleSection(QStringLiteral("底片"));
         filmCombo_ = new QComboBox;
-        filmCombo_->setToolTip(QStringLiteral("彩色负片（D55）；反转片和 T 型灯光片尚未接通"));
+        filmCombo_->setToolTip(
+            QStringLiteral("彩色负片、Vision3 电影负片和反转片（Ektachrome/Velvia/Provia/Kodachrome）。"));
         negativeSection->addWidget(labeledRow(QStringLiteral("胶片"), filmCombo_));
         negativeSection->addWidget(couplers_);
         negativeSection->addWidget(noteLabel(
@@ -1403,7 +1418,8 @@ private:
 
         auto* printSection = new CollapsibleSection(QStringLiteral("印片与扫描"));
         paperCombo_ = new QComboBox;
-        paperCombo_->setToolTip(QStringLiteral("印片相纸；负片扫描也用它做密度参考"));
+        paperCombo_->setToolTip(
+            QStringLiteral("印片相纸或电影印片；反转片直扫不需要印片，选择会自动停用。"));
         printSection->addWidget(labeledRow(QStringLiteral("相纸"), paperCombo_));
         printSection->addWidget(labeledRow(QStringLiteral("扫描方式"), scan_));
         printSection->addWidget(contrastRow);
@@ -1574,9 +1590,27 @@ private:
             originalTime_ = -1.0;
             markLookChanged();
         });
+        // D067: a reversal stock is scanned directly, so the paper controls are
+        // irrelevant and the scan mode follows the stock type.
+        const auto updateScanUi = [this]() {
+            const bool slide = scan_->currentData().toString() == QStringLiteral("slide");
+            if (paperCombo_ != nullptr) paperCombo_->setEnabled(!slide);
+        };
         connect(scan_, &QComboBox::currentIndexChanged, this,
-                [this](int) { markLookChanged(); });
-        connect(filmCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+                [this, updateScanUi](int) {
+                    const bool positive = filmCombo_->currentData(Qt::UserRole + 2).toBool();
+                    const QString mode = scan_->currentData().toString();
+                    if (positive && mode != QStringLiteral("slide")) {
+                        const QSignalBlocker blocker(scan_);
+                        selectData(scan_, QStringLiteral("slide"));
+                    } else if (!positive && mode == QStringLiteral("slide")) {
+                        const QSignalBlocker blocker(scan_);
+                        selectData(scan_, QStringLiteral("negative"));
+                    }
+                    updateScanUi();
+                    markLookChanged();
+                });
+        connect(filmCombo_, &QComboBox::currentIndexChanged, this, [this, updateScanUi](int) {
             const QString target = filmCombo_->currentData(Qt::UserRole + 1).toString();
             if (!target.isEmpty()) {
                 for (int i = 0; i < paperCombo_->count(); ++i) {
@@ -1588,6 +1622,16 @@ private:
                     }
                 }
             }
+            const bool positive = filmCombo_->currentData(Qt::UserRole + 2).toBool();
+            const bool slide = scan_->currentData().toString() == QStringLiteral("slide");
+            if (positive && !slide) {
+                selectData(scan_, QStringLiteral("slide"));
+                if (std::abs(contrast_->value() - 1.15) < 1e-6) contrast_->setValue(1.0);
+            } else if (!positive && slide) {
+                selectData(scan_, QStringLiteral("negative"));
+                if (std::abs(contrast_->value() - 1.0) < 1e-6) contrast_->setValue(1.15);
+            }
+            updateScanUi();
             markLookChanged();
         });
         connect(paperCombo_, &QComboBox::currentIndexChanged, this,

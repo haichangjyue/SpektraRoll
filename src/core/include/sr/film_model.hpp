@@ -20,7 +20,9 @@ namespace sr {
 //   Print     negative -> paper -> scan, the M1 chain (a printed photograph)
 //   Negative  scan the negative itself, inverted and balanced against the
 //             film base: much more latitude, flatter look, meant for grading
-enum class ScanMode { Print, Negative };
+//   Positive  scan a reversal (slide) film directly: the developed dyes already
+//             form the positive image, so there is no inversion and no paper
+enum class ScanMode { Print, Negative, Positive };
 
 // Output transfer for HDR delivery (D029). PQ takes absolute luminance with
 // `peakNits` as the value of diffuse white; HLG treats 1.0 as peak signal.
@@ -97,6 +99,12 @@ struct GpuFilmData {
     float negativeWhite[3]{};
     float negativeBlack[3]{};
     float negativeGamma[3]{};
+    // D067: the slide scan keeps the film base (a transparency is viewed as
+    // developed) and is balanced between its own white and black points.
+    float positiveWhite[3]{};
+    float positiveBlack[3]{};
+    float positiveGamma[3]{};
+    float positiveGreyLuma = 0.18f;
     bool couplersActive = false;
     bool filmIsPositive = false;
 };
@@ -148,6 +156,7 @@ private:
     Rgb transformLinear(const double linear[3], const BakeOptions& options) const;
     Rgb encodeOutput(const double linear[3], const BakeOptions& options) const;
     void filmCmy(const double linear[3], double cmy[3]) const;
+    void scanDye(const double cmy[3], bool includeBase, double linearSrgb[3]) const;
     void scanPositiveDye(const double cmy[3], double linearSrgb[3]) const;
     void filmRaw(const double rgb[3], double raw[3]) const;
     void simpleRgbToDensitySpectral(double value, double density[81]) const;
@@ -208,6 +217,12 @@ private:
     double negativeGamma_[3] = {1.0, 1.0, 1.0};
     // Luminance of the scan's 18% grey, used as the contrast pivot.
     double negativeGreyLuma_ = 0.18;
+    // D067: reversal (slide) direct scan. The positive image is scanned with
+    // its base density, mapped between the white/black points of that scan.
+    double positiveWhite_[3] = {1.0, 1.0, 1.0};
+    double positiveBlack_[3] = {0.0, 0.0, 0.0};
+    double positiveGamma_[3] = {1.0, 1.0, 1.0};
+    double positiveGreyLuma_ = 0.18;
     std::array<double, 3> neutralFilters_{0.0, 0.0, 0.0};
 };
 

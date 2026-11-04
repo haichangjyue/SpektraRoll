@@ -215,6 +215,68 @@ int main() {
               std::fabs(daylightGrey.g - daylightGrey.b) < 0.01f,
           "250D / 2393 mid-grey is neutral");
 
+    // D067: reversal (slide) direct scan. A positive stock is scanned through
+    // its own dyes; the scan is balanced between clear base (white) and maximum
+    // dye (black), then mid-grey is neutralised like the negative scan.
+    sr::Profile slideFilm;
+    check(sr::loadProfile(root + "/data/profiles/kodak_ektachrome_100.json", slideFilm, error),
+          "Ektachrome 100 profile loads");
+    check(slideFilm.info.type == "positive", "Ektachrome is a positive stock");
+    sr::Triple slideFilters{0.0, 0.0, 0.0};
+    check(sr::loadNeutralFilters(root + "/data/profiles/neutral_print_filters.json",
+                                 paper.info.stock, slideFilm.info.stock, "TH-KG3", slideFilters,
+                                 error),
+          "Ektachrome neutral filters load");
+    sr::FilmModel slide;
+    check(slide.configure(slideFilm, paper, slideFilters, error), "slide chain configures");
+
+    sr::BakeOptions slideOptions;
+    slideOptions.scan = sr::ScanMode::Positive;
+    slideOptions.gamutCompress = true;
+    checkRgb(slide.transformFrom(slideOptions, {0.0f, 0.0f, 0.0f}), {0.0f, 0.0f, 0.0f}, 1e-3,
+             "slide scan black");
+    const sr::Rgb slideWhite = slide.transformFrom(slideOptions, {1.0f, 1.0f, 1.0f});
+    check(slideWhite.r > 0.9f && slideWhite.g > 0.9f && slideWhite.b > 0.9f,
+          "slide scan reaches white");
+    const sr::Rgb slideGrey =
+        slide.transformFrom(slideOptions, {static_cast<float>(sr::srgbEncode(0.18)),
+                                           static_cast<float>(sr::srgbEncode(0.18)),
+                                           static_cast<float>(sr::srgbEncode(0.18))});
+    check(std::fabs(slideGrey.r - slideGrey.g) < 0.02f &&
+              std::fabs(slideGrey.g - slideGrey.b) < 0.02f,
+          "slide scan grey is neutral");
+    float previousSlide = -1.0f;
+    for (float code = 0.0f; code <= 0.9f; code += 0.05f) {
+        const float value = slide.transformFrom(slideOptions, {code, code, code}).g;
+        check(value >= previousSlide, "slide scan is monotonic");
+        previousSlide = value;
+    }
+    // Frozen anchors from the same arithmetic in tools/parity (float64).
+    checkRgb(slide.transformFrom(slideOptions, {0.5f, 0.5f, 0.5f}),
+             {0.56516f, 0.56440f, 0.56354f}, 5e-4, "slide probe 0.5");
+    checkRgb(slide.transformFrom(slideOptions, {1.0f, 1.0f, 1.0f}),
+             {0.92891f, 0.93354f, 0.92488f}, 5e-4, "slide probe 1.0");
+
+    // The other three reversal stocks take the same path.
+    const char* reversalStocks[] = {"kodak_kodachrome_64", "fujifilm_velvia_100",
+                                    "fujifilm_provia_100f"};
+    for (const char* stock : reversalStocks) {
+        sr::Profile profile;
+        check(sr::loadProfile(root + "/data/profiles/" + stock + ".json", profile, error),
+              "reversal profile loads");
+        check(profile.info.type == "positive", "reversal stock is positive");
+        sr::Triple filters{0.0, 0.0, 0.0};
+        check(sr::loadNeutralFilters(root + "/data/profiles/neutral_print_filters.json",
+                                     paper.info.stock, profile.info.stock, "TH-KG3", filters,
+                                     error),
+              "reversal neutral filters load");
+        sr::FilmModel model;
+        check(model.configure(profile, paper, filters, error), "reversal chain configures");
+        const sr::Rgb white = model.transformFrom(slideOptions, {1.0f, 1.0f, 1.0f});
+        check(white.r > 0.85f && white.g > 0.85f && white.b > 0.85f,
+              "reversal scan reaches white");
+    }
+
     if (g_failures == 0) {
         std::printf("all checks passed\n");
         return 0;

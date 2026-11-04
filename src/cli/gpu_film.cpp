@@ -56,6 +56,10 @@ cbuffer Params : register(b0) {
     float4 negativeWhite;
     float4 negativeBlack;
     float4 negativeGamma;
+    // D067: reversal (slide) direct scan.
+    float4 positiveWhite;
+    float4 positiveBlack;
+    float4 positiveGamma;
     float filmAxisStart;
     float filmAxisStep;
     float paperAxisStart;
@@ -65,10 +69,11 @@ cbuffer Params : register(b0) {
     float scanNormalization;
     float printScanNormalization;
     float negativeGreyLuma;
+    float positiveGreyLuma;
     uint count;
     int couplersActive;
     int filmIsPositive;
-    int scanNegative;
+    int scanMode;
     int gamutCompress;
     int hdrMode;
     int inputMode;
@@ -76,12 +81,10 @@ cbuffer Params : register(b0) {
     float contrast;
     float peakNits;
     float strength;
-    // D065: keep the constant buffer a multiple of 16 bytes after adding
-    // printScanNormalization.
+    // Keep the constant buffer a multiple of 16 bytes (D065/D067).
     float pad1;
     float pad2;
     float pad3;
-    float pad4;
 };
 
 StructuredBuffer<float4> inputPixels : register(t0);
@@ -335,10 +338,11 @@ float3 filmCmy(float3 linRgb) {
                   sampleFilmCoupler(corrected.z, 2));
 }
 
-float3 scanPositive(float3 positive) {
+float3 scanDye(float3 cmy, int includeBase) {
     float3 xyz = float3(0, 0, 0);
     [loop] for (int l = 0; l < 81; ++l) {
-        float density = dot(filmDensity[l].xyz, positive);
+        float density = (includeBase != 0 ? filmBaseDensity[l].x : 0.0) +
+                        dot(filmDensity[l].xyz, cmy);
         // Same guard as the CPU reference: undefined density contributes no light.
         float light = (density != density) ? 0.0
                                            : exp2(-density * kLog2Of10) * viewingIlluminant[l].x;
@@ -477,9 +481,29 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     float3 cmyFilm = filmCmy(linRgb);
     float3 rgb;
-    if (scanNegative != 0) {
+    if (scanMode == 2) {
+        // D067: reversal direct scan — keep the base, then white/black balance.
+        rgb = scanDye(cmyFilm, 1);
+        float3 span = float3(positiveWhite.x - positiveBlack.x,
+                             positiveWhite.y - positiveBlack.y,
+                             positiveWhite.z - positiveBlack.z);
+        rgb = float3(span.x > 1e-9 ? (rgb.x - positiveBlack.x) / span.x : 0.0,
+                     span.y > 1e-9 ? (rgb.y - positiveBlack.y) / span.y : 0.0,
+                     span.z > 1e-9 ? (rgb.z - positiveBlack.z) / span.z : 0.0);
+        if (gamutCompress != 0) rgb = compressGamut(rgb);
+        for (int c = 0; c < 3; ++c) {
+            rgb[c] = pow(clamp(rgb[c], 0.0, 1.0), positiveGamma[c]);
+        }
+        if (contrast != 1.0) {
+            float luma = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+            if (luma > 1e-9) {
+                float scale = pow(luma / positiveGreyLuma, contrast - 1.0);
+                rgb = min(rgb * scale, 1.0);
+            }
+        }
+    } else if (scanMode == 1) {
         float3 positive = filmMaxCmy.xyz - cmyFilm;
-        rgb = scanPositive(positive);
+        rgb = scanDye(positive, 0);
         for (int c = 0; c < 3; ++c) {
             float span = negativeWhite[c] - negativeBlack[c];
             rgb[c] = span > 1e-9 ? (rgb[c] - negativeBlack[c]) / span : 0.0;
@@ -548,6 +572,9 @@ struct GpuFilm::Impl {
         float negativeWhite[4];
         float negativeBlack[4];
         float negativeGamma[4];
+        float positiveWhite[4];
+        float positiveBlack[4];
+        float positiveGamma[4];
         float filmAxisStart;
         float filmAxisStep;
         float paperAxisStart;
@@ -557,10 +584,11 @@ struct GpuFilm::Impl {
         float scanNormalization;
         float printScanNormalization;
         float negativeGreyLuma;
+        float positiveGreyLuma;
         unsigned int count;
         int couplersActive;
         int filmIsPositive;
-        int scanNegative;
+        int scanMode;
         int gamutCompress;
         int hdrMode;
         int inputMode;
@@ -571,8 +599,9 @@ struct GpuFilm::Impl {
         float pad1;
         float pad2;
         float pad3;
-        float pad4;
     } params;
+    static_assert(sizeof(Params) % 16 == 0,
+                  "D3D11 constant buffers must be a multiple of 16 bytes");
 
 #endif
 
@@ -683,6 +712,9 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
         p.negativeWhite[r] = data.negativeWhite[r];
         p.negativeBlack[r] = data.negativeBlack[r];
         p.negativeGamma[r] = data.negativeGamma[r];
+        p.positiveWhite[r] = data.positiveWhite[r];
+        p.positiveBlack[r] = data.positiveBlack[r];
+        p.positiveGamma[r] = data.positiveGamma[r];
     }
     p.filmAxisStart = data.filmAxisStart;
     p.filmAxisStep = data.filmAxisStep;
@@ -693,9 +725,10 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
     p.scanNormalization = data.scanNormalization;
     p.printScanNormalization = data.printScanNormalization;
     p.negativeGreyLuma = data.negativeGreyLuma;
+    p.positiveGreyLuma = data.positiveGreyLuma;
     p.couplersActive = data.couplersActive ? 1 : 0;
     p.filmIsPositive = data.filmIsPositive ? 1 : 0;
-    p.scanNegative = options.scan == ScanMode::Negative ? 1 : 0;
+    p.scanMode = static_cast<int>(options.scan);
     p.gamutCompress = options.gamutCompress ? 1 : 0;
     p.hdrMode = options.hdr == HdrMode::Pq ? 1 : (options.hdr == HdrMode::Hlg ? 2 : 0);
     p.inputMode = static_cast<int>(options.input);

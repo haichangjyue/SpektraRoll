@@ -240,6 +240,30 @@ int main() {
     runCase(cineModel, sr::BakeOptions{}, "vision3 500T / 2383 / print", tolerance);
     runCase(cineModel, slog3, "vision3 500T / 2383 / s-log3 neg", tolerance);
 
+    // D067: reversal direct scan crosses the new white/black/gamma fields and
+    // the scan-mode branch. Couplers on exercises the positive silver model.
+    sr::Profile slideFilm;
+    std::array<double, 3> slideFilters{};
+    if (!sr::loadProfile(root + "/data/profiles/kodak_ektachrome_100.json", slideFilm, error) ||
+        !sr::loadNeutralFilters(root + "/data/profiles/neutral_print_filters.json",
+                                paper.info.stock, slideFilm.info.stock, "TH-KG3",
+                                slideFilters, error)) {
+        std::fprintf(stderr, "FAIL: slide profile load: %s\n", error.c_str());
+        return 1;
+    }
+    sr::FilmModelOptions slideCouplers;
+    slideCouplers.couplers = true;
+    sr::FilmModel slideModel;
+    if (!slideModel.configure(slideFilm, paper, slideFilters, error, slideCouplers)) {
+        std::fprintf(stderr, "FAIL: slide configure: %s\n", error.c_str());
+        return 1;
+    }
+    sr::BakeOptions slide = slog3;
+    slide.scan = sr::ScanMode::Positive;
+    slide.contrast = 1.0;
+    slide.gamutCompress = true;
+    runCase(slideModel, slide, "ektachrome / slide +gamut", tolerance);
+
     if (g_failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;
