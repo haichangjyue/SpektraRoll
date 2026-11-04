@@ -33,6 +33,7 @@ final class AppState: ObservableObject {
     @Published var assets: [MediaAsset] = []
     @Published var selectedAssetID: MediaAsset.ID?
     @Published var settings = LookSettings()
+    @Published var inspectorTab: InspectorTab = .info
     @Published var importDraft: ImportDraft?
 
     @Published var statusMessage = "正在连接引擎…"
