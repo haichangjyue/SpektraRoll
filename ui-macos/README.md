@@ -17,6 +17,9 @@ D073 的 macOS 壳。它不是第二套引擎：所有颜色、胶片、渲染�
 # 一次完成：编 CLI -> 编 SwiftUI -> 组装 .app -> ad-hoc 签名 -> 打开
 scripts/build-macos-ui.sh
 
+# 或者双击
+scripts/build-macos-ui.command
+
 # 只编 SwiftUI（CLI 用已有 build/）
 scripts/build-macos-ui.sh --skip-cli
 
