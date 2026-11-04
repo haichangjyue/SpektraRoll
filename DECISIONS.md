@@ -1285,6 +1285,7 @@
   - `red-to-prores` 出 3 帧 ProRes 422 HQ（3024×1701，~23.976 fps，无音频）。
   - 性能：half 约 **3.8 s/帧**（含 SDK 初始化 + 30 MB PNG），full 6K 约 **14 s/帧**（含 100 MB PNG）。
   - `ctest` **11/11**；官方构建（无插件）`red-info` 仍是 `built=false`，CI 断言改为“plugin not found”。
+  - CI：run **116** Windows + macOS 双绿（真实解码只在有 SDK 的本机验证）。
   - 用假 `R3DSDK.h` 做过 `-Wall -Wextra -Wpedantic` 检查；真实 SDK 用 MSVC 完整编译并实际解码通过。
 - **后果**：
   - R3D NE 从“只读元数据”升级为“可解码帧”；用户可以用 `red-decode` + `lut apply` 完成整段序列的胶片模拟。

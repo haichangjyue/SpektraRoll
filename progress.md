@@ -50,7 +50,8 @@
 - 本机：SDK **9.2.1**，样片 6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03；half 约 **3.8 s/帧**，full 6K 约 **14 s/帧**（CPU，含 16-bit PNG 写盘）。
 - `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
 - 双击验收：`scripts\demo-red.cmd`。
-- 最新代码提交：`8c3f03b`（D069）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
+- CI：run **116** Windows + macOS 双绿（官方构建只有 loader，`red-info`/`red-decode` 断言插件缺失）。
+- 最新代码提交：`e99f673`（D069）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
 
 ### 关键决策
 
