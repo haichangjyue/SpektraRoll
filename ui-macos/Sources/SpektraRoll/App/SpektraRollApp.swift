@@ -3,19 +3,32 @@ import AppKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var timer: Timer?
+    private var attempts = 0
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            let allSpaces = ProcessInfo.processInfo.environment["SPEKTRA_ALL_SPACES"] == "1"
-            for window in NSApp.windows {
-                if allSpaces {
-                    window.collectionBehavior.insert(.canJoinAllSpaces)
-                }
+        guard ProcessInfo.processInfo.environment["SPEKTRA_ALL_SPACES"] == "1" else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            self.attempts += 1
+            let windows = NSApp.windows
+            NSLog("SpektraRoll debug: attempt %d, windows %d", self.attempts, windows.count)
+            for window in windows {
+                window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+                window.level = .floating
+                window.setFrame(NSRect(x: 80, y: 80, width: 1200, height: 780), display: true)
                 if window.isMiniaturized {
                     window.deminiaturize(nil)
                 }
-                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
             }
             NSApp.activate(ignoringOtherApps: true)
+            if self.attempts >= 20 {
+                timer.invalidate()
+            }
         }
     }
 }
