@@ -61,28 +61,34 @@ Write-Host " REDWideGamutRGB + Log3G10 -> Vision3 250D + 2383" -ForegroundColor 
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "1/4  解码第 $Frame 帧（可看的 sRGB）..." -ForegroundColor Cyan
+Write-Host "1/5  解码第 $Frame 帧（可看的 sRGB）..." -ForegroundColor Cyan
 & $exe red-decode --in $Footage --frame $Frame --scale $Scale --format srgb `
     --out "out\red-original.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "2/4  解码同一帧为 REDWideGamutRGB + Log3G10（LUT 的输入域）..." -ForegroundColor Cyan
+Write-Host "2/5  解码同一帧为 REDWideGamutRGB + Log3G10（LUT 的输入域）..." -ForegroundColor Cyan
 & $exe red-decode --in $Footage --frame $Frame --scale $Scale --format log3g10 `
     --out "out\red-log3g10.png"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "3/4  烘 Vision3 250D + 2383 的 Log3G10/RWG LUT..." -ForegroundColor Cyan
+Write-Host "3/5  烘 Vision3 250D + 2383 的 Log3G10/RWG LUT..." -ForegroundColor Cyan
 & $exe lut bake --ocio-config $ocio --ocio-input "Log3G10 REDWideGamutRGB" `
     --film data\profiles\kodak_vision3_250d.json --paper data\profiles\kodak_2383.json `
     --scan print --exposure $Exposure --out "out\red-vision3-2383.cube"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "4/4  把 LUT 套到 R3D 帧上..." -ForegroundColor Cyan
+Write-Host "4/5  把 LUT 套到 R3D 帧上..." -ForegroundColor Cyan
 & $exe lut apply --lut "out\red-vision3-2383.cube" --in "out\red-log3g10.png" `
     --out "out\red-graded.png"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Host ""
+Write-Host "5/5  直接渲染 3 帧 R3D 视频（video --in clip.R3D）..." -ForegroundColor Cyan
+& $exe video --lut "out\red-vision3-2383.cube" --in $Footage `
+    --out "out\red-clip.mov" --frames 3 --red-scale $Scale --codec prores
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
@@ -90,17 +96,19 @@ Write-Host "要怎么看:" -ForegroundColor Green
 Write-Host "  * red-original.png 是 RED SDK 解码的 sRGB，作为对照"
 Write-Host "  * red-log3g10.png 是 Log3G10/RWG，直接看会偏灰，这是正常的中间格式"
 Write-Host "  * red-graded.png 是 Vision3 250D + 2383 的胶片/印片模拟"
-Write-Host "  * 现在走的是 red-decode + lut apply；video/预览直连是下一阶段"
-Write-Host "  * 想直接出一小段 ProRes：scripts\red-to-prores.cmd -Frames 12"
+Write-Host "  * red-clip.mov 是 video --in clip.R3D 直接渲染的 3 帧 ProRes（无音频）"
+Write-Host "  * 预览/界面直连还是下一阶段；视频用 CLI 已经可以"
 Write-Host "  * 解码是 CPU（6K 全分辨率较慢），--scale half 更快"
 Write-Host ""
 Write-Host "生成的文件:" -ForegroundColor Green
 Write-Host "  $root\out\red-original.png"
 Write-Host "  $root\out\red-log3g10.png"
 Write-Host "  $root\out\red-graded.png"
+Write-Host "  $root\out\red-clip.mov"
 Write-Host ""
 
 if (-not $NoOpen) {
     Start-Process (Join-Path $root "out\red-original.png")
     Start-Process (Join-Path $root "out\red-graded.png")
+    Start-Process (Join-Path $root "out\red-clip.mov")
 }

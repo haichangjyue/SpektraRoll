@@ -89,6 +89,7 @@ void printUsage() {
         "                         [--segment SEC] [--resume] [--keep-parts] [--jobs N]\n"
         "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
         "                         [--texture-engine auto|cpu|gpu] [--ffmpeg <path>]\n"
+        "                         [--red-scale full|half|quarter]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
         "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
@@ -96,6 +97,11 @@ void printUsage() {
         "      skips the chunks that already finished, so an interrupted long\n"
         "      render continues where it stopped. --jobs N renders N parts at a\n"
         "      time (default: a conservative auto value; 1 keeps it sequential).\n"
+        "      An .R3D / R3D NE input uses the local RED plugin: the LUT engine\n"
+        "      decodes Log3G10/REDWideGamutRGB (bake the LUT with --ocio-input\n"
+        "      \"Log3G10 REDWideGamutRGB\"), the spectral engine decodes sRGB; use\n"
+        "      --red-scale full|half|quarter. R3D output is video-only for now\n"
+        "      (audio is not muxed) and --segment/--resume is not supported.\n"
         "      The source timecode is copied\n"
         "      to the output unless --no-timecode is given. With\n"
         "      --engine spectral the LUT is bypassed and every pixel runs the\n"
@@ -1585,6 +1591,11 @@ struct VideoRender {
     int width = 0;
     int height = 0;
     double fps = 24.0;
+    // D070: when set, renderRange decodes R3D frames through the local plugin
+    // instead of an ffmpeg pipe. redScale/redFormat are sr::RedScale/RedFormat.
+    bool red = false;
+    int redScale = 0;
+    int redFormat = 0;
     const sr::Lut3D* lut = nullptr;
     // Set when `--engine spectral`: the per-pixel physical chain replaces the
     // LUT. Kept as a pointer because FilmModel is not copyable and lives in
@@ -1638,6 +1649,8 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
               << (job.bake.ocioInput.empty() ? std::string(sr::inputTransferName(job.bake.input))
                                              : "ocio:" + job.bake.ocioInput)
               << " " << job.inMatrix << "\n"
+              << "red " << (job.red ? 1 : 0) << " scale " << job.redScale << " format "
+              << job.redFormat << "\n"
               << "lut " << fileHash(lutPath) << "\n"
               << "start " << startFrame << " total " << totalFrames << " segment "
               << segmentFrames << "\n"
@@ -1854,14 +1867,25 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
         " -colorspace " + job.matrix +
         (timecode.empty() ? "" : " -timecode " + timecode) + " " + shellQuote(outPath);
 
-    FILE* decoder = openPipe(decodeCmd, "rb");
-    if (!decoder) {
-        error = "failed to start ffmpeg decoder";
-        return false;
+    std::unique_ptr<sr::RedReader> red;
+    if (job.red) {
+        red = std::make_unique<sr::RedReader>();
+        sr::RedClip info;
+        if (!red->open(job.inPath, info, error)) return false;
+    }
+
+    FILE* decoder = nullptr;
+    std::unique_ptr<FramePipeReader> reader;
+    if (!job.red) {
+        decoder = openPipe(decodeCmd, "rb");
+        if (!decoder) {
+            error = "failed to start ffmpeg decoder";
+            return false;
+        }
     }
     FILE* encoder = openPipe(encodeCmd, "wb");
     if (!encoder) {
-        closePipe(decoder);
+        if (decoder != nullptr) closePipe(decoder);
         error = "failed to start ffmpeg encoder";
         return false;
     }
@@ -1869,30 +1893,53 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     const size_t pixels = static_cast<size_t>(job.width) * job.height;
     const size_t values = pixels * 3;
     std::vector<float> frame(values);
-    FramePipeReader reader(decoder, values);
+    if (decoder != nullptr) reader = std::make_unique<FramePipeReader>(decoder, values);
     FramePipeWriter writer(encoder, values);
-    reader.start();
+    if (reader != nullptr) reader->start();
     size_t frames = 0;
     bool writeError = false;
+    bool decodeFailed = false;
     const bool debugTiming = std::getenv("SPEKTRA_VIDEO_DEBUG") != nullptr;
     double tWait = 0.0, tConvert = 0.0, tProcess = 0.0, tPack = 0.0;
     const auto now = [] { return std::chrono::steady_clock::now(); };
     while (frameCount <= 0 || frames < static_cast<size_t>(frameCount)) {
         auto mark = now();
-        if (!reader.next()) break;
-        const unsigned short* src = reader.data();
-        if (debugTiming) {
-            tWait += std::chrono::duration<double, std::milli>(now() - mark).count();
-            mark = now();
-        }
-        sr::parallelChunks(values, job.threads, [&](size_t begin, size_t end) {
-            for (size_t i = begin; i < end; ++i) {
-                frame[i] = static_cast<float>(src[i]) * (1.0f / 65535.0f);
+        if (job.red) {
+            sr::Image image;
+            if (!red->decode(startFrame + static_cast<long>(frames),
+                             static_cast<sr::RedFormat>(job.redFormat),
+                             static_cast<sr::RedScale>(job.redScale), image, error)) {
+                decodeFailed = true;
+                break;
             }
-        });
-        if (debugTiming) {
-            tConvert += std::chrono::duration<double, std::milli>(now() - mark).count();
-            mark = now();
+            if (image.width != job.width || image.height != job.height) {
+                error = "R3D decode returned " + std::to_string(image.width) + "x" +
+                        std::to_string(image.height) + ", expected " +
+                        std::to_string(job.width) + "x" + std::to_string(job.height);
+                decodeFailed = true;
+                break;
+            }
+            frame = std::move(image.pixels);
+            if (debugTiming) {
+                tWait += std::chrono::duration<double, std::milli>(now() - mark).count();
+                mark = now();
+            }
+        } else {
+            if (!reader->next()) break;
+            const unsigned short* src = reader->data();
+            if (debugTiming) {
+                tWait += std::chrono::duration<double, std::milli>(now() - mark).count();
+                mark = now();
+            }
+            sr::parallelChunks(values, job.threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    frame[i] = static_cast<float>(src[i]) * (1.0f / 65535.0f);
+                }
+            });
+            if (debugTiming) {
+                tConvert += std::chrono::duration<double, std::milli>(now() - mark).count();
+                mark = now();
+            }
         }
         const int frameIndex = static_cast<int>(rangeFrameBase + static_cast<long>(frames));
         bool fused = false;
@@ -1958,8 +2005,8 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
             std::fflush(stdout);
         }
     }
-    reader.stop();
-    closePipe(decoder);
+    if (reader != nullptr) reader->stop();
+    if (decoder != nullptr) closePipe(decoder);
     if (!writer.finish(error)) {
         closePipe(encoder);
         return false;
@@ -1974,6 +2021,7 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     }
 
     if (rendered != nullptr) *rendered = frames;
+    if (decodeFailed) return false;
     if (writeError) {
         error = "encoder closed the pipe early";
         return false;
@@ -2017,12 +2065,15 @@ int cmdVideo(const Args& args) {
     if (!spectral && lutPath.empty()) return fail("video requires --lut <file.cube>");
     if (inPath.empty()) return fail("video requires --in <clip>");
     if (outPath.empty()) return fail("video requires --out <clip>");
-    if (sr::redIsRedFile(inPath)) return fail(redGuidance(inPath));
+
+    std::string error;
+    const bool red = sr::redIsRedFile(inPath);
+    sr::RedClip redClip;
+    if (red && !sr::redProbeClip(inPath, redClip, error)) return fail(error);
 
     sr::Lut3D lut;
     FilmRecipe recipe;
     sr::GpuFilm gpuFilm;
-    std::string error;
     if (spectral) {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
         bool gpuFellBackForOcio = false;
@@ -2055,54 +2106,85 @@ int cmdVideo(const Args& args) {
                     "`lut bake --ocio-input <space>` instead");
     }
 
+    sr::RedScale redScale = sr::RedScale::Full;
+    if (red) {
+        const std::string scaleName = args.get("red-scale", "full");
+        if (scaleName == "full") {
+            redScale = sr::RedScale::Full;
+        } else if (scaleName == "half") {
+            redScale = sr::RedScale::Half;
+        } else if (scaleName == "quarter") {
+            redScale = sr::RedScale::Quarter;
+        } else {
+            return fail("--red-scale expects full, half or quarter");
+        }
+        if (spectral && (args.has("input") || hasOcioFlags(args))) {
+            return fail("R3D spectral video decodes to sRGB Rec.709; remove --input/--ocio-* "
+                        "(use a Log3G10/RWG LUT for R3D)");
+        }
+    }
+    const sr::RedFormat redFormat =
+        spectral ? sr::RedFormat::Srgb : sr::RedFormat::Log3G10;
+
     const std::string ffmpeg = ffmpegPath(args);
     const std::string ffprobe = siblingTool(ffmpeg);
-    const std::string probe = firstLine(
-        runCapture(shellQuote(ffprobe) +
-                   " -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate"
-                   " -of csv=p=0 " +
-                   shellQuote(inPath)));
     int width = 0;
     int height = 0;
     double fps = 0.0;
-    {
-        std::istringstream stream(probe);
-        std::string token;
-        std::vector<std::string> parts;
-        while (std::getline(stream, token, ',')) parts.push_back(token);
-        if (parts.size() < 3) {
-            return fail("could not probe " + inPath + " (is ffprobe next to ffmpeg?)");
+    std::string inMatrix;
+    if (red) {
+        width = redClip.width;
+        height = redClip.height;
+        fps = redClip.fps;
+        if (redScale == sr::RedScale::Half) {
+            width /= 2;
+            height /= 2;
+        } else if (redScale == sr::RedScale::Quarter) {
+            width /= 4;
+            height /= 4;
         }
-        width = std::atoi(parts[0].c_str());
-        height = std::atoi(parts[1].c_str());
-        const auto slash = parts[2].find('/');
-        if (slash != std::string::npos) {
-            const double num = std::atof(parts[2].substr(0, slash).c_str());
-            const double den = std::atof(parts[2].substr(slash + 1).c_str());
-            fps = den != 0.0 ? num / den : 0.0;
+        inMatrix = "bt709";
+    } else {
+        const std::string probe = firstLine(
+            runCapture(shellQuote(ffprobe) +
+                       " -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate"
+                       " -of csv=p=0 " +
+                       shellQuote(inPath)));
+        {
+            std::istringstream stream(probe);
+            std::string token;
+            std::vector<std::string> parts;
+            while (std::getline(stream, token, ',')) parts.push_back(token);
+            if (parts.size() < 3) {
+                return fail("could not probe " + inPath + " (is ffprobe next to ffmpeg?)");
+            }
+            width = std::atoi(parts[0].c_str());
+            height = std::atoi(parts[1].c_str());
+            const auto slash = parts[2].find('/');
+            if (slash != std::string::npos) {
+                const double num = std::atof(parts[2].substr(0, slash).c_str());
+                const double den = std::atof(parts[2].substr(slash + 1).c_str());
+                fps = den != 0.0 ? num / den : 0.0;
+            }
+        }
+        inMatrix = resolveColorMatrix(args.get("in-matrix", "auto"), ffprobe, inPath);
+
+        // ffmpeg autorotates while decoding, so a 90/270 display matrix means
+        // the frames arrive with width and height swapped.
+        const std::string rotation = firstLine(runCapture(
+            shellQuote(ffprobe) +
+            " -v error -select_streams v:0 -show_entries side_data=rotation"
+            " -of default=noprint_wrappers=1:nokey=1 " +
+            shellQuote(inPath)));
+        const int degrees = std::atoi(rotation.c_str());
+        if (degrees == 90 || degrees == -90 || degrees == 270 || degrees == -270) {
+            std::swap(width, height);
         }
     }
     if (width <= 0 || height <= 0 || fps <= 0.0) return fail("bad video geometry");
 
-    // ffmpeg autorotates while decoding, so a 90/270 display matrix means the
-    // frames arrive with width and height swapped.
-    const std::string rotation = firstLine(runCapture(
-        shellQuote(ffprobe) +
-        " -v error -select_streams v:0 -show_entries side_data=rotation"
-        " -of default=noprint_wrappers=1:nokey=1 " +
-        shellQuote(inPath)));
-    const int degrees = std::atoi(rotation.c_str());
-    if (degrees == 90 || degrees == -90 || degrees == 270 || degrees == -270) {
-        std::swap(width, height);
-    }
-
-    if (width % 2 != 0 || height % 2 != 0) {
-        return fail("video needs even width and height for 4:2:0 output");
-    }
-
     const std::string trc = args.get("trc", "srgb");
     const bool hdr = trc == "pq" || trc == "hlg";
-    const std::string inMatrix = resolveColorMatrix(args.get("in-matrix", "auto"), ffprobe, inPath);
     if (spectral) {
         // The LUT path bakes PQ/HLG into the table; spectral output encodes it
         // at the end of the chain, using the same --trc.
@@ -2121,27 +2203,38 @@ int cmdVideo(const Args& args) {
     } else if (args.has("duration")) {
         framesWanted = std::floor(parseSeconds(args.get("duration")) * fps + 0.5);
     }
-    const long probedFrames = probeFrameCount(ffprobe, inPath, fps);
+    const long probedFrames =
+        red ? static_cast<long>(redClip.frames) : probeFrameCount(ffprobe, inPath, fps);
     long totalFrames = 0;
     if (framesWanted >= 1.0) {
         totalFrames = static_cast<long>(std::llround(framesWanted));
     } else if (probedFrames > 0) {
         totalFrames = std::max(0L, probedFrames - startFrame);
     }
+    if (red) {
+        const long remaining = std::max(0L, static_cast<long>(redClip.frames) - startFrame);
+        if (startFrame >= redClip.frames) return fail("--start is past the end of the R3D clip");
+        if (totalFrames > remaining) {
+            std::printf("warning: clipping the range to %ld remaining R3D frames\n", remaining);
+            totalFrames = remaining;
+        }
+    }
 
     // Timecode (D040): copy the source start unless overridden or disabled.
     std::string timecode;
     if (!args.has("no-timecode")) {
         timecode = args.get("timecode");
-        if (timecode.empty()) timecode = probeTimecode(ffprobe, inPath);
+        if (timecode.empty()) timecode = red ? redClip.timecode : probeTimecode(ffprobe, inPath);
     }
     Timecode base = parseTimecode(timecode);
     if (!timecode.empty() && !base.valid) {
         std::printf("warning: ignoring unreadable timecode '%s'\n", timecode.c_str());
     }
 
-    // Codec: HEVC for HDR, H.264 for SDR, or ProRes 422 HQ on request.
-    std::string codec = args.get("codec", hdr ? "hevc" : "h264");
+    // Codec: HEVC for HDR, H.264 for SDR, or ProRes 422 HQ on request. R3D
+    // defaults to ProRes so odd half/quarter heights (e.g. 3024x1701) are valid.
+    const std::string defaultCodec = red ? "prores" : (hdr ? "hevc" : "h264");
+    std::string codec = args.get("codec", defaultCodec);
     if (args.has("prores")) codec = "prores";
     if (codec != "hevc" && codec != "h264" && codec != "prores") {
         return fail("--codec expects 'hevc', 'h264' or 'prores'");
@@ -2155,6 +2248,9 @@ int cmdVideo(const Args& args) {
     const bool qsv = encoderMode == "qsv" && codec != "prores";
 
     const bool prores = codec == "prores";
+    if (!prores && (width % 2 != 0 || height % 2 != 0)) {
+        return fail("4:2:0 output needs even width and height; use --codec prores for this size");
+    }
     const std::string outFormat = prores ? "yuv422p10le"
                                          : (qsv ? (hdr ? "p010le" : "nv12")
                                                 : (hdr ? "yuv420p10le" : "yuv420p"));
@@ -2199,6 +2295,9 @@ int cmdVideo(const Args& args) {
     job.width = width;
     job.height = height;
     job.fps = fps;
+    job.red = red;
+    job.redScale = static_cast<int>(redScale);
+    job.redFormat = static_cast<int>(redFormat);
     job.spectral = spectral;
     job.lut = spectral ? nullptr : &lut;
     job.model = spectral ? &recipe.model : nullptr;
@@ -2224,6 +2323,10 @@ int cmdVideo(const Args& args) {
     double segmentSeconds = args.getDouble("segment", 0.0);
     if (segmentSeconds <= 0.0 && resume) segmentSeconds = 10.0;
     const bool segmented = segmentSeconds > 0.0;
+    if (segmented && red) {
+        return fail("--segment/--resume is not wired for R3D yet; use red-decode --out-dir "
+                    "for sequences, or omit --segment");
+    }
     if (segmented && totalFrames <= 0) {
         return fail("--segment needs a known length: add --frames or --duration");
     }
@@ -2252,6 +2355,19 @@ int cmdVideo(const Args& args) {
         std::printf("engine: lut %s\n", lutPath.c_str());
     }
     if (job.textureGpu != nullptr) std::printf("texture: gpu\n");
+    if (red) {
+        std::printf("R3D:   %s decode (%s)\n",
+                    redScale == sr::RedScale::Full
+                        ? "full"
+                        : (redScale == sr::RedScale::Half ? "half" : "quarter"),
+                    spectral ? "sRGB Rec.709" : "Log3G10 / REDWideGamutRGB");
+        if (redClip.audioChannels > 0) {
+            std::printf("warning: R3D audio (%d ch) is not muxed yet; output is video-only\n",
+                        redClip.audioChannels);
+        } else {
+            std::printf("audio: none in the R3D clip\n");
+        }
+    }
 
 
     const std::filesystem::path outFile(outPath);
@@ -2449,8 +2565,22 @@ int cmdVideo(const Args& args) {
     }
 
     std::string finishError;
-    if (!finishVideo(ffmpeg, videoInput, inPath, startFrame, totalFrames, fps, outPath,
-                     finishError)) {
+    if (red) {
+        // The R3D path is video-only for now: no source audio is muxed. The
+        // encoder already stamped the timecode, so just move the temp file.
+        std::error_code ec;
+        std::filesystem::remove(outPath, ec);
+        ec.clear();
+        std::filesystem::rename(tempVideo, outPath, ec);
+        if (ec) {
+            std::filesystem::copy_file(tempVideo, outPath,
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+        }
+        if (ec) {
+            return fail("could not move the rendered video: " + ec.message());
+        }
+    } else if (!finishVideo(ffmpeg, videoInput, inPath, startFrame, totalFrames, fps, outPath,
+                            finishError)) {
         return fail(finishError);
     }
 
