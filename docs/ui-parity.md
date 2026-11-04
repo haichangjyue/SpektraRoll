@@ -2,48 +2,50 @@
 
 > 目的：Windows Qt UI 和 macOS SwiftUI UI 不再靠“感觉”同步。**功能是否完成，以这张表为准**。
 >
-> 状态：✅ 已完成 / 🟡 部分 / ⬜ 计划 / ❌ 本期不做
+> 状态：✅ 已完成 / 🟡 部分（D073：SwiftUI 代码已写，Mac 编译/验收待做）/ ⬜ 计划 / ❌ 本期不做
 >
-> 最后更新：2026-11-04（Phase 0）
+> 最后更新：2026-11-05（D073：macOS SwiftUI 三栏骨架已写）
+>
+> **注意**：D073 的 SwiftUI 代码还没有在 Mac 上编译过；表中标 🟡 的 macOS 项表示“代码已写、待 Mac/CI 验证”，不是已验收。
 
 ## 1. 功能矩阵
 
 | 功能 | CLI | Qt Windows | SwiftUI macOS v1 | 备注 |
 |---|---|---|---|---|
-| 引擎握手 `capabilities --json` | ✅ | ⬜ 待接入 | ⬜ 待接入 | D072 Phase 0 已提供 CLI |
-| 片库 `catalog --json` | ✅ | ✅（自己扫描 JSON） | ⬜ 待接入 | SwiftUI 必须走 CLI，不再重写规则 |
-| 素材探测（ffprobe） | ✅ | ✅ | ⬜ | 信息条：分辨率/帧率/时长/帧数/timecode |
-| 输入类型 9 种 Log | ✅ | ✅ | ⬜ | 与 `ui-schema.json` 的 `input` 对齐 |
-| OCIO 配置 + 色彩空间下拉 | ✅ | ✅ | ⬜ | 名字来自 `ocio-info --json` |
-| 片库：20 底片 / 8 相纸印片 | ✅ | ✅ | ⬜ | 反转片标记、电影印片标记 |
-| 选胶片自动推荐相纸/印片 | ✅ | ✅ | ⬜ | 用 `catalog.targetPrint` |
-| 选反转片自动切直扫 | ✅ | ✅ | ⬜ | 停用相纸 |
-| LUT 烘焙 + 配方签名 | ✅ | ✅ | ⬜ | UI 烘的 LUT 必须与 CLI 逐位相同 |
-| 常驻预览 `preview` | ✅ | ✅ | ⬜ | protocol 2；`hello` 已加 |
+| 引擎握手 `capabilities --json` | ✅ | ⬜ 待接入 | 🟡 已写 | D072 Phase 0 已提供 CLI |
+| 片库 `catalog --json` | ✅ | ✅（自己扫描 JSON） | 🟡 已写 | SwiftUI 必须走 CLI，不再重写规则 |
+| 素材探测（ffprobe） | ✅ | ✅ | 🟡 已写 | 信息条：分辨率/帧率/时长/帧数/timecode |
+| 输入类型 9 种 Log | ✅ | ✅ | 🟡 已写 | 与 `ui-schema.json` 的 `input` 对齐 |
+| OCIO 配置 + 色彩空间下拉 | ✅ | ✅ | 🟡 已写 | 名字来自 `ocio-info --json` |
+| 片库：20 底片 / 8 相纸印片 | ✅ | ✅ | 🟡 已写 | 反转片标记、电影印片标记 |
+| 选胶片自动推荐相纸/印片 | ✅ | ✅ | 🟡 已写 | 用 `catalog.targetPrint` |
+| 选反转片自动切直扫 | ✅ | ✅ | 🟡 已写 | 停用相纸 |
+| LUT 烘焙 + 配方签名 | ✅ | ✅ | 🟡 已写 | UI 烘的 LUT 必须与 CLI 逐位相同 |
+| 常驻预览 `preview` | ✅ | ✅ | 🟡 已写 | protocol 2；SwiftUI v1 用暂停单帧，不是常驻 |
 | 时间线拖动预览 | ✅ | ✅ | ⬜ | 短片内存缓存；长片 960 px 代理 |
-| 适合 / 100% / 缩放平移 | — | ✅ | ⬜ | SwiftUI 用 `MagnificationGesture` + `interpolation(.none)` |
+| 适合 / 100% / 缩放平移 | — | ✅ | ⬜ | SwiftUI v1 未做缩放 |
 | 直方图 | — | ✅ | ⬜ | 可先由 UI 从 RGBA 计算；后续加 `histogram` 协议 |
-| 按住看原片 | ✅ | ✅ | ⬜ | `raw` 命令 |
-| 预览尺寸/耗时状态 | ✅ | ✅ | ⬜ | 状态栏文案统一 |
-| 单帧渲染 / 整段渲染 | ✅ | ✅ | ⬜ | `video` |
-| 区间 / 帧数 / 时长 | ✅ | ✅ | ⬜ | `--start/--frames/--duration` |
-| 编码 H.264 / HEVC / ProRes | ✅ | ✅ | ⬜ | HDR 自动 HEVC；R3D 自动 ProRes |
-| 音频 / timecode / 旋转 | ✅ | ✅ | ⬜ | 音频只听最终片，不逐段编码 |
-| 分段 / 续渲 / 并行 | ✅ | ✅ | ⬜ | `--segment/--resume/--jobs` |
-| 渲染进度 JSON | ✅ | ⬜ 待接入 | ⬜ | `--progress json`；Qt 仍在正则解析文本 |
-| 取消渲染 | ✅ | ✅ | ⬜ | 杀进程 + 清理临时文件 |
-| 渲染日志 | ✅ | ✅ | ⬜ | 文本原样进日志；`{` 行进进度 |
-| 队列持久化/恢复 | — | ✅ | ⬜ | 队列 JSON schema 见下 |
-| 批量拖入入队 | — | ✅ | ⬜ | R3D 批量仍不支持 |
-| 设置持久化 | — | ✅ | ⬜ | `~/Library/Application Support/SpektraRoll` |
-| R3D 单条预览/渲染 | ✅ | ✅ | ⬜ | macOS v1 无插件 → 明确禁用 |
+| 按住看原片 | ✅ | ✅ | ⬜ | `raw` 命令；SwiftUI v1 未接 |
+| 预览尺寸/耗时状态 | ✅ | ✅ | 🟡 已写 | 状态栏文案统一 |
+| 单帧渲染 / 整段渲染 | ✅ | ✅ | 🟡 已写 | `video` |
+| 区间 / 帧数 / 时长 | ✅ | ✅ | ⬜ | SwiftUI v1 暂未暴露区间 |
+| 编码 H.264 / HEVC / ProRes | ✅ | ✅ | 🟡 已写 | HDR 自动 HEVC；R3D 自动 ProRes |
+| 音频 / timecode / 旋转 | ✅ | ✅ | 🟡 已写 | 音频只听最终片，不逐段编码 |
+| 分段 / 续渲 / 并行 | ✅ | ✅ | ⬜ | SwiftUI v1 未暴露 |
+| 渲染进度 JSON | ✅ | ⬜ 待接入 | 🟡 已写 | `--progress json`；Qt 仍在正则解析文本 |
+| 取消渲染 | ✅ | ✅ | 🟡 已写 | 杀进程 + 清理临时文件 |
+| 渲染日志 | ✅ | ✅ | 🟡 已写 | 文本原样进日志；`{` 行进进度 |
+| 队列持久化/恢复 | — | ✅ | ⬜ | v1 不做队列；后续按同一 JSON schema |
+| 批量拖入入队 | — | ✅ | ⬜ | v1 不做 |
+| 设置持久化 | — | ✅ | 🟡 已写 | `~/Library/Application Support/SpektraRoll` |
+| R3D 单条预览/渲染 | ✅ | ✅ | ❌ | macOS v1 无插件 → 明确禁用 |
 | R3D 批量入队 | — | ❌ | ❌ | 已有明确提示；后续单独做 |
-| 深浅色外观 | — | 仅深色 | ⬜ | macOS 走系统外观；Windows 可后续补 |
+| 深浅色外观 | — | 仅深色 | 🟡 深色 | macOS v1 只做深色品牌 |
 | 无障碍 / VoiceOver | — | 🟡 | ⬜ | SwiftUI 优先补齐 |
-| 中英本地化 | — | 仅中文 | ⬜ | schema 已带 zh/en 标签 |
-| 未签名 `.app` 本地验收 | — | — | ⬜ | D072 选择 B：先本地，公证后补 |
+| 中英本地化 | — | 仅中文 | 🟡 仅中文 | schema 已带 zh/en 标签 |
+| 未签名 `.app` 本地验收 | — | — | 🟡 脚本已写 | 待 Mac 上首次跑 |
 | 公证 / DMG | — | — | ⬜ | 需要 Apple Developer Program |
-| CI 编译 UI | — | ⬜（当前 CI 不编 Qt） | ⬜ | D072 要补；两边都要编 |
+| CI 编译 UI | — | ⬜（当前 CI 不编 Qt） | 🟡 已加 `swift build` | 首次推送后验证 |
 | 自动更新 | — | ❌ | ❌ | 首版不做 |
 
 ## 2. v1 范围（macOS）

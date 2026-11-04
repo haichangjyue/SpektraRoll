@@ -233,6 +233,7 @@ final class AppState: ObservableObject {
             }
             settings.contrast = settings.scan == .negative ? 1.15 : 1.0
         }
+        settings.gamut = settings.scan == .negative
         save()
     }
 
@@ -241,6 +242,7 @@ final class AppState: ObservableObject {
         if settings.scan != .slide {
             settings.scan = .print
             settings.contrast = 1.0
+            settings.gamut = false
         }
         save()
     }
@@ -251,6 +253,7 @@ final class AppState: ObservableObject {
         if !film.positive && mode == .slide { return }
         settings.scan = mode
         settings.contrast = mode == .negative ? 1.15 : 1.0
+        settings.gamut = mode == .negative
         save()
     }
 
@@ -481,6 +484,7 @@ final class AppState: ObservableObject {
                 settings.contrast = 1.15
             }
         }
+        settings.gamut = settings.scan == .negative
         if settings.ocioInput.isEmpty {
             settings.ocioInput = ocioColorSpaces.first(where: { $0.contains("S-Log3") })
                 ?? ocioColorSpaces.first

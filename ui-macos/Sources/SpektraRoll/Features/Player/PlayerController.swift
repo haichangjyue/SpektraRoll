@@ -20,12 +20,14 @@ final class PlayerController: ObservableObject {
             forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
-            guard let self else { return }
-            self.currentTime = time.seconds.isFinite ? max(0, time.seconds) : 0
-            if let item = self.player.currentItem {
-                let length = item.duration.seconds
-                if length.isFinite, length > 0 {
-                    self.duration = length
+            Task { @MainActor in
+                guard let self else { return }
+                self.currentTime = time.seconds.isFinite ? max(0, time.seconds) : 0
+                if let item = self.player.currentItem {
+                    let length = item.duration.seconds
+                    if length.isFinite, length > 0 {
+                        self.duration = length
+                    }
                 }
             }
         }

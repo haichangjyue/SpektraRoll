@@ -46,6 +46,9 @@ enum FontBook {
         if NSFont(name: notoSansCJKSC, size: size) != nil {
             return .custom(notoSansCJKSC, size: size).weight(weight)
         }
+        if NSFont(name: "NotoSansCJKsc-Regular", size: size) != nil {
+            return .custom("NotoSansCJKsc-Regular", size: size).weight(weight)
+        }
         if NSFont(name: pingFangSC, size: size) != nil {
             return .custom(pingFangSC, size: size).weight(weight)
         }
@@ -54,6 +57,8 @@ enum FontBook {
 }
 
 enum Theme {
+    // Keep these values in sync with design/tokens.json (D073). The plan is to
+    // generate this file from the tokens once the macOS design is frozen.
     static let background = Color(hex: "0A0A0B")
     static let backgroundElevated = Color(hex: "0F0F11")
     static let surface = Color(hex: "121214")

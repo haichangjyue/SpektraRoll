@@ -37,7 +37,7 @@ struct LibraryView: View {
                     ForEach(app.assets) { asset in
                         LibraryCard(asset: asset, selected: asset.id == app.selectedAssetID)
                             .onTapGesture {
-                                app.selectedAssetID = asset.id
+                                app.selectAsset(asset)
                             }
                             .highPriorityGesture(
                                 TapGesture(count: 2).onEnded {

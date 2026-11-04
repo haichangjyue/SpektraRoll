@@ -48,7 +48,13 @@ if [[ "$SKIP_CLI" -eq 0 ]]; then
         echo "cmake not found. Install it with: brew install cmake" >&2
         exit 1
     fi
-    cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DSR_BUILD_TESTS=OFF
+    CMAKE_ARGS=(-S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DSR_BUILD_TESTS=OFF)
+    if command -v brew >/dev/null 2>&1; then
+        # Let CMake find Homebrew OpenColorIO for local builds. The app bundle
+        # still needs static linking or dylib bundling before distribution.
+        CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(brew --prefix)")
+    fi
+    cmake "${CMAKE_ARGS[@]}"
     cmake --build "$BUILD_DIR" -j "$(sysctl -n hw.ncpu)"
 fi
 

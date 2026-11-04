@@ -11,6 +11,10 @@ struct ImportSheet: View {
     @State private var input: InputTransform = .sLog3
     @State private var ocioInput: String = ""
 
+    init(draft: ImportDraft) {
+        self.draft = draft
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 5) {
@@ -91,6 +95,7 @@ struct ImportSheet: View {
         .frame(width: 480)
         .background(Theme.backgroundElevated)
         .onAppear {
+            input = app.settings.input
             if let first = app.ocioColorSpaces.first(where: { $0.contains("S-Log3") })
                 ?? app.ocioColorSpaces.first {
                 ocioInput = first

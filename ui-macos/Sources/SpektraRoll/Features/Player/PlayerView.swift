@@ -96,6 +96,11 @@ struct PlayerView: View {
                 .padding(40)
             }
         }
+        .onAppear {
+            if let asset = app.selectedAsset, asset.isPlayable {
+                player.load(url: asset.url)
+            }
+        }
         .onChange(of: app.selectedAssetID) { _, _ in
             guard let asset = app.selectedAsset, asset.isPlayable else { return }
             player.load(url: asset.url)

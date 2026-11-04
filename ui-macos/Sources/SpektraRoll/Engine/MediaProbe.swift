@@ -50,7 +50,7 @@ enum MediaProbe {
 
     static func makeThumbnail(url: URL, cacheDirectory: URL) async -> String? {
         guard url.pathExtension.lowercased() != "r3d" else { return nil }
-        return await Task.detached(priority: .utility) { () -> String? in
+        return await Task.detached(priority: .utility) { () async -> String? in
             let avAsset = AVURLAsset(url: url)
             let generator = AVAssetImageGenerator(asset: avAsset)
             generator.appliesPreferredTrackTransform = true
