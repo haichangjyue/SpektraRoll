@@ -185,7 +185,7 @@ jobs:
           # the BYO-SDK / REDCINE-X guidance rather than failing in ffprobe.
           if "$exe" video --lut placeholder.cube --in sample.r3d \
                --out should-not.mov 2> red.txt; then exit 1; fi
-          grep -q "RED R3D" red.txt
+          grep -q "RED plugin not found" red.txt
           if "$exe" red-decode --in sample.r3d --out should-not.png 2> red.txt; then exit 1; fi
           grep -q "RED plugin not found" red.txt
 
