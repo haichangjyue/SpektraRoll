@@ -774,6 +774,11 @@ private:
         // prefer the full build when it exists. Set SPEKTRA_CLI to override.
         const QString fromEnv = qEnvironmentVariable("SPEKTRA_CLI");
         if (!fromEnv.isEmpty() && QFileInfo::exists(fromEnv)) return fromEnv;
+        // A local RED plugin build is a superset of the normal CLI: it has the
+        // same OCIO/film code plus the optional R3D loader. Prefer it when the
+        // user built one, so `red-info` in the UI sees the plugin (D069).
+        const QString red = repoRoot_ + "/build-red/spektra-roll-cli" + exeSuffix();
+        if (QFileInfo::exists(red)) return red;
         const QString built = repoRoot_ + "/build/spektra-roll-cli" + exeSuffix();
         if (QFileInfo::exists(built)) return built;
         const QString local =

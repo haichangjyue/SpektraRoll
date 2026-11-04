@@ -91,6 +91,7 @@ Write-Host "  * red-original.png 是 RED SDK 解码的 sRGB，作为对照"
 Write-Host "  * red-log3g10.png 是 Log3G10/RWG，直接看会偏灰，这是正常的中间格式"
 Write-Host "  * red-graded.png 是 Vision3 250D + 2383 的胶片/印片模拟"
 Write-Host "  * 现在走的是 red-decode + lut apply；video/预览直连是下一阶段"
+Write-Host "  * 想直接出一小段 ProRes：scripts\red-to-prores.cmd -Frames 12"
 Write-Host "  * 解码是 CPU（6K 全分辨率较慢），--scale half 更快"
 Write-Host ""
 Write-Host "生成的文件:" -ForegroundColor Green
