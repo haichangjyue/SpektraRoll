@@ -79,7 +79,7 @@
 - [x] **R3D 直读视频**（D070）：`video --in clip.R3D`；LUT 引擎解 Log3G10/RWG，光谱引擎解 sRGB；`--red-scale`；timecode/帧数来自插件；默认 ProRes 422 HQ；**音频、segment/resume、UI 直连仍未接**
 - [x] **R3D 收尾**（D071）：插件音频（AU → PCM/AAC）、`--segment/--resume/--jobs`、UI `.r3d` 预览/单条渲染；`--red-selftest` / `--red-render-selftest`；**真实 R3D 音频、批量 R3D、GPU 解码未验证**
 - [x] **macOS SwiftUI 决策 + 引擎契约**（D072 Phase 0）：macOS UI 用 **SwiftUI 壳 + 现有 CLI**；先做未签名 `.app` 本地验收；v1 与 Qt 功能对齐；macOS 是参考实现、`design/` 是设计源；Windows Qt 冻结到 macOS v1。新增 `capabilities --json`、`catalog --json`（20 底片 / 8 相纸印片）、`video --progress json`、`preview hello`（protocol 2）；新增 `data/ui-schema.json`、`design/tokens.json`、`docs/engine-api.md`、`docs/ui-parity.md`、`scripts\verify-d072.cmd`；`ctest` 11/11
-- [x] **macOS SwiftUI 三栏初版**（D073）：`ui-macos/` Swift Package（SwiftUI）；左「底片」缩略图 + 双击导入 + 输入/OCIO 弹窗；中 AVPlayer + 空格播放/暂停 + 胶片效果单帧；右 INFO/FILM/PRINT/ADVANCED/OUTPUT；`scripts/build-macos-ui.sh` 打包 `.app`（CLI/data/ffmpeg/字体/ad-hoc 签名）；`docs/ui-design-macos.md`、`design/tokens.json` v2；CI 加 `swift build`；**Mac 上首次编译/双击验收待做**
+- [x] **macOS SwiftUI 三栏初版**（D073）：`ui-macos/` Swift Package（SwiftUI）；左「底片」缩略图 + 双击导入 + 输入/OCIO 弹窗；中 AVPlayer + 空格播放/暂停 + 胶片效果单帧；右 INFO/FILM/PRINT/ADVANCED/OUTPUT；`scripts/build-macos-ui.sh` 打包 `.app`（CLI/data/ffmpeg/字体/ad-hoc 签名）；`docs/ui-design-macos.md`、`design/tokens.json` v2；CI #128 `swift build` 通过；**Mac 上双击 `.app` 验收待做**
 - [x] `scripts\demo-log-inputs.cmd`：九种输入各烘一张 LUT + GPU/CPU 对照表
 - [x] `scripts\demo-ocio.cmd`：配置信息 / Apple Log 双实现 / ACES 显示器变换 / LUT 对比
 - [x] `scripts\demo-ocio-ui.cmd`：界面自检（52 个空间）/ UI LUT vs CLI / 用 UI 的 LUT 渲一帧

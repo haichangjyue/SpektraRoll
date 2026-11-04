@@ -96,8 +96,12 @@ extension LookSettings {
     }
 
     func videoArguments(asset: MediaAsset, filmPath: URL, paperPath: URL?, filterPath: URL?,
-                        ocioConfig: URL?, lutPath: URL?, output: URL) -> [String] {
+                        ocioConfig: URL?, lutPath: URL?, ffmpeg: URL?,
+                        output: URL) -> [String] {
         var args = ["video", "--in", asset.path, "--out", output.path]
+        if let ffmpeg {
+            args += ["--ffmpeg", ffmpeg.path]
+        }
         if engine == .lut, let lutPath {
             args += ["--lut", lutPath.path]
         } else {

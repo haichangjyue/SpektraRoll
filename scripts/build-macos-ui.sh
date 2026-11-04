@@ -95,6 +95,9 @@ if [[ -d "$ROOT/ui-macos/Resources/Fonts" ]]; then
         \( -name '*.otf' -o -name '*.ttf' -o -name '*.ttc' \) \
         -exec cp {} "$APP_DIR/Contents/Resources/Fonts/" \;
 fi
+if ! find "$APP_DIR/Contents/Resources/Fonts" -type f \( -name '*.otf' -o -name '*.ttf' -o -name '*.ttc' \) -print -quit 2>/dev/null | grep -q .; then
+    echo "warning: no bundled font. Run scripts/fetch-macos-fonts.sh for Source Han Sans (Noto Sans CJK)." >&2
+fi
 
 FFMPEG="${SPEKTRA_FFMPEG:-}"
 if [[ -z "$FFMPEG" ]]; then

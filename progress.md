@@ -36,7 +36,7 @@
 | 项 | 状态 |
 |---|---|
 | SwiftUI 源码 | 已写；Windows 本机不能编译 SwiftUI |
-| macOS 编译 | 已加 CI 步骤；首次推送后由 macOS runner 验证 |
+| macOS 编译 | **✅ CI #128 `swift build` 通过**；#125/#126 因缺 `inspectorTab` 失败，已修 |
 | `.app` 双击验收 | **待 Mac 上跑** `scripts/build-macos-ui.sh` |
 | 字体 | 需先跑 `scripts/fetch-macos-fonts.sh`（或系统已有思源黑体） |
 | ffmpeg | 构建脚本会打包 `brew` 的 ffmpeg/ffprobe |

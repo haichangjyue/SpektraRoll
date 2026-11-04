@@ -205,6 +205,7 @@ final class AppState: ObservableObject {
         if !asset.ocioInput.isEmpty {
             settings.ocioInput = asset.ocioInput
         }
+        filmPreview = nil
         statusMessage = asset.isPlayable ? asset.displayName : "R3D 仅 Windows"
         save()
     }
@@ -380,6 +381,7 @@ final class AppState: ObservableObject {
         let gradedURL = engine.cacheDirectory.appendingPathComponent("preview/graded.png")
 
         isPreviewing = true
+        filmPreview = nil
         previewTask = Task {
             do {
                 try await engine.extractFrame(url: asset.url, at: seconds, output: frameURL)
@@ -486,6 +488,9 @@ final class AppState: ObservableObject {
             }
         }
         settings.gamut = settings.scan == .negative
+        if settings.trc != .srgb, settings.codec == .h264 {
+            settings.codec = .hevc
+        }
         if settings.ocioInput.isEmpty {
             settings.ocioInput = ocioColorSpaces.first(where: { $0.contains("S-Log3") })
                 ?? ocioColorSpaces.first

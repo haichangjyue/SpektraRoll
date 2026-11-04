@@ -244,7 +244,8 @@ final class EngineClient {
                 onLine: @escaping (String) -> Void) async throws -> ProcessResult {
         let args = settings.videoArguments(asset: asset, filmPath: filmPath, paperPath: paperPath,
                                            filterPath: filtersURL, ocioConfig: ocioConfig,
-                                           lutPath: lutPath, output: output)
+                                           lutPath: lutPath, ffmpeg: ffmpegURL,
+                                           output: output)
         return try await stream(args, onLine: onLine)
     }
 

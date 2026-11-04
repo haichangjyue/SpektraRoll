@@ -6,7 +6,7 @@
 >
 > 最后更新：2026-11-05（D073：macOS SwiftUI 三栏骨架已写）
 >
-> **注意**：D073 的 SwiftUI 代码还没有在 Mac 上编译过；表中标 🟡 的 macOS 项表示“代码已写、待 Mac/CI 验证”，不是已验收。
+> **注意**：D073 的 SwiftUI 代码已在 macOS CI run **#128** 通过 `swift build`；`.app` 双击验收仍待 Mac。表中标 🟡 的 macOS 项表示“代码已写、待 Mac 验收”。
 
 ## 1. 功能矩阵
 

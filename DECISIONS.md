@@ -1419,8 +1419,9 @@
   - `design/tokens.json` 升到 v2：暗色品牌、白色药丸、思源黑体、三栏尺寸。
   - CI：macOS job 增加 `swift build --package-path ui-macos -c release`，先保证编译不退化。
 - **验证**：
-  - Windows 本机不能编译 SwiftUI；本轮只做了代码/JSON/脚本的静态检查。
-  - 已加 macOS CI 编译检查；真正的 `.app` 双击验收需要在 Mac 上跑 `scripts/build-macos-ui.sh`。
+  - Windows 本机不能编译 SwiftUI；用 Windows 上的 Swift 6.4 做了 `-parse`，Foundation 引擎层 `-typecheck` 通过。
+  - macOS CI run **#128**（commit `0f7b593`）`swift build` 通过；此前 #125/#126 失败于 `AppState` 缺 `inspectorTab`，已修；#127 起 CI 会把 Swift 错误打成 annotation。
+  - 真正的 `.app` 双击验收仍需在 Mac 上跑 `scripts/build-macos-ui.sh`。
   - 验收清单见 `docs/ui-design-macos.md` 第 8 节。
 - **后果**：
   - 第一次构建需要 Xcode 16.2、`brew install cmake ffmpeg`，以及可选的字体下载。
