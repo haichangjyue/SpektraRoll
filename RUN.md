@@ -347,7 +347,7 @@ X:\agent\SpektraRoll\scripts\demo-ocio-ui.cmd
 
 **要注意**：胶片模型永远吃**线性 Rec.709**；配置里的 `Linear Rec.709 (sRGB)` 就是它（名字不一样时用 `--ocio-linear` 指定）。
 
-## RED R3D / R3D NE（自带 SDK，D069）
+## RED R3D / R3D NE（自带 SDK，D070）
 
 > **重要**：官方包**不带** RED SDK，也不能解码 R3D。这一节是给“自己有 RED SDK、愿意本地编译”的人看的。官方 `build\` 只带 loader，没有插件。
 
@@ -395,7 +395,22 @@ $env:SR_REDSDK_ROOT = "D:\RED_SDK"
   --in-dir out\red-seq --out-dir out\red-seq-graded --out-ext png
 ```
 
-短片段直接出 ProRes（无音频；R3D 音频封装还没接）：
+直接出视频（D070）：
+
+```powershell
+# LUT 路径：LUT 必须是 Log3G10/RWG 烘的
+.\build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube `
+  --in D:\footage\A001.R3D --out out\red-clip.mov `
+  --frames 12 --red-scale half --codec prores
+
+# 光谱 GPU 路径：R3D 解 sRGB；不要传 --input / --ocio-*
+.\build-red\spektra-roll-cli.exe video --engine spectral-gpu `
+  --film data\profiles\kodak_vision3_250d.json --paper data\profiles\kodak_2383.json `
+  --scan print --exposure 0.7 --in D:\footage\A001.R3D `
+  --out out\red-spec.mov --frames 12 --red-scale half --codec prores
+```
+
+或者用序列桥（每帧 PNG，较慢）：
 
 ```powershell
 scripts\red-to-prores.cmd -Frames 12 -Scale half -Out out\red-clip.mov
@@ -405,7 +420,8 @@ scripts\red-to-prores.cmd -Frames 12 -Scale half -Out out\red-clip.mov
 
 - 读元数据：分辨率、帧数、帧率、音频通道、timecode
 - 解码单帧/序列：Log3G10/RWG、Linear Rec.709、sRGB；full/half/quarter
-- 还不能 `video --in clip.R3D` 直读，也不能在界面里预览/渲染 `.R3D`；先用 `red-decode` + `lut apply`（下一阶段接）
+- `video --in clip.R3D` 直读：LUT / 光谱 GPU、`--start/--frames`、timecode、纹理
+- 还没做：R3D 音频封装、`--segment/--resume`、界面直接预览/渲染 `.R3D`
 
 **许可证**：不要把 SDK 或带 RED 的二进制当作官方包分发；`build-red\` 只限自用。细节见 `docs/red-sdk.md`。
 

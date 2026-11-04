@@ -110,9 +110,14 @@ build-red\
 # 3. 序列
 .\build-red\spektra-roll-cli.exe lut apply --lut out\red-vision3-2383.cube `
   --in-dir out\red-seq --out-dir out\red-seq-graded --out-ext png
+
+# 4. 直接出视频（D070；无音频，不支持 --segment）
+.\build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube `
+  --in D:\footage\A001.R3D --out out\red-clip.mov `
+  --frames 12 --red-scale half --codec prores
 ```
 
-双击演示：`scripts\demo-red.cmd`。它会解一帧 sRGB、一帧 Log3G10、烘 Vision3 250D + 2383、套 LUT，最后打开原图和成片。
+双击演示：`scripts\demo-red.cmd`。它会解一帧 sRGB、一帧 Log3G10、烘 Vision3 250D + 2383、套 LUT，最后直接渲染 3 帧视频。
 
 ---
 
@@ -126,20 +131,22 @@ build-red\
 | 解码后端 | **CPU**（`OPTION_RED_NONE`）；GPU 解码（CUDA/OpenCL/Metal）还没接 |
 | 格式 | Log3G10/RWG、Linear Rec.709、sRGB Rec.709 |
 | 序列 | `red-decode --out-dir` + `lut apply --in-dir` 正常 |
+| 直读视频（D070） | `video --in clip.R3D`：half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧** |
+| 视频 timecode | `--start 1` 时 `11:09:14:03 → 11:09:15:03` |
 
-6K 全分辨率很吃 CPU；预览/批量先用 `--scale half`，成片再用 `full`。
+6K 全分辨率很吃 CPU；预览/批量先用 `--red-scale half`，成片再用 `full`。
 
 ---
 
 ## 6. 还没做
 
-- `video --in clip.R3D` 直读（帧源抽象、编码、音频、timecode 复制）
-- 界面里预览/渲染 `.R3D`（目前只显示元数据和 `red-decode` 指引）
+- 界面里预览/渲染 `.R3D`（目前只显示元数据和 `video`/`red-decode` 指引）
 - R3D 音频导出/封装（样片本身 0 通道；SDK 的音频 API 还没接）
-- GPU 解码（CUDA / OpenCL / Metal）
-- 并行解码多帧
+- R3D 的 `--segment/--resume/--jobs`（目前会明确报错）
+- GPU 解码（CUDA / OpenCL / Metal）、并行解码
+- 6K 全分辨率的高性能路径
 
-这些是下一阶段的 D070 候选。
+这些是下一阶段的候选。
 
 ---
 

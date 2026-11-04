@@ -1294,6 +1294,34 @@
 
 ---
 
+## D070 · R3D NE 直读视频（`video --in clip.R3D`）
+
+- **日期**：2026-11-04
+- **背景**：D069 已经能 `red-decode` 单帧/序列 + `lut apply`，但普通用户还是希望一条 `video` 命令直接吃 `.R3D`。
+- **实现**：
+  - `VideoRender` 增加 `red` / `redScale` / `redFormat`；`renderRange` 在 R3D 模式下用 `sr::RedReader` 取帧，不再开 ffmpeg 解码管道。
+  - LUT 引擎：R3D 解成 **Log3G10 / REDWideGamutRGB**，直接套用 `--ocio-input "Log3G10 REDWideGamutRGB"` 烘的 LUT。
+  - 光谱引擎：R3D 解成 **sRGB Rec.709**，作为 `InputTransfer::Srgb` 进入 `FilmModel`；禁止同时传 `--input` / `--ocio-*`（否则语义冲突）。
+  - 元数据：帧数/帧率/timecode 来自插件；`--start` 会按 `addFrames` 偏移输出 timecode；`--frames` 超出剩余帧会截断并 warning。
+  - 默认编码为 **ProRes 422 HQ**（half 的 3024×1701 高度是奇数，H.264/HEVC 4:2:0 不接受；`--codec prores` 可处理）。
+  - `--red-scale full|half|quarter` 控制解码尺寸；6K full 很慢，half/quarter 适合预览。
+  - R3D 分支暂不支持 `--segment/--resume`（明确报错）；输出为**视频-only**，不封装 R3D 音频。
+  - UI 仍不直连 `.r3d`，但提示改成“CLI 已可直接 video --in clip.R3D”。
+  - `scripts/demo-red.cmd` 增加 5/5：直接渲染 3 帧 `out\red-clip.mov`。
+- **验证**：
+  - `video --in sample.R3D --lut ... --frames 3 --red-scale half`：3024×1701 ProRes 422 HQ，**2.0 s/帧**（含 CPU R3D 解码 + LUT + 编码）。
+  - `--engine spectral-gpu`（Vision3 250D + 2383，half）：**2.29 s/帧**，输出正常。
+  - `--red-scale quarter`：1512×850，**0.69 s/帧**。
+  - `--start 1 --frames 1`：timecode `11:09:14:03 → 11:09:15:03`，帧位置正确。
+  - `demo-red.cmd` 正常出 4 张 PNG + 1 段 3 帧 ProRes。
+  - `ctest` 11/11；官方构建（无插件）仍走“plugin not found”错误路径。
+- **后果**：
+  - R3D NE 现在是“`video --in clip.R3D` 一条命令出片”；LUT 和光谱 GPU 都能用。
+  - 还没做：R3D 音频封装、`--segment/--resume`、UI 预览/渲染直连、GPU 解码/并行解码。
+  - 官方包仍然不带 RED，`build-red\` 只限本地自用。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

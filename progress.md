@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D069：RED R3D NE 帧解码）
-> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + R3D NE 本地解码**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码，D041–D069）
+> **最后更新**：2026-11-04（D070：R3D NE 直读视频）
+> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + R3D NE 本地解码/直读视频**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D`，D041–D070）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -37,9 +37,56 @@
 
 ---
 
-## 零之零、本次对话（D069）交接摘要
+## 零之零、本次对话（D070）交接摘要
 
-> **新开对话先读这一节**；D068 和更早的 D067 / D063–D066 在下面，细节按决策编号往下（最新在前）。
+> **新开对话先读这一节**；D069 / D068 和更早的 D067 / D063–D066 在下面，细节按决策编号往下（最新在前）。
+
+### 这次完成了什么
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **D070** | R3D NE 直读视频 | `video --in clip.R3D` 直接出片；LUT 引擎解 **Log3G10/RWG**，光谱引擎解 **sRGB**；`--red-scale full/half/quarter`；timecode/帧数/帧率来自插件；默认 ProRes 422 HQ；`demo-red` 增加 3 帧视频；**音频、segment/resume、UI 直连仍未接** |
+
+- 本机实测：half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧**；`--start 1` 的 timecode 从 `11:09:14:03` 正确偏到 `11:09:15:03`。
+- `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
+- 双击验收：`scripts\demo-red.cmd`（现在是 5 步，最后出 `out\red-clip.mov`）。
+- 最新代码提交：`27f9aac`（D070）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
+
+### 关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D070 | R3D 直读视频 | `VideoRender.red` + `RedReader` 帧源；LUT=Log3G10/RWG，光谱=sRGB；默认 ProRes；视频-only、无 segment |
+
+### 未完成的待办（按建议顺序）
+
+1. **R3D 音频/timecode 封装**：插件音频解码 + ffmpeg 封装；样片本身 0 音频
+2. **R3D 的 segment/resume/并行**：每个 part 用自己的 RedReader；或改用 `red-decode` 序列
+3. **UI 预览/渲染直连 `.R3D`**：预览协议 `open` 接受 `.r3d`，LUT 自动用 Log3G10/RWG 烘
+4. **GPU 解码 / 并行解码**：目前 CPU
+5. 印片机控制、空间物理模型、光谱 GPU 的 OCIO、PIZ/DWA、macOS Qt 打包
+
+### 新对话第一步
+
+1. `ctest --test-dir build --output-on-failure`（11/11）
+2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
+3. `scripts\demo-red.cmd -NoOpen`（5 步；需要 `build-red\`、SDK 和 ZR 样片）
+4. `build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube --in <R3D> --frames 3 --red-scale half --out out\red-clip.mov`
+5. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（旧路径不回归）
+
+### 当前已知限制 / 坑
+
+- **R3D 输出是视频-only**：音频没封装；样片 0 音频通道，所以本机测不到。
+- **`--segment/--resume` 对 R3D 会明确报错**；先用 `red-decode --out-dir` 或不分段。
+- **half 的 3024×1701 高度是奇数**：默认 ProRes；`--codec h264/hevc` 会拒绝。
+- **解码是 CPU**：half 约 2 s/帧（LUT）、quarter 约 0.7 s/帧；full 6K 很慢。
+- **官方包不带 RED**：只有 `build-red\` + 你的 SDK 能用；`build-red\` 只限自用。
+
+---
+
+## 零之零点五、上一轮（D069）交接摘要
+
+> D069 的完整摘要；新对话优先读上面的 D070。
 
 ### 这次完成了什么
 
@@ -274,6 +321,66 @@
 | D062 | OpenColorIO | 可选依赖 + stub；胶片模型只吃线性 Rec.709；解码烘进 LUT；GPU 回退 CPU |
 
 > 本次对话（D063–D066）的完成、决策和待办见前面的「零之一」；下面是更早阶段的记录。
+
+---
+
+## 会话 D070 · R3D NE 直读视频（`video --in clip.R3D`）
+
+会话目标：D069 已经能 `red-decode` + `lut apply`；这一轮让普通 `video` 命令直接吃 `.R3D`。
+
+### 一、已完成的事项
+
+**D070 · 直读视频**
+- `VideoRender` 增加 `red/redScale/redFormat`；`renderRange` 在 R3D 模式下改用 `sr::RedReader` 取帧，不再开 ffmpeg 解码管道。
+- LUT 引擎：R3D → **Log3G10/REDWideGamutRGB** → LUT；光谱引擎：R3D → **sRGB Rec.709** → `FilmModel`。
+- 元数据：帧数/帧率/timecode 来自插件；`--start` 正确偏移输出 timecode；`--frames` 超长会截断并 warning。
+- 默认编码 **ProRes 422 HQ**（half 3024×1701 高度奇数；H.264/HEVC 4:2:0 不接受）。
+- `--red-scale full|half|quarter`。
+- R3D 分支暂时拒绝 `--segment/--resume`；输出视频-only（不封装音频）。
+- `demo-red.cmd` 增加 5/5：直接 `video --in clip.R3D` 出 3 帧 `out\red-clip.mov`。
+- UI 仍不直连 `.r3d`，但提示改成“CLI 已可直接 video --in clip.R3D”。
+
+### 二、一条关键决策（详见 DECISIONS D070）
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D070 | R3D 直读视频 | `VideoRender.red` + `RedReader` 帧源；LUT=Log3G10/RWG，光谱=sRGB；默认 ProRes；视频-only、无 segment |
+
+### 三、实测 / 验证
+
+| 项 | 结果 |
+|---|---|
+| LUT，half，3 帧 | 3024×1701 ProRes 422 HQ，**2.0 s/帧**（CPU R3D 解码 + LUT + 编码） |
+| 光谱 GPU，half，2 帧 | Vision3 250D + 2383，**2.29 s/帧**，输出正常 |
+| LUT，quarter，1 帧 | 1512×850，**0.69 s/帧** |
+| `--start 1 --frames 1` | timecode `11:09:14:03 → 11:09:15:03` |
+| `demo-red.cmd` | 4 张 PNG + 3 帧 `red-clip.mov` 正常 |
+| `ctest` | **11/11**；`verify-m1` 88.07 dB |
+
+### 四、怎么用
+
+```powershell
+# LUT 路径（LUT 必须是 Log3G10/RWG 烘的）
+.\build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube `
+  --in "X:\agent\footage\ZR_RED_Color_Science_Sunflower.R3D" `
+  --out out\red-clip.mov --frames 12 --red-scale half --codec prores
+
+# 光谱 GPU 路径（R3D 解 sRGB；不要传 --input/--ocio-*）
+.\build-red\spektra-roll-cli.exe video --engine spectral-gpu `
+  --film data\profiles\kodak_vision3_250d.json --paper data\profiles\kodak_2383.json `
+  --scan print --exposure 0.7 --in "...\ZR_RED_Color_Science_Sunflower.R3D" `
+  --out out\red-spec.mov --frames 3 --red-scale half --codec prores
+
+# 不点鼠标
+scripts\demo-red.cmd
+```
+
+### 五、未完成的待办
+
+- [ ] R3D 音频封装（插件音频 API + ffmpeg）；样片 0 音频
+- [ ] R3D 的 `--segment/--resume/--jobs`
+- [ ] UI 预览/渲染直连 `.R3D`
+- [ ] GPU/并行解码
 
 ---
 
