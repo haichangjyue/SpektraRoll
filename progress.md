@@ -50,7 +50,8 @@
 - 本机实测：half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧**；`--start 1` 的 timecode 从 `11:09:14:03` 正确偏到 `11:09:15:03`。
 - `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
 - 双击验收：`scripts\demo-red.cmd`（现在是 5 步，最后出 `out\red-clip.mov`）。
-- 最新代码提交：`27f9aac`（D070）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
+- CI：run **119** Windows + macOS 双绿（run 118 是 CI 断言字符串没跟上 D070 的错误文案，代码本身通过）。
+- 最新代码提交：`c51c0ee`（D070 + CI 断言）；之后只有文档更新。
 
 ### 关键决策
 

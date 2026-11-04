@@ -1315,6 +1315,7 @@
   - `--start 1 --frames 1`：timecode `11:09:14:03 → 11:09:15:03`，帧位置正确。
   - `demo-red.cmd` 正常出 4 张 PNG + 1 段 3 帧 ProRes。
   - `ctest` 11/11；官方构建（无插件）仍走“plugin not found”错误路径。
+  - CI：run **119** Windows + macOS 双绿（run 118 只是 CI 断言字符串没跟上 D070 的错误文案）。
 - **后果**：
   - R3D NE 现在是“`video --in clip.R3D` 一条命令出片”；LUT 和光谱 GPU 都能用。
   - 还没做：R3D 音频封装、`--segment/--resume`、UI 预览/渲染直连、GPU 解码/并行解码。

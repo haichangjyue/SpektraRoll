@@ -154,7 +154,7 @@
 | 反转片直扫（D067） | 4K50 FX30 单帧：光谱 CPU **2685.6 ms** vs GPU **261.3 ms**，**119.09 dB**；`test_gpu_film` slide + couplers worst **6e-6**；界面 profile **24 → 28**（20 底片 + 6 相纸 + 2 印片） |
 | RED R3D 骨架（D068） | `ctest` **11/11**（新增 `test_red`）；官方 `red-info` 必须 `built=false`；无 SDK 时配置阶段报错；假 `libR3DSDK.a` 走通 ON 配置 + 编译 + `red-info --in`（4096×2160/120 帧）；CI run **113** 双绿；**帧解码未接** |
 | RED R3D NE 解码（D069） | SDK 9.2.1 + Nikon ZR 样片：6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03；half 约 **3.8 s/帧**、full 6K 约 **14 s/帧**（CPU，含 16-bit PNG 写盘）；`red-decode` + `lut apply` 出 Vision3 250D + 2383 成片；`demo-red.cmd` 正常；CI run **116** 双绿 |
-| R3D 直读视频（D070） | half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧**；`--start` timecode 正确偏移；输出 ProRes 422 HQ，视频-only |
+| R3D 直读视频（D070） | half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧**；`--start` timecode 正确偏移；输出 ProRes 422 HQ，视频-only；CI run **119** 双绿 |
 | 融合提交（D049，全质感） | **207.1 ms/帧**（分段 233.6，1.13×）；与分段输出 **逐位相同**；累计相对 D046 1.83× |
 | 管道修复（D050） | **85–92 ms/帧**（207.1 → 2.4×）；`pack` 130 → 5 ms；输出逐位相同；H.264 + QSV 77 ms/帧 |
 | 读写重叠（D051） | **79.2 ms/帧**；`demo-m3` 226.8；相对 D046 累计 **4.8×**；输出逐位相同 |
