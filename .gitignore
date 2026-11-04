@@ -4,6 +4,17 @@ out/
 build-*/
 .cache/
 
+# SwiftPM / Xcode
+ui-macos/.build/
+ui-macos/.swiftpm/
+ui-macos/*.xcodeproj/xcuserdata/
+ui-macos/DerivedData/
+
+# Bundled fonts (run scripts/fetch-macos-fonts.sh)
+ui-macos/Resources/Fonts/*.otf
+ui-macos/Resources/Fonts/*.ttf
+ui-macos/Resources/Fonts/*.ttc
+
 # IDE
 .vs/
 .vscode/

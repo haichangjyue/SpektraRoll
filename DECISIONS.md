@@ -1391,6 +1391,45 @@
 
 ---
 
+## D073 · macOS UI 初版：SwiftUI 三栏 + 品牌暗色
+
+- **日期**：2026-11-05
+- **背景**：Xcode 16.2 + command line tools 已安装；产品负责人给出 macOS UI 的初版设计：暗色/近黑、白色药丸按钮黑字、思源黑体、标题加粗；三栏（左「底片」、中播放、右检查器）；参考 SpektraLab 的工作流但不复制其源码/图标/截图。
+- **决定**：
+  - **品牌一致 + 平台自适应**：颜色/间距/组件取自 `design/tokens.json`；窗口、菜单、文件选择器用 macOS 原生。
+  - 三栏宽度：左 **220**、右 **380**、中间自适应；窗口最小 1280×800。
+  - 字体：**思源黑体**；没装时回退 Noto Sans SC / Noto Sans CJK SC / PingFang SC / 系统。标题一律 bold。
+  - 主按钮：**白色胶囊 + 黑色文字**；次按钮：深色胶囊 + 白字 + 1px 边框。
+  - 左侧「底片」：双击空白导入视频/项目目录；单列缩略图；双击缩略图载入播放器。导入时弹窗选择 **画面类型** 或 **OCIO 色彩空间**；OCIO 配置由后台自动选择，不让用户填路径。
+  - 中间：AVPlayer 播放原片；**空格播放/暂停**；暂停时可开「胶片效果」，用 CLI 渲染当前帧。
+  - 右侧 tab：**INFO / FILM / PRINT / ADVANCED / OUTPUT**。
+    - FILM：画幅（35mm / Super 35 / 16mm / Super 16 / 65mm / IMAX）、胶片按彩色负片/电影负片/反转片分类、颗粒/光晕/防光晕层/耀光/扩散。
+    - PRINT：相纸/电影印片分类、扫描方式、反差、OkLCh。
+    - ADVANCED：曝光、DIR、强度、引擎、GPU 质感、LUT 插值、线程、OCIO 状态。
+    - OUTPUT：编码、SDR/PQ/HLG、CRF/preset、输出目录/文件名、渲染、进度、日志、取消。
+  - **SwiftUI 仍然只是壳**：所有颜色/胶片/渲染在 `spektra-roll-cli`，UI 只生成 argv、读 JSON、显示状态。
+  - 字体用 OFL 的 Noto Sans CJK SC（思源黑体的 Google 发行版）按需下载，不提交二进制；构建脚本负责打包。
+  - macOS v1 **不支持 R3D**（无插件）；导入时明确提示。
+  - Windows Qt 继续冻结；等 macOS v1 设计冻结后按同一份 token 重做 Windows UI v3。
+- **交付**：
+  - `ui-macos/`：Swift Package（`Package.swift` + SwiftUI 源码），不依赖 Xcode 工程文件；`swift build` 可在 Xcode/CLT 下编译。
+  - `scripts/build-macos-ui.sh`：编 CLI → 编 SwiftUI → 组装 `SpektraRoll.app` → 拷 data/ffmpeg/fonts → ad-hoc 签名 → 打开。
+  - `scripts/fetch-macos-fonts.sh`：下载 Noto Sans CJK SC Regular/Bold（OFL）。
+  - `docs/ui-design-macos.md`：布局、交互、参数映射、v1 范围、验收。
+  - `design/tokens.json` 升到 v2：暗色品牌、白色药丸、思源黑体、三栏尺寸。
+  - CI：macOS job 增加 `swift build --package-path ui-macos -c release`，先保证编译不退化。
+- **验证**：
+  - Windows 本机不能编译 SwiftUI；本轮只做了代码/JSON/脚本的静态检查。
+  - 已加 macOS CI 编译检查；真正的 `.app` 双击验收需要在 Mac 上跑 `scripts/build-macos-ui.sh`。
+  - 验收清单见 `docs/ui-design-macos.md` 第 8 节。
+- **后果**：
+  - 第一次构建需要 Xcode 16.2、`brew install cmake ffmpeg`，以及可选的字体下载。
+  - `.app` 目前是 ad-hoc 签名；分发给别人前要做 Developer ID + 公证。
+  - OCIO 在 macOS 仍可能链接 Homebrew 动态库；正式分发前要静态链接或捆绑 dylib。
+  - 播放器 v1 是原片播放 + 暂停时单帧胶片预览；时间线逐帧预览留给下一轮。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

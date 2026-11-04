@@ -58,6 +58,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Build macOS SwiftUI shell (D073)
+        if: runner.os == 'macOS'
+        run: |
+          swift --version
+          swift build --package-path ui-macos -c release
+
       - name: Smoke test the CLI
         shell: bash
         run: |

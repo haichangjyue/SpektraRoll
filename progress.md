@@ -2,11 +2,62 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D072：macOS SwiftUI 决策 + 引擎契约 Phase 0）
-> **当前里程碑**：**M5 进行中 · macOS SwiftUI 启动（D072）+ Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D073：macOS SwiftUI 三栏初版）
+> **当前里程碑**：**M5 进行中 · macOS SwiftUI 骨架（D073）+ Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
+
+---
+
+## 最新：D073 · macOS SwiftUI 三栏初版
+
+> 新开对话先读这一节；D072 是引擎契约，D071 及更早是 CLI/引擎历史。
+
+### 一、这次做了什么
+
+- 按产品负责人的设计输入，建立 macOS SwiftUI 初版：
+  - 三栏：左「底片」220 / 中播放 / 右检查器 380。
+  - 深色近黑；白色药丸按钮 + 黑字；思源黑体，标题加粗。
+  - 左侧双击空白导入视频/项目目录；单列缩略图；双击缩略图载入播放器。
+  - 导入弹窗：画面类型 / OCIO 色彩空间；OCIO 配置后台自动选择。
+  - 中间 AVPlayer 播放；空格播放/暂停；暂停时可开「胶片效果」单帧预览。
+  - 右侧 INFO / FILM / PRINT / ADVANCED / OUTPUT。
+- 关键文件：
+  - `ui-macos/Package.swift` + `ui-macos/Sources/SpektraRoll/**`（SwiftUI）。
+  - `scripts/build-macos-ui.sh`：编 CLI → 编 SwiftUI → 组装 `.app` → 拷 data/ffmpeg/字体 → ad-hoc 签名。
+  - `scripts/fetch-macos-fonts.sh`：下载 Noto Sans CJK SC（OFL）。
+  - `docs/ui-design-macos.md`：布局/交互/参数映射/验收。
+  - `design/tokens.json` 升到 v2：暗色品牌、白色药丸、思源黑体、三栏尺寸。
+  - CI macOS job 增加 `swift build --package-path ui-macos -c release`。
+
+### 二、当前状态（诚实）
+
+| 项 | 状态 |
+|---|---|
+| SwiftUI 源码 | 已写；Windows 本机不能编译 SwiftUI |
+| macOS 编译 | 已加 CI 步骤；首次推送后由 macOS runner 验证 |
+| `.app` 双击验收 | **待 Mac 上跑** `scripts/build-macos-ui.sh` |
+| 字体 | 需先跑 `scripts/fetch-macos-fonts.sh`（或系统已有思源黑体） |
+| ffmpeg | 构建脚本会打包 `brew` 的 ffmpeg/ffprobe |
+| R3D | macOS v1 明确禁用 |
+
+### 三、Mac 上第一次验收
+
+```bash
+brew install cmake ffmpeg
+scripts/fetch-macos-fonts.sh          # 可选，但推荐
+scripts/build-macos-ui.sh             # 自动组装并打开
+```
+
+验收：双击左侧空白 → 选 `C0113.MP4` → 选 S-Log3 → 缩略图出现 → 双击缩略图 → 空格播放 → 暂停 → 开「胶片效果」→ 选 Portra 400 / Vision3 500T → 渲染。
+
+### 四、下一步
+
+1. 在 Mac 上首次编译，修 Swift 编译错误（CI 也会报）。
+2. 验证 `.app` 能双击启动、能找 CLI/data/ffmpeg。
+3. 调整视觉细节（间距、字号、按钮宽度）。
+4. 之后才做时间线逐帧预览、R3D macOS、公证。
 
 ---
 
