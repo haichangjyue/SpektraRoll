@@ -48,6 +48,7 @@
 | **D067** | 反转片直扫 | Ektachrome 100 / Velvia 100 / Provia 100F / Kodachrome 64；`--scan slide` 保留片基、按“清澈片基 → 最深染料”黑白平衡、中灰按通道中和；正片自动直扫，错误组合明确报错；CPU / D3D11 / Metal 同步；4K 单帧 CPU 2685.6 ms vs GPU 261.3 ms（**119.09 dB**）；界面片库 **20 支底片**（`stocks selftest: ok films=20 papers=8 ... slide=1`） |
 
 - 本机：`ctest` **10/10**；`verify-m1` **88.07 dB**；`test_gpu_film` 新增 slide + couplers worst **6e-6**。
+- CI：run **110** Windows + macOS 双绿（macOS 真跑 Metal 的 slide parity）。
 - 双击验收：`scripts\demo-slide.cmd`（四支反转片各出一张 4K 图）。
 - 最新代码提交：`b08f40f`（D067）；之后只有文档更新（DECISIONS / STATUS / RUN / README / 本文件）。
 

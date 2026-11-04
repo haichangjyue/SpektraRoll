@@ -1228,6 +1228,7 @@
   - `spektra-roll-ui.exe --stocks-selftest`：**films=20 / papers=8**，`slide=1`。
   - `scripts\demo-slide.cmd -NoOpen`：四支反转片都正常烘表 + 出 4K 图（33³ 约 100–110 ms）。
   - `verify-m1` 仍是 **88.07 dB**；M1/负片/印片路径数值未变。
+  - CI：run **110** Windows + macOS 双绿；macOS 真跑 Metal 的 slide parity。
 - **后果**：
   - 界面可用 profile **24 → 28**（20 底片 + 6 相纸 + 2 电影印片）；所有随仓库提供的 stock 都已接通。
   - 反转片直扫的黑白平衡是**扫描仪式**的工程处理，和上游默认的“原始密度扫描”不同；上游没有正片直扫的 parity 目标。
