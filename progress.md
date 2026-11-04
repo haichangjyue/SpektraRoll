@@ -33,255 +33,90 @@
 测试素材固定用 X:\agent\footage\C0113.MP4
 （Sony FX30，S-Log3 / S-Gamut3.Cine，4K50，全范围，PCM 音频，timecode 00:13:37:46）。
 不要再用旧的 A001_11011538_C001.mov；视频文件不进仓库。
+
+R3D 测试（D068–D071）：
+  - 样片：X:\agent\footage\ZR_RED_Color_Science_Sunflower.R3D
+    （Nikon ZR R3D NE，6048×3402，249 帧，23.976，TC 11:09:14:03，0 音频）
+  - SDK：X:\agent\footage\R3DSDKv9_2_1（不进仓库）
+  - 本机插件：build-red\spektra-red.dll（MSVC + 用户 SDK 本地编译）
+  - 官方 build\ 永远不带 RED；只有 build-red\ 能解码 R3D。
 ```
 
 ---
 
-## 零之零、本次对话（D071）交接摘要
+## 零之零、本次对话（D067–D071）交接摘要
 
-> **新开对话先读这一节**；D070 / D069 / D068 和更早的 D067 / D063–D066 在下面，细节按决策编号往下（最新在前）。
-
-### 这次完成了什么
-
-| 编号 | 交付 | 关键结果 |
-|---|---|---|
-| **D071** | R3D 收尾 | 插件音频（AU→PCM/AAC）、`--segment/--resume/--jobs`、UI `.r3d` 预览/单条渲染；R3D 渲染在 UI 里也能直接走；**真实 R3D 音频、批量 R3D、GPU/并行解码仍未验证** |
-
-- 本机：`--red-selftest` → **3024×1701，7993 ms**；`--red-render-selftest` → 2 帧 ProRes 422 HQ；`--segment` 2 段 + `--jobs=2` + `--resume` 正常。
-- 音频：合成 AU 与 ProRes 视频封装成功（PCM 24-bit）；**样片 0 音频通道**，真实 R3D 音频未测。
-- `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
-- 双击验收：`scripts\demo-red.cmd`（5 步）；UI `--red-selftest` / `--red-render-selftest`。
-- CI：run **121** Windows + macOS 双绿。
-- 最新代码提交：`d6adb83`（D071）；之后只有文档更新。
-
-### 关键决策
-
-| 编号 | 决策 | 结论 |
-|---|---|---|
-| D071 | R3D 收尾 | 插件写 AU + ffmpeg 封装；segment 每段独立 RedReader；UI 强制 Log3G10/RWG LUT + red-decode 预览；选 R3D 自动 ProRes |
-
-### 未完成的待办（按建议顺序）
-
-1. **真实 R3D 音频样片验证**（当前只验证了无音频和合成 AU）
-2. **UI 批量 R3D 入队**（现在单条可用，批量提示先用单条/red-decode）
-3. **GPU/并行 R3D 解码**；6K 全分辨率性能
-4. 印片机控制、空间物理模型、光谱 GPU 的 OCIO、PIZ/DWA、macOS Qt 打包
-
-### 新对话第一步
-
-1. `ctest --test-dir build --output-on-failure`（11/11）
-2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
-3. `scripts\demo-red.cmd -NoOpen`（5 步）
-4. `build-ui\spektra-roll-ui.exe --red-selftest` / `--red-render-selftest`
-5. R3D 分段：`video --in clip.R3D --lut ... --frames 4 --segment 0.1 --red-scale half --jobs 2`
-
-### 当前已知限制 / 坑
-
-- **R3D 音频代码已接通，但没有有声 R3D 样片**；样片 0 通道，只验证了无音频和合成 AU 封装。
-- **批量拖入 R3D 仍不支持**：单条渲染/入队可用；批量会提示先用单条或 `red-decode --out-dir`。
-- **UI 预览走 red-decode 单帧**：约 4–8 s/帧（含 SDK/LUT），拖动只在松手后更新。
-- **half 3024×1701 高度奇数**：选 R3D 自动切 ProRes；手动改 H.264/HEVC 会被 CLI 拒绝。
-- **官方包不带 RED**：只有 `build-red\` + 你的 SDK 能用；`build-red\` 只限自用。
-
----
-
-## 零之零点五、上一轮（D070）交接摘要
-
-> D070 的完整摘要；新对话优先读上面的 D071。
+> **新开对话先读这一节**；更早的 D063–D066 在下一节，细节按决策编号往下（最新在前）。
+>
+> 本次对话从 D067 开始：先做反转片直扫，然后接入 RED R3D / R3D NE（D068 骨架 → D069 解码 → D070 直读视频 → D071 音频/UI/segment）。
 
 ### 这次完成了什么
 
 | 编号 | 交付 | 关键结果 |
 |---|---|---|
-| **D070** | R3D NE 直读视频 | `video --in clip.R3D` 直接出片；LUT 引擎解 **Log3G10/RWG**，光谱引擎解 **sRGB**；`--red-scale full/half/quarter`；timecode/帧数/帧率来自插件；默认 ProRes 422 HQ；`demo-red` 增加 3 帧视频；**音频、segment/resume、UI 直连仍未接** |
+| **D067** | 反转片直扫 | Ektachrome 100 / Velvia 100 / Provia 100F / Kodachrome 64；`--scan slide` 保留片基、按“清澈片基 → 最深染料”黑白平衡、中灰按通道中和；正片自动直扫，错误组合明确报错；CPU / D3D11 / Metal 同步；4K 单帧 CPU 2685.6 ms vs GPU 261.3 ms（**119.09 dB**）；界面片库 **20 支底片** |
+| **D068** | RED R3D BYO-SDK 骨架 | `red-info [--in] [--json]`、`.r3d` 识别、`scripts\build-red` + `docs/red-sdk.md`；官方构建只带 loader。**D068 的静态 `SR_WITH_REDSDK` 路径已在 D069 被插件架构取代，新对话不要再用它。** |
+| **D069** | R3D NE 帧解码 | Windows SDK 是 MSVC-only → 核心 GPL CLI + 本地 **MSVC 插件** `spektra-red.dll`（C ABI）；`red-decode` 解单帧/序列，默认 **REDWideGamutRGB + Log3G10**，也支持 linear/sRGB、full/half/quarter；真实 Nikon ZR 样片：6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03；half 约 3.8 s/帧、full 6K 约 14 s/帧（CPU，含 PNG 写盘） |
+| **D070** | R3D 直读视频 | `video --in clip.R3D` 直接出片；LUT 引擎解 **Log3G10/RWG**，光谱引擎解 **sRGB**；`--red-scale full/half/quarter`；timecode/帧数/帧率来自插件；默认 ProRes 422 HQ；half LUT **2.0 s/帧**、half 光谱 GPU **2.29 s/帧**、quarter **0.69 s/帧** |
+| **D071** | R3D 收尾 | 插件音频（AU → PCM/AAC）、`--segment/--resume/--jobs`、UI `.r3d` 预览/单条渲染；`--red-selftest` ≈ **7.9 s**（3024×1701）、`--red-render-selftest` 2 帧 ProRes；**真实 R3D 音频、批量 R3D、GPU/并行解码仍未验证** |
 
-- 本机实测：half LUT **2.0 s/帧**；half 光谱 GPU **2.29 s/帧**；quarter **0.69 s/帧**；`--start 1` 的 timecode 从 `11:09:14:03` 正确偏到 `11:09:15:03`。
-- `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
-- 双击验收：`scripts\demo-red.cmd`（现在是 5 步，最后出 `out\red-clip.mov`）。
-- CI：run **119** Windows + macOS 双绿（run 118 是 CI 断言字符串没跟上 D070 的错误文案，代码本身通过）。
-- 最新代码提交：`c51c0ee`（D070 + CI 断言）；之后只有文档更新。
-
-### 关键决策
-
-| 编号 | 决策 | 结论 |
-|---|---|---|
-| D070 | R3D 直读视频 | `VideoRender.red` + `RedReader` 帧源；LUT=Log3G10/RWG，光谱=sRGB；默认 ProRes；视频-only、无 segment |
-
-### 未完成的待办（按建议顺序）
-
-1. **R3D 音频/timecode 封装**：插件音频解码 + ffmpeg 封装；样片本身 0 音频
-2. **R3D 的 segment/resume/并行**：每个 part 用自己的 RedReader；或改用 `red-decode` 序列
-3. **UI 预览/渲染直连 `.R3D`**：预览协议 `open` 接受 `.r3d`，LUT 自动用 Log3G10/RWG 烘
-4. **GPU 解码 / 并行解码**：目前 CPU
-5. 印片机控制、空间物理模型、光谱 GPU 的 OCIO、PIZ/DWA、macOS Qt 打包
-
-### 新对话第一步
-
-1. `ctest --test-dir build --output-on-failure`（11/11）
-2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
-3. `scripts\demo-red.cmd -NoOpen`（5 步；需要 `build-red\`、SDK 和 ZR 样片）
-4. `build-red\spektra-roll-cli.exe video --lut out\red-vision3-2383.cube --in <R3D> --frames 3 --red-scale half --out out\red-clip.mov`
-5. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（旧路径不回归）
-
-### 当前已知限制 / 坑
-
-- **R3D 输出是视频-only**：音频没封装；样片 0 音频通道，所以本机测不到。
-- **`--segment/--resume` 对 R3D 会明确报错**；先用 `red-decode --out-dir` 或不分段。
-- **half 的 3024×1701 高度是奇数**：默认 ProRes；`--codec h264/hevc` 会拒绝。
-- **解码是 CPU**：half 约 2 s/帧（LUT）、quarter 约 0.7 s/帧；full 6K 很慢。
-- **官方包不带 RED**：只有 `build-red\` + 你的 SDK 能用；`build-red\` 只限自用。
-
----
-
-## 零之零点五、上一轮（D069）交接摘要
-
-> D069 的完整摘要；新对话优先读上面的 D070。
-
-### 这次完成了什么
-
-| 编号 | 交付 | 关键结果 |
-|---|---|---|
-| **D069** | RED R3D NE 帧解码 | 核心 GPL CLI + 本地 **MSVC 插件** `spektra-red.dll`（C ABI）；`red-decode` 解单帧/序列，默认 **REDWideGamutRGB + Log3G10**，也支持 linear/sRGB、full/half/quarter；`build-red` 自动编插件并打包；`demo-red.cmd` 用真实 Nikon ZR 样片出 Vision3 250D + 2383 成片；**官方包/CI 仍不带 RED** |
-
-- 本机：SDK **9.2.1**，样片 6048×3402 / 249 帧 / 23.976 / TC 11:09:14:03；half 约 **3.8 s/帧**，full 6K 约 **14 s/帧**（CPU，含 16-bit PNG 写盘）。
-- `ctest` **11/11**；`verify-m1` 88.07 dB 不变。
-- 双击验收：`scripts\demo-red.cmd`。
-- CI：run **116** Windows + macOS 双绿（官方构建只有 loader，`red-info`/`red-decode` 断言插件缺失）。
-- 最新代码提交：`e99f673`（D069）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
-
-### 关键决策
-
-| 编号 | 决策 | 结论 |
-|---|---|---|
-| D069 | R3D 解码架构 | Windows SDK 是 MSVC-only → 不做 MinGW 直链；核心 loader + MSVC 插件 C ABI；插件输出 Log3G10/RWG 16-bit；官方包不带 SDK |
-
-### 未完成的待办（按建议顺序）
-
-1. **R3D 直读 `video` / UI**：帧源抽象、音频、timecode、预览；GPU/并行解码
-2. **印片机控制**：Y/M 二向色滤色片、预闪、光源；扫描仪 unsharp
-3. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散、镜头/扫描仪 blur
-4. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
-5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
-
-### 新对话第一步
-
-1. `ctest --test-dir build --output-on-failure`（11/11）
-2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
-3. `scripts\demo-red.cmd -NoOpen`（需要 `build-red\`、SDK 和 ZR 样片）
-4. `build\spektra-roll-cli.exe red-info`（无插件时应是 `built=false`）
-5. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（旧路径不回归）
-6. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
-
-### 当前已知限制 / 坑
-
-- **官方包不能解 R3D**：`build\` 只有 loader；必须用 `build-red\`（本地 MSVC 插件 + 你的 SDK）。
-- **没有 `video --in clip.R3D` / UI 直连**：先用 `red-decode` 出帧，再 `lut apply`（单帧或 `--in-dir` 序列）。
-- **解码是 CPU**：half 约 3.8 s/帧、full 6K 约 14 s/帧；GPU 解码没接。
-- **音频/timecode 只在元数据里**：样片 0 音频通道；视频封装要等下一阶段。
-- **不要把 SDK/插件/`build-red\` 当官方包分发**；`build-red\` 只限自用。
-- 插件用 MSVC 编译（VS Build Tools 2022 + SDK 2017 库）；MinGW 不能直链 SDK。
-
----
-
-## 零之零点五、上一轮（D068）交接摘要
-
-> D068 的完整摘要；新对话优先读上面的 D069。
-
-### 这次完成了什么
-
-| 编号 | 交付 | 关键结果 |
-|---|---|---|
-| **D068** | RED R3D / R3D NE 的 BYO-SDK 骨架 | `SR_WITH_REDSDK` 默认 OFF；`red-info [--in] [--json]` 报告 SDK/读元数据；`.r3d` 在 CLI/UI 被识别并给出后续路径；`scripts\build-red` + `docs/red-sdk.md`；官方 CI 只测 stub；**帧解码未接** |
-
-- 本机：`ctest` **11/11**（新增 `test_red`）；`verify-m1` **88.07 dB** 不变；UI `stocks selftest` 正常。
-- `CMake -DSR_WITH_REDSDK=ON` 无 SDK 时在配置阶段明确报错；`red_sdk.cpp` 用最小假头文件通过 `-Wall -Wextra -Wpedantic` 语法/接口检查。
-- 假 `libR3DSDK.a` 走通 `-DSR_WITH_REDSDK=ON` 的配置 + 编译 + `red-info --in`（fake 4096×2160 / 120 帧 / 25 fps）。
-- CI：run **113** Windows + macOS 双绿（官方构建只跑 stub）。
-- 双击/命令行验收：`build\spektra-roll-cli.exe red-info`（应是 `not built`）；`red-info --in sample.r3d --json` 给出指引。
-- 最新代码提交：`4a5353b`（D068）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
-
-### 关键决策
-
-| 编号 | 决策 | 结论 |
-|---|---|---|
-| D068 | RED R3D | BYO SDK；官方包/CI 永远 stub；D068 只读元数据；渲染先用 REDCINE-X ProRes 4444（RWG/Log3G10）+ OCIO LUT |
-
-### 未完成的待办（按建议顺序）
-
-1. **R3D 帧解码**（BYO SDK）：把 `red_sdk.cpp` 接上解码，抽象 `video` 的帧源（ffmpeg / RED），处理音频、timecode、预览；只有带 SDK 的机器能测
-2. **印片机控制**：Y/M 二向色滤色片、预闪、光源；扫描仪 unsharp
-3. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散、镜头/扫描仪 blur
-4. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**
-5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
-
-### 新对话第一步
-
-1. `ctest --test-dir build --output-on-failure`（11/11）
-2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
-3. `build\spektra-roll-cli.exe red-info`（`not built`）与 `red-info --in x.r3d`（指引）
-4. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（D067/D065 不回归）
-5. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
-
-### 当前已知限制 / 坑
-
-- **官方包不能解码 R3D**：`build\` 永远是 stub；只有 `build-red\`（用户自己的 SDK）能初始化 SDK。
-- **D068 只读元数据**：`red-info --in` 能看尺寸/帧数/帧率/音频/timecode，但 `video` 会拒绝 `.r3d` 并给 REDCINE-X 路径。
-- **不要分发 SDK 或带 RED 的二进制**；`build-red\` 只限自用，再分发要同时处理 GPL 与 RED EULA。
-- R3D NE 需要较新的 SDK；旧 SDK 会报 unsupported clip format。
-- 运行时动态库路径不是 exe 旁边时，设 `SPEKTRA_RED_SDK` 指向 SDK 的 bin/lib 目录。
-
----
-
-## 零之零点五、上一轮（D067）交接摘要
-
-> D067 的完整摘要；新对话优先读上面的 D068。
-
-### 这次完成了什么
-
-| 编号 | 交付 | 关键结果 |
-|---|---|---|
-| **D067** | 反转片直扫 | Ektachrome 100 / Velvia 100 / Provia 100F / Kodachrome 64；`--scan slide` 保留片基、按“清澈片基 → 最深染料”黑白平衡、中灰按通道中和；正片自动直扫，错误组合明确报错；CPU / D3D11 / Metal 同步；4K 单帧 CPU 2685.6 ms vs GPU 261.3 ms（**119.09 dB**）；界面片库 **20 支底片**（`stocks selftest: ok films=20 papers=8 ... slide=1`） |
-
-- 本机：`ctest` **10/10**；`verify-m1` **88.07 dB**；`test_gpu_film` 新增 slide + couplers worst **6e-6**。
-- CI：run **110** Windows + macOS 双绿（D067 代码）。
-- 双击验收：`scripts\demo-slide.cmd`（四支反转片各出一张 4K 图）。
-- 最新代码提交：`b08f40f`（D067）；之后只有文档更新（DECISIONS / STATUS / RUN / README / 本文件）。
+- 本机：`ctest` **11/11**；`verify-m1` **88.07 dB**；UI `stocks selftest: ok films=20 papers=8 ... slide=1`。
+- CI：run **121** Windows + macOS 双绿（官方构建无插件，只走“plugin not found”路径）。
+- 最新代码提交：`d6adb83`（D071 代码）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
+- 双击验收：
+  - `scripts\demo-slide.cmd`（D067 四支反转片）
+  - `scripts\demo-cine.cmd`（D065 电影片库）
+  - `scripts\demo-red.cmd`（5 步：R3D 解码 → Log3G10 → Vision3 250D + 2383 → 3 帧 ProRes）
+  - `build-ui\spektra-roll-ui.exe --red-selftest` / `--red-render-selftest`
 
 ### 关键决策
 
 | 编号 | 决策 | 结论 |
 |---|---|---|
 | D067 | 反转片直扫 | `ScanMode::Positive`；保留片基；扫描仪黑白平衡 + 中灰中性；正片默认直扫；CPU/GPU 三态 `scanMode` |
+| D068 | RED R3D 依赖策略 | BYO SDK；官方包/CI 永远不带 SDK；**D069 起改为 loader + 本地 MSVC 插件，`SR_WITH_REDSDK` 已移除** |
+| D069 | R3D 解码架构 | Windows SDK 是 MSVC-only → 不 MinGW 直链；插件 C ABI；输出 Log3G10/RWG 16-bit；官方包不带 SDK |
+| D070 | R3D 直读视频 | `VideoRender.red` + `RedReader` 帧源；LUT=Log3G10/RWG，光谱=sRGB；默认 ProRes；timecode 跟 `--start` |
+| D071 | R3D 收尾 | 插件写 AU + ffmpeg 封装；segment 每段独立 RedReader；UI 强制 Log3G10/RWG LUT + red-decode 预览；选 R3D 自动 ProRes |
 
 ### 未完成的待办（按建议顺序）
 
-1. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪 unsharp
-2. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散滤镜、镜头/扫描仪 blur
-3. **光谱 GPU 的 OCIO**：现在 `--ocio-input` 会回退 CPU 光谱（4K 约 3.5 s/帧）
-4. **PIZ / DWA 压缩**、**代理清理 / 4K 预览**、**macOS Qt 打包**
-5. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG
+1. **真实 R3D 音频样片验证**：代码已接通，但 `ZR_RED_Color_Science_Sunflower.R3D` 是 0 音频通道；目前只验证了无音频路径和合成 AU 封装。
+2. **UI 批量 R3D 入队**：单条预览/渲染已可用；批量拖入仍明确提示先用单条或 `red-decode --out-dir`。
+3. **GPU / 并行 R3D 解码**：目前 CPU；6K 全分辨率约 14 s/帧（含 PNG），成片性能还需优化。
+4. **印片机控制**：Y/M 二向色滤色片步进、预闪、光源选择；扫描仪 unsharp。
+5. **空间物理模型**：染料云颗粒、逐通道 halation/scatter、具名扩散、镜头/扫描仪 blur。
+6. **光谱 GPU 的 OCIO**、**PIZ / DWA**、**代理清理 / 4K 预览**、**macOS Qt 打包**。
+7. **`--exr-linear` 的 OCIO 显示变换**：现在只认 sRGB/PQ/HLG。
 
 ### 新对话第一步
 
-1. `ctest --test-dir build --output-on-failure`（10/10）
+1. `ctest --test-dir build --output-on-failure`（11/11）
 2. `scripts\verify-m1.cmd -NoOpen`（应仍是 **88.07 dB**）
-3. `scripts\demo-slide.cmd -NoOpen`（四支反转片；4K 图正常）
-4. `build-ui\spektra-roll-ui.exe --stocks-selftest`（应含 `films=20 ... slide=1`）
-5. `scripts\demo-cine.cmd -NoOpen`、`scripts\demo-ocio.cmd -NoOpen`（旧路径不回归）
-6. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
+3. `scripts\demo-slide.cmd -NoOpen`、`scripts\demo-cine.cmd -NoOpen`（D067/D065 不回归）
+4. `scripts\demo-red.cmd -NoOpen`（5 步；需要 `build-red\`、SDK 和 ZR 样片）
+5. `build-ui\spektra-roll-ui.exe --red-selftest` / `--red-render-selftest`
+6. `build-red\spektra-roll-cli.exe video --in <R3D> --lut ... --frames 4 --segment 0.1 --red-scale half --jobs 2`（分段/续渲）
+7. Mac：`scripts\verify-macos.command` 与 `scripts\bench-macos.command`
 
-### 当前已知限制 / 坑
+### 当前环境 / 已知限制
 
-- 反转片直扫的黑白平衡是扫描仪式工程处理，**没有上游 parity**；上游默认只做原始密度扫描。
-- 正片宽容度比负片低：`--exposure` 仍默认 0.7 EV，亮部容易顶到；想要更平就降曝光或降反差。
-- 片基密度在反转片直扫里保留（和负片扫描相反），换片基/扫描光会改变白点。
-- UI 选反转片会自动切“扫描反转片（直扫）”并停用相纸；切回负片恢复“扫描负片”。
+- 本机已装 **VS Build Tools 2022**（`X:\agent\tools\vsbuild`），用于本地编 `spektra-red.dll`；MinGW 不能直链 RED SDK。
+- RED SDK 在 `X:\agent\footage\R3DSDKv9_2_1`；R3D 样片在 `X:\agent\footage\ZR_RED_Color_Science_Sunflower.R3D`。两者都**不进仓库**。
+- 官方 `build\` / CI 永远只有 loader，不带 RED；只有 `build-red\` + 用户自己的 SDK 能解码。
+- `build-red\` 含 RED Redistributable DLL 和带 SDK 的插件，**只限本地自用**，不要当官方包分发。
+- `build-red.ps1` 会复制当前 `build\spektra-roll-cli.exe` 到 `build-red\`；改完核心代码后要重新跑一次 `scripts\build-red.cmd`。
+- R3D 音频：插件按 SDK 的 `AudioBlockCountAndSize` + `DecodeAudioBlock` 写 AU，`video` 再封装；**没有有声 R3D 样片，真实音频未测**。
+- UI 预览 R3D 走 `red-decode` 单帧（约 4–8 s/帧），拖动只在松手后更新；不是常驻预览缓存。
+- half 3024×1701 高度是奇数：选 R3D 自动切 ProRes；手动改 H.264/HEVC 会被 CLI 拒绝。
+- R3D 解码是 CPU；`full` 6K 很慢，预览/批量先用 `half`/`quarter`。
+- 旧 D068 文档里的 `SR_WITH_REDSDK` 已不存在；当前构建不需要任何 CMake RED 开关。
 
 ---
 
 ## 零之一、上一轮（D063–D066）交接摘要
 
-> 这里是上一轮的摘要；新对话优先读上面的 D067。
+> 上一轮（D063–D066）的摘要；新对话优先读上面的 D067–D071。
 
 ### 这次完成了什么
 
