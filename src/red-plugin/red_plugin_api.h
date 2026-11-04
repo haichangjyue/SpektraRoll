@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#define SR_RED_PLUGIN_ABI 1
+#define SR_RED_PLUGIN_ABI 2
 
 #if defined(_WIN32)
 #define SR_RED_EXPORT __declspec(dllexport)
@@ -50,6 +50,7 @@ typedef struct SrRedPluginClip {
     int64_t frames;
     double fps;
     int audio_channels;
+    int audio_sample_rate;
     int min_color_version;
     char timecode[64];
 } SrRedPluginClip;
@@ -66,6 +67,14 @@ SR_RED_EXPORT int sr_red_open(const char* utf8_path, SrRedPluginClip* out,
 SR_RED_EXPORT int sr_red_decode(SrRedPluginHandle handle, int64_t frame, int format, int scale,
                                 const uint16_t** pixels, int* width, int* height, char* error,
                                 int error_size);
+
+/* Audio: 0 = no audio, 1 = audio present. write_audio writes a 32-bit PCM
+ * Sun AU file exactly as the SDK sample does; ffmpeg can mux it directly. */
+SR_RED_EXPORT int sr_red_has_audio(SrRedPluginHandle handle);
+SR_RED_EXPORT int sr_red_write_audio(SrRedPluginHandle handle, const char* utf8_path,
+                                     int* sample_rate, int* channels, char* error,
+                                     int error_size);
+
 SR_RED_EXPORT void sr_red_close(SrRedPluginHandle handle);
 
 #ifdef __cplusplus

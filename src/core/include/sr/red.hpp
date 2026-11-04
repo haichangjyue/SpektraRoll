@@ -41,6 +41,7 @@ struct RedClip {
     long long frames = 0;
     double fps = 0.0;
     int audioChannels = 0;
+    int audioSampleRate = 0;
     int minimumColorVersion = 0;
     std::string timecode;
 };
@@ -61,6 +62,10 @@ public:
     bool open(const std::string& path, RedClip& clip, std::string& error);
     void close();
     bool isOpen() const;
+    bool hasAudio() const;
+    // Writes the clip's audio as a 32-bit PCM Sun AU file (ffmpeg can mux it).
+    bool writeAudio(const std::string& path, int& sampleRate, int& channels,
+                    std::string& error);
 
     // Decodes one frame into `out` as 0..1 samples. Log3G10 is the LUT-domain
     // format; Linear/Srgb are Rec.709 for direct viewing.

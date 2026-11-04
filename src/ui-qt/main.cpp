@@ -18,6 +18,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -562,6 +563,66 @@ public:
     QString previewSelfTest() {
         previewFrame();
         return status_ != nullptr ? status_->text() : QString();
+    }
+
+    // `--red-selftest` (D071): load the known Nikon ZR sample through the same
+    // probe/bake/preview path as the buttons. Requires build-red + SDK.
+    QString redSelfTest() {
+        const QString sample = QStringLiteral("X:/agent/footage/ZR_RED_Color_Science_Sunflower.R3D");
+        if (!QFileInfo::exists(sample)) return QStringLiteral("error: sample R3D not found");
+        inputEdit_->setText(sample);
+        probeInput();
+        if (!redAvailable_) {
+            return QStringLiteral("error: RED plugin not available: ") + status_->text();
+        }
+        if (!spectralEngine()) {
+            lutEdit_->setText(repoRoot_ + QStringLiteral("/out/ui-red-selftest.cube"));
+            if (!bakeLut(false)) {
+                return QStringLiteral("error: LUT bake failed: ") + status_->text();
+            }
+        }
+        previewFrame();
+        const QString result = status_ != nullptr ? status_->text() : QString();
+        if (result.startsWith(QStringLiteral("预览"))) return QStringLiteral("ok: ") + result;
+        return QStringLiteral("error: ") + result;
+    }
+
+    // `--red-render-selftest` (D071): run two R3D frames through the actual
+    // Render button path (args, ensureLut, QProcess) and wait for it.
+    QString redRenderSelfTest() {
+        const QString sample = QStringLiteral("X:/agent/footage/ZR_RED_Color_Science_Sunflower.R3D");
+        if (!QFileInfo::exists(sample)) return QStringLiteral("error: sample R3D not found");
+        inputEdit_->setText(sample);
+        probeInput();
+        if (!redAvailable_) {
+            return QStringLiteral("error: RED plugin not available: ") + status_->text();
+        }
+        if (!spectralEngine()) {
+            lutEdit_->setText(repoRoot_ + QStringLiteral("/out/ui-red-render.cube"));
+            if (!bakeLut(false)) {
+                return QStringLiteral("error: LUT bake failed: ") + status_->text();
+            }
+        }
+        frames_->setValue(2);
+        start_->setValue(0.0);
+        outputEdit_->setText(repoRoot_ + QStringLiteral("/out/ui-red-render.mov"));
+        suppressCompletionDialog_ = true;
+        startRender();
+        if (!rendering_) {
+            return QStringLiteral("error: render did not start: ") + status_->text();
+        }
+        QEventLoop loop;
+        QTimer poll;
+        connect(&poll, &QTimer::timeout, &loop, [this, &loop] {
+            if (!rendering_) loop.quit();
+        });
+        poll.start(200);
+        QTimer::singleShot(180000, &loop, &QEventLoop::quit);
+        loop.exec();
+        if (rendering_) return QStringLiteral("error: render timed out");
+        const QString result = status_->text();
+        if (result.startsWith(QStringLiteral("渲染完成"))) return QStringLiteral("ok: ") + result;
+        return QStringLiteral("error: ") + result;
     }
 
     // `--stocks-selftest` (D065): the catalogue the UI builds from the profile
@@ -1158,6 +1219,14 @@ private:
                          QStringLiteral("davinci"));
         source_->addItem(QStringLiteral("普通 SDR 素材"), QStringLiteral("srgb"));
         materialSection->addWidget(labeledRow(QStringLiteral("画面类型"), source_));
+        redScale_ = new QComboBox;
+        redScale_->addItem(QStringLiteral("完整（full）"), QStringLiteral("full"));
+        redScale_->addItem(QStringLiteral("半分辨率（half）"), QStringLiteral("half"));
+        redScale_->addItem(QStringLiteral("四分之一（quarter）"), QStringLiteral("quarter"));
+        redScale_->setCurrentIndex(1);
+        redScale_->setToolTip(
+            QStringLiteral("R3D 解码尺寸；6K 全分辨率很慢，预览/批量建议 half。"));
+        materialSection->addWidget(labeledRow(QStringLiteral("R3D 解码"), redScale_));
         materialSection->addWidget(labeledRow(
             QStringLiteral("ffmpeg"),
             pathRow(ffmpegEdit_, QStringLiteral("选择 ffmpeg"),
@@ -1603,6 +1672,8 @@ private:
             const bool slide = scan_->currentData().toString() == QStringLiteral("slide");
             if (paperCombo_ != nullptr) paperCombo_->setEnabled(!slide);
         };
+        connect(redScale_, &QComboBox::currentIndexChanged, this,
+                [this](int) { markLookChanged(); });
         connect(scan_, &QComboBox::currentIndexChanged, this,
                 [this, updateScanUi](int) {
                     const bool positive = filmCombo_->currentData(Qt::UserRole + 2).toBool();
@@ -1778,6 +1849,8 @@ private:
                     settings.value(QStringLiteral("look/paper"),
                                    QStringLiteral("kodak_portra_endura.json")).toString());
         exposure_->setValue(settings.value(QStringLiteral("look/exposure"), 0.7).toDouble());
+        selectData(redScale_,
+                   settings.value(QStringLiteral("look/redScale"), QStringLiteral("half")).toString());
         selectData(scan_, settings.value(QStringLiteral("look/scan"), QStringLiteral("negative")).toString());
         contrast_->setValue(settings.value(QStringLiteral("look/contrast"), 1.15).toDouble());
         couplers_->setChecked(settings.value(QStringLiteral("look/couplers"), true).toBool());
@@ -1854,6 +1927,7 @@ private:
         settings.setValue(QStringLiteral("look/paper"),
                           QFileInfo(paperCombo_->currentData().toString()).fileName());
         settings.setValue(QStringLiteral("look/exposure"), exposure_->value());
+        settings.setValue(QStringLiteral("look/redScale"), redScale_->currentData().toString());
         settings.setValue(QStringLiteral("look/scan"), scan_->currentData().toString());
         settings.setValue(QStringLiteral("look/contrast"), contrast_->value());
         settings.setValue(QStringLiteral("look/couplers"), couplers_->isChecked());
@@ -1947,7 +2021,7 @@ private:
                 QStringLiteral("找不到 spektra-roll-cli。\n请先双击 scripts\\build-ui.cmd 重新编译。"));
             return false;
         }
-        if (isRedPath(inputEdit_->text().trimmed())) {
+        if (isRedPath(inputEdit_->text().trimmed()) && !redAvailable_) {
             status_->setText(redBlockMessage(inputEdit_->text().trimmed()));
             return false;
         }
@@ -1961,7 +2035,7 @@ private:
             }
             return false;
         }
-        if (ocioActive() && ocioSpace_->currentData().toString().isEmpty()) {
+        if (!redInput_ && ocioActive() && ocioSpace_->currentData().toString().isEmpty()) {
             const QString message =
                 QStringLiteral("OCIO 输入还没选好：先点“读取”，再选一个色彩空间。");
             status_->setText(message);
@@ -1975,7 +2049,24 @@ private:
         // D063: an OCIO colour space replaces --input; the decode is baked into
         // the LUT, so `lut apply` and `video` never need the library.
         QStringList args{QStringLiteral("lut"), QStringLiteral("bake")};
-        if (ocioActive()) {
+        const bool redLut = redInput_ && !spectralEngine();
+        if (redLut) {
+            // An R3D frame decoded for the LUT is Log3G10/RWG, not the UI's
+            // "source" camera log. Force the bundled OCIO config and space.
+            QString config = repoRoot_ + QStringLiteral(
+                                            "/data/ocio/"
+                                            "studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio");
+            if (!QFileInfo::exists(config)) config = defaultOcioConfig();
+            if (config.isEmpty() || !QFileInfo::exists(config)) {
+                const QString message =
+                    QStringLiteral("R3D LUT 需要 data/ocio 里的 ACES 配置；找不到 OCIO 配置。");
+                status_->setText(message);
+                if (interactive) QMessageBox::critical(this, QStringLiteral("R3D LUT"), message);
+                return false;
+            }
+            args << QStringLiteral("--ocio-config") << config << QStringLiteral("--ocio-input")
+                 << QStringLiteral("Log3G10 REDWideGamutRGB");
+        } else if (ocioActive()) {
             args << ocioArgs();
         } else {
             args << QStringLiteral("--input") << source_->currentData().toString();
@@ -2014,10 +2105,12 @@ private:
         if (params.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             params.write(lookSignature().toUtf8());
         }
-        status_->setText(ocioActive()
-                             ? QStringLiteral("LUT 已烘焙（OCIO %1）：%2")
-                                   .arg(ocioSpace_->currentText(), QFileInfo(path).fileName())
-                             : QStringLiteral("LUT 已烘焙：") + QFileInfo(path).fileName());
+        status_->setText(
+            redLut ? QStringLiteral("LUT 已烘焙（R3D Log3G10/RWG）：") + QFileInfo(path).fileName()
+                   : (ocioActive()
+                          ? QStringLiteral("LUT 已烘焙（OCIO %1）：%2")
+                                .arg(ocioSpace_->currentText(), QFileInfo(path).fileName())
+                          : QStringLiteral("LUT 已烘焙：") + QFileInfo(path).fileName()));
         if (trc != QStringLiteral("srgb")) {
             appendLog(QStringLiteral("提示：HDR LUT 的画面在普通 SDR 屏上会偏暗，最终请用 HDR 显示器/iPhone 看。\n"));
         }
@@ -2044,7 +2137,7 @@ private:
     }
 
     QString lookSignature() const {
-        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9|%10|%11")
+        return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9|%10|%11|%12")
             .arg(engine_->currentData().toString())
             .arg(source_->currentData().toString())
             .arg(number(exposure_->value(), 4))
@@ -2057,7 +2150,9 @@ private:
             .arg(QFileInfo(paperCombo_->currentData().toString()).fileName())
             .arg(ocioActive() ? QFileInfo(ocioConfig_->text().trimmed()).fileName() +
                                     QLatin1Char(':') + ocioSpace_->currentData().toString()
-                              : QStringLiteral("-"));
+                              : QStringLiteral("-"))
+            .arg(redInput_ ? QStringLiteral("r3d:") + redScale_->currentData().toString()
+                           : QStringLiteral("-"));
     }
 
     QStringList textureArgs() const {
@@ -2094,47 +2189,75 @@ private:
             timeLabel_->setText(QStringLiteral("--"));
             return;
         }
-        // D068: `.r3d` cannot be probed with ffprobe. Ask the CLI whether this
-        // build has the optional RED SDK and show metadata or the next step.
+        // D071: `.r3d` uses the CLI's optional RED plugin. ffprobe still gives
+        // width/fps/frames/timecode; the plugin decides whether we can decode.
         if (isRedPath(path)) {
-            clipInfo_ = ClipInfo{};
-            lastProbePath_.clear();
+            redInput_ = true;
+            // half/quarter R3D heights can be odd; ProRes handles them while
+            // H.264/HEVC 4:2:0 does not. Keep the combo editable for full-res.
+            if (codec_ != nullptr) selectData(codec_, QStringLiteral("prores"));
             stopPreviewServer();
-            clipNameLabel_->setText(QFileInfo(path).fileName());
-            clipNameLabel_->setToolTip(path);
-            timeline_->setRange(0, 0);
-            timeLabel_->setText(QStringLiteral("--"));
             const QJsonObject red = queryRedInfo(path);
-            QString label;
-            if (red.value(QStringLiteral("available")).toBool()) {
+            redAvailable_ = red.value(QStringLiteral("available")).toBool();
+            ClipInfo info = probeClip(path);
+            if (!info.valid()) {
                 const QJsonObject clip = red.value(QStringLiteral("clip")).toObject();
                 if (!clip.isEmpty()) {
-                    label = QStringLiteral("R3D %1×%2 · %3 fps · %4 帧")
-                                .arg(clip.value(QStringLiteral("width")).toInt())
-                                .arg(clip.value(QStringLiteral("height")).toInt())
-                                .arg(number(clip.value(QStringLiteral("fps")).toDouble(), 3))
-                                .arg(clip.value(QStringLiteral("frames")).toVariant().toLongLong());
-                    const QString timecode = clip.value(QStringLiteral("timecode")).toString();
-                    if (!timecode.isEmpty()) label += QStringLiteral(" · TC ") + timecode;
-                    label += QStringLiteral(" · 元数据已读；CLI 可直接 video --in clip.R3D（D070）");
-                } else {
-                    label = QStringLiteral("R3D：SDK 已启用，但读不到元数据：") +
-                            red.value(QStringLiteral("clipError")).toString();
+                    info.width = clip.value(QStringLiteral("width")).toInt();
+                    info.height = clip.value(QStringLiteral("height")).toInt();
+                    info.fps = clip.value(QStringLiteral("fps")).toDouble();
+                    info.frames = clip.value(QStringLiteral("frames")).toVariant().toLongLong();
+                    info.timecode = clip.value(QStringLiteral("timecode")).toString();
+                    info.duration = info.fps > 0.0 ? info.frames / info.fps : 0.0;
                 }
-            } else {
-                label = QStringLiteral("R3D：此构建没有 RED SDK。用 REDCINE-X 导出 ProRes 4444"
-                                       "（REDWideGamutRGB + Log3G10），或按 docs/red-sdk.md "
-                                       "用你自己的 SDK 本地编译。");
+            }
+            clipNameLabel_->setText(QFileInfo(path).fileName());
+            clipNameLabel_->setToolTip(path);
+            if (!info.valid()) {
+                clipInfo_ = ClipInfo{};
+                timeline_->setRange(0, 0);
+                timeLabel_->setText(QStringLiteral("--"));
+                const QString label = QStringLiteral("R3D：读不到元数据（检查 ffprobe / RED 插件）");
+                clipInfoLabel_->setText(label);
+                status_->setText(label);
+                return;
+            }
+            clipInfo_ = info;
+            if (path != lastProbePath_) {
+                lastProbePath_ = path;
+                preview_->setImage(QImage());
+                gradedImage_ = QImage();
+                originalImage_ = QImage();
+                originalTime_ = -1.0;
+            }
+            if (info.frames > 1) timeline_->setRange(0, static_cast<int>(info.frames - 1));
+            previewTime_->setMaximum(qMax(1.0, info.duration));
+            if (previewTime_->value() > info.duration) {
+                previewTime_->setValue(qMax(0.0, info.duration - 0.001));
+            }
+            syncTimelineFromTime();
+            QString label = QStringLiteral("R3D %1×%2 · %3 fps · %4 帧")
+                                .arg(info.width)
+                                .arg(info.height)
+                                .arg(number(info.fps, 3))
+                                .arg(info.frames);
+            if (!info.timecode.isEmpty()) label += QStringLiteral(" · TC ") + info.timecode;
+            label += redAvailable_
+                         ? QStringLiteral(" · RED SDK 已启用；预览/渲染走 build-red")
+                         : QStringLiteral(" · 没有 RED SDK：先 scripts\\build-red.cmd 本地编译");
+            clipInfoLabel_->setText(label);
+            status_->setText(label);
+            appendLog(QStringLiteral("R3D: ") + QDir::toNativeSeparators(path) + QLatin1Char('\n'));
+            if (!redAvailable_) {
                 const QString message = red.value(QStringLiteral("message")).toString();
                 if (!message.isEmpty()) {
                     appendLog(QStringLiteral("RED: ") + message + QLatin1Char('\n'));
                 }
             }
-            clipInfoLabel_->setText(label);
-            status_->setText(label);
-            appendLog(QStringLiteral("R3D: ") + QDir::toNativeSeparators(path) + QLatin1Char('\n'));
             return;
         }
+        redInput_ = false;
+        redAvailable_ = false;
         const ClipInfo info = probeClip(path);
         if (!info.valid()) {
             clipInfo_ = ClipInfo{};
@@ -2440,6 +2563,7 @@ private:
     }
 
     bool previewFromServer(int frame, bool graded, QImage* image, QString* log) {
+        if (redInput_) return false;  // R3D uses the red-decode path below (D071)
         if (!ensurePreviewServer(log)) return false;
         if (frame < 0 || frame >= previewFrames_) return false;
 
@@ -2503,7 +2627,54 @@ private:
 
     // The pre-D048 path: one ffmpeg extraction plus one CLI run. Still used when
     // the server cannot start or the frame is outside the decode cache.
+    // D071: R3D preview. The preview server does not read `.r3d`; decode one
+    // frame through the same RedReader plugin and then run `lut apply` (or the
+    // spectral engine) on it. Scrubbing is slower than the 960 px proxy, but
+    // this is the same colour path as the full render.
+    bool previewRedLegacy(bool graded, QImage* image, QString* log) {
+        QDir().mkpath(repoRoot_ + QStringLiteral("/out"));
+        const QString source =
+            repoRoot_ + QStringLiteral("/out/ui-red-src.png");
+        const QString output =
+            repoRoot_ + QStringLiteral("/out/ui-red.png");
+        const int frame = previewFrameIndex();
+        const QString redFormat =
+            (graded && spectralEngine()) ? QStringLiteral("srgb") : QStringLiteral("log3g10");
+        QStringList decodeArgs{
+            QStringLiteral("red-decode"),
+            QStringLiteral("--in"), inputEdit_->text(),
+            QStringLiteral("--frame"), QString::number(frame),
+            QStringLiteral("--scale"), redScale_->currentData().toString(),
+            QStringLiteral("--format"), graded ? redFormat : QStringLiteral("srgb"),
+            QStringLiteral("--out"), graded ? source : output};
+        QString outputText;
+        if (!runSync(cliPath_, decodeArgs, &outputText)) {
+            *log += outputText;
+            return false;
+        }
+        if (graded) {
+            QStringList args{QStringLiteral("lut"), QStringLiteral("apply")};
+            if (spectralEngine()) {
+                args << QStringLiteral("--engine") << engineName();
+                args << lookArgs(true);
+            } else {
+                args << QStringLiteral("--lut") << lutEdit_->text();
+            }
+            args << QStringLiteral("--in") << source << QStringLiteral("--out") << output;
+            args << textureArgs();
+            if (!runSync(cliPath_, args, &outputText)) {
+                *log += outputText;
+                return false;
+            }
+        }
+        const QImage loaded(output);
+        if (loaded.isNull()) return false;
+        *image = loaded;
+        return true;
+    }
+
     bool previewLegacy(bool graded, QImage* image, QString* log) {
+        if (redInput_) return previewRedLegacy(graded, image, log);
         QDir().mkpath(repoRoot_ + QStringLiteral("/out"));
         const QString suffix = graded ? QStringLiteral("preview") : QStringLiteral("original");
         const QString source =
@@ -2563,6 +2734,9 @@ private:
     void previewFrame() {
         if (!requireInput() || !ensureLut()) return;
         const int frame = previewFrameIndex();
+        // R3D preview decodes a full frame through the SDK; only render on
+        // release, not on every scrub tick.
+        if (redInput_ && scrubbing_) return;
         // While scrubbing, never fall back to the slow single-frame path.
         if (scrubbing_ && previewFrames_ > 0 && frame >= previewFrames_) return;
 
@@ -2719,7 +2893,11 @@ private:
     // already selects PQ/HLG there.
     QStringList lookArgs(bool withHdr) const {
         QStringList args;
-        if (ocioActive()) {
+        // R3D spectral frames are decoded to sRGB Rec.709 by the plugin; the
+        // UI's "source" camera log and OCIO decode do not apply.
+        if (redInput_) {
+            // intentionally no --input / --ocio-*
+        } else if (ocioActive()) {
             args << ocioArgs();
         } else {
             args << QStringLiteral("--input") << source_->currentData().toString();
@@ -2774,6 +2952,9 @@ private:
         args << QStringLiteral("--in") << input << QStringLiteral("--out") << output
              << QStringLiteral("--trc") << trc_->currentData().toString()
              << QStringLiteral("--ffmpeg") << ffmpegEdit_->text();
+        if (redInput_) {
+            args << QStringLiteral("--red-scale") << redScale_->currentData().toString();
+        }
         args << textureArgs();
         args << QStringLiteral("--codec") << codec_->currentData().toString();
         if (start_->value() > 0.0) {
@@ -2843,12 +3024,14 @@ private:
                         status_->setText(QStringLiteral("渲染完成：") + outputEdit_->text());
                         progress_->setRange(0, 100);
                         progress_->setValue(100);
-                        const auto answer = QMessageBox::question(
-                            this, QStringLiteral("完成"),
-                            QStringLiteral("渲染完成。现在打开文件所在文件夹吗？"));
-                        if (answer == QMessageBox::Yes) {
-                            QDesktopServices::openUrl(
-                                QUrl::fromLocalFile(QFileInfo(outputEdit_->text()).absolutePath()));
+                        if (!suppressCompletionDialog_) {
+                            const auto answer = QMessageBox::question(
+                                this, QStringLiteral("完成"),
+                                QStringLiteral("渲染完成。现在打开文件所在文件夹吗？"));
+                            if (answer == QMessageBox::Yes) {
+                                QDesktopServices::openUrl(QUrl::fromLocalFile(
+                                    QFileInfo(outputEdit_->text()).absolutePath()));
+                            }
                         }
                     } else {
                         status_->setText(QStringLiteral("渲染失败，日志里有原因"));
@@ -3043,8 +3226,10 @@ private:
         if (videos.isEmpty()) return;
         for (const QString& video : videos) {
             if (isRedPath(video)) {
-                QMessageBox::information(this, QStringLiteral("R3D 还没接入渲染"),
-                                         redBlockMessage(video));
+                QMessageBox::information(
+                    this, QStringLiteral("批量 R3D 还没接"),
+                    QStringLiteral("单条渲染/入队已经支持 R3D；批量先一次选一个，"
+                                   "或用 build-red 的 red-decode --out-dir。"));
                 return;
             }
         }
@@ -3474,6 +3659,10 @@ private:
     QLineEdit* outputEdit_ = nullptr;
 
     QComboBox* source_ = nullptr;
+    // D071: R3D decode scale and state. The UI only drives the CLI.
+    QComboBox* redScale_ = nullptr;
+    bool redInput_ = false;
+    bool redAvailable_ = false;
     // OpenColorIO input (D063).
     QCheckBox* ocioEnabled_ = nullptr;
     QLineEdit* ocioConfig_ = nullptr;
@@ -3566,6 +3755,9 @@ private:
     QString pending_;
     bool rendering_ = false;
     bool canceled_ = false;
+    // D071 selftests run the real button path but must not block on the
+    // "open the output folder?" modal.
+    bool suppressCompletionDialog_ = false;
     bool geometryChecked_ = false;
     bool lutBaked_ = false;
     bool lutStale_ = false;
@@ -3602,7 +3794,9 @@ int main(int argc, char** argv) {
     const QStringList arguments = QCoreApplication::arguments();
     // The OCIO and stock checks only read JSON/bake a LUT; do not flash a window.
     if (!arguments.contains(QStringLiteral("--ocio-selftest")) &&
-        !arguments.contains(QStringLiteral("--stocks-selftest"))) {
+        !arguments.contains(QStringLiteral("--stocks-selftest")) &&
+        !arguments.contains(QStringLiteral("--red-selftest")) &&
+        !arguments.contains(QStringLiteral("--red-render-selftest"))) {
         window.show();
     }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &window,
@@ -3635,6 +3829,26 @@ int main(int argc, char** argv) {
         QTimer::singleShot(400, &window, [&window, &app] {
             const QString result = window.stocksSelfTest();
             std::printf("stocks selftest: %s\n", result.toUtf8().constData());
+            std::fflush(stdout);
+            window.shutdownPreview();
+            app.exit(result.startsWith(QStringLiteral("ok")) ? 0 : 1);
+        });
+    }
+    // D071: R3D probe + LUT bake + preview through the UI path.
+    if (arguments.contains(QStringLiteral("--red-selftest"))) {
+        QTimer::singleShot(800, &window, [&window, &app] {
+            const QString result = window.redSelfTest();
+            std::printf("red selftest: %s\n", result.toUtf8().constData());
+            std::fflush(stdout);
+            window.shutdownPreview();
+            app.exit(result.startsWith(QStringLiteral("ok")) ? 0 : 1);
+        });
+    }
+    // D071: the actual Render button path for two R3D frames.
+    if (arguments.contains(QStringLiteral("--red-render-selftest"))) {
+        QTimer::singleShot(800, &window, [&window, &app] {
+            const QString result = window.redRenderSelfTest();
+            std::printf("red render selftest: %s\n", result.toUtf8().constData());
             std::fflush(stdout);
             window.shutdownPreview();
             app.exit(result.startsWith(QStringLiteral("ok")) ? 0 : 1);

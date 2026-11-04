@@ -34,6 +34,8 @@ struct Plugin {
     decltype(&sr_red_info) info = nullptr;
     decltype(&sr_red_open) open = nullptr;
     decltype(&sr_red_decode) decode = nullptr;
+    decltype(&sr_red_has_audio) hasAudio = nullptr;
+    decltype(&sr_red_write_audio) writeAudio = nullptr;
     decltype(&sr_red_close) close = nullptr;
 
 #if defined(_WIN32)
@@ -128,6 +130,10 @@ Plugin& plugin() {
                 GetProcAddress(state.module, "sr_red_open"));
             state.decode = reinterpret_cast<decltype(&sr_red_decode)>(
                 GetProcAddress(state.module, "sr_red_decode"));
+            state.hasAudio = reinterpret_cast<decltype(&sr_red_has_audio)>(
+                GetProcAddress(state.module, "sr_red_has_audio"));
+            state.writeAudio = reinterpret_cast<decltype(&sr_red_write_audio)>(
+                GetProcAddress(state.module, "sr_red_write_audio"));
             state.close = reinterpret_cast<decltype(&sr_red_close)>(
                 GetProcAddress(state.module, "sr_red_close"));
 #else
@@ -140,11 +146,16 @@ Plugin& plugin() {
                 reinterpret_cast<decltype(&sr_red_open)>(dlsym(state.module, "sr_red_open"));
             state.decode =
                 reinterpret_cast<decltype(&sr_red_decode)>(dlsym(state.module, "sr_red_decode"));
+            state.hasAudio = reinterpret_cast<decltype(&sr_red_has_audio)>(
+                dlsym(state.module, "sr_red_has_audio"));
+            state.writeAudio = reinterpret_cast<decltype(&sr_red_write_audio)>(
+                dlsym(state.module, "sr_red_write_audio"));
             state.close =
                 reinterpret_cast<decltype(&sr_red_close)>(dlsym(state.module, "sr_red_close"));
 #endif
             if (state.abi == nullptr || state.info == nullptr || state.open == nullptr ||
-                state.decode == nullptr || state.close == nullptr) {
+                state.decode == nullptr || state.hasAudio == nullptr ||
+                state.writeAudio == nullptr || state.close == nullptr) {
                 state.message = "RED plugin is missing an expected C entry point: " + candidate;
 #if defined(_WIN32)
                 FreeLibrary(state.module);
@@ -156,6 +167,8 @@ Plugin& plugin() {
                 state.info = nullptr;
                 state.open = nullptr;
                 state.decode = nullptr;
+                state.hasAudio = nullptr;
+                state.writeAudio = nullptr;
                 state.close = nullptr;
                 continue;
             }
@@ -171,6 +184,8 @@ Plugin& plugin() {
                 state.info = nullptr;
                 state.open = nullptr;
                 state.decode = nullptr;
+                state.hasAudio = nullptr;
+                state.writeAudio = nullptr;
                 state.close = nullptr;
                 continue;
             }
@@ -240,6 +255,7 @@ bool RedReader::open(const std::string& path, RedClip& clip, std::string& error)
     clip.frames = info.frames;
     clip.fps = info.fps;
     clip.audioChannels = info.audio_channels;
+    clip.audioSampleRate = info.audio_sample_rate;
     clip.minimumColorVersion = info.min_color_version;
     clip.timecode = info.timecode;
     return true;
@@ -253,6 +269,31 @@ void RedReader::close() {
 }
 
 bool RedReader::isOpen() const { return impl_ && impl_->handle != nullptr; }
+
+bool RedReader::hasAudio() const {
+    Plugin& state = plugin();
+    if (!state.loaded || !impl_ || impl_->handle == nullptr) return false;
+    return state.hasAudio(impl_->handle) != 0;
+}
+
+bool RedReader::writeAudio(const std::string& path, int& sampleRate, int& channels,
+                           std::string& error) {
+    Plugin& state = plugin();
+    if (!state.loaded || !impl_ || impl_->handle == nullptr) {
+        error = state.loaded ? "no R3D clip is open" : state.message;
+        return false;
+    }
+    char message[1024] = {};
+    int rate = 0;
+    int count = 0;
+    if (!state.writeAudio(impl_->handle, path.c_str(), &rate, &count, message, sizeof(message))) {
+        error = message[0] != '\0' ? message : "could not write R3D audio";
+        return false;
+    }
+    sampleRate = rate;
+    channels = count;
+    return true;
+}
 
 bool RedReader::decode(long long frame, RedFormat format, RedScale scale, Image& out,
                        std::string& error) {

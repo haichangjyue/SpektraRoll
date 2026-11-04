@@ -818,6 +818,7 @@ int cmdRedInfo(const Args& args) {
             std::printf("    \"frames\": %lld,\n", clip.frames);
             std::printf("    \"fps\": %.6f,\n", clip.fps);
             std::printf("    \"audioChannels\": %d,\n", clip.audioChannels);
+            std::printf("    \"audioSampleRate\": %d,\n", clip.audioSampleRate);
             std::printf("    \"minimumColorVersion\": %d,\n", clip.minimumColorVersion);
             std::printf("    \"timecode\": %s\n", jsonQuote(clip.timecode).c_str());
             std::printf("  }");
@@ -838,8 +839,10 @@ int cmdRedInfo(const Args& args) {
     if (!in.empty()) {
         if (haveClip) {
             std::printf("clip:          %s\n", in.c_str());
-            std::printf("  %dx%d, %lld frames, %.3f fps, %d audio channels\n", clip.width,
+            std::printf("  %dx%d, %lld frames, %.3f fps, %d audio channels", clip.width,
                         clip.height, clip.frames, clip.fps, clip.audioChannels);
+            if (clip.audioChannels > 0) std::printf(" @ %d Hz", clip.audioSampleRate);
+            std::printf("\n");
             std::printf("  minimum color version: %d\n", clip.minimumColorVersion);
             if (!clip.timecode.empty()) std::printf("  timecode: %s\n", clip.timecode.c_str());
             std::printf(
@@ -2052,6 +2055,34 @@ bool finishVideo(const std::string& ffmpeg, const std::string& videoInput,
     return true;
 }
 
+// Final container step for R3D renders. The video-only stream is copied; if
+// the SDK produced an AU file it is muxed here (AAC for H.264/HEVC, PCM for
+// ProRes). R3D audio decoding is only tested on clips that actually have it.
+bool finishRedVideo(const std::string& ffmpeg, const std::string& videoInput,
+                    const std::string& audioPath, long startFrame, long totalFrames, double fps,
+                    const std::string& codec, const std::string& outPath, std::string& error) {
+    std::string command = shellQuote(ffmpeg) + " -v error -y" + videoInput;
+    if (!audioPath.empty()) {
+        const double start = static_cast<double>(startFrame) / fps;
+        if (start > 0.0) command += " -ss " + formatSeconds(start);
+        if (totalFrames > 0) {
+            command += " -t " + formatSeconds(static_cast<double>(totalFrames) / fps);
+        }
+        command += " -i " + shellQuote(audioPath) +
+                   " -map 0:v:0 -map 1:a:0 -c:v copy -c:a " +
+                   (codec == "prores" ? "pcm_s24le" : "aac") +
+                   (codec == "prores" ? "" : " -b:a 192k") + " -shortest " +
+                   shellQuote(outPath);
+    } else {
+        command += " -c copy " + shellQuote(outPath);
+    }
+    if (runCommand(command) != 0) {
+        error = "ffmpeg could not finish the R3D video";
+        return false;
+    }
+    return true;
+}
+
 int cmdVideo(const Args& args) {
     const std::string inPath = args.get("in");
     const std::string outPath = args.get("out");
@@ -2323,10 +2354,6 @@ int cmdVideo(const Args& args) {
     double segmentSeconds = args.getDouble("segment", 0.0);
     if (segmentSeconds <= 0.0 && resume) segmentSeconds = 10.0;
     const bool segmented = segmentSeconds > 0.0;
-    if (segmented && red) {
-        return fail("--segment/--resume is not wired for R3D yet; use red-decode --out-dir "
-                    "for sequences, or omit --segment");
-    }
     if (segmented && totalFrames <= 0) {
         return fail("--segment needs a known length: add --frames or --duration");
     }
@@ -2355,15 +2382,35 @@ int cmdVideo(const Args& args) {
         std::printf("engine: lut %s\n", lutPath.c_str());
     }
     if (job.textureGpu != nullptr) std::printf("texture: gpu\n");
+    std::string redAudioPath;
+    if (red && redClip.audioChannels > 0) {
+        redAudioPath = outPath + ".audio.au";
+        sr::RedReader audioReader;
+        sr::RedClip audioClip;
+        std::string audioError;
+        int audioRate = 0;
+        int audioChannels = 0;
+        if (!audioReader.open(inPath, audioClip, audioError) ||
+            !audioReader.writeAudio(redAudioPath, audioRate, audioChannels, audioError)) {
+            std::fprintf(stderr, "warning: R3D audio could not be extracted: %s; output is video-only\n",
+                         audioError.c_str());
+            redAudioPath.clear();
+        } else {
+            redClip.audioSampleRate = audioRate;
+        }
+    }
+
     if (red) {
         std::printf("R3D:   %s decode (%s)\n",
                     redScale == sr::RedScale::Full
                         ? "full"
                         : (redScale == sr::RedScale::Half ? "half" : "quarter"),
                     spectral ? "sRGB Rec.709" : "Log3G10 / REDWideGamutRGB");
-        if (redClip.audioChannels > 0) {
-            std::printf("warning: R3D audio (%d ch) is not muxed yet; output is video-only\n",
-                        redClip.audioChannels);
+        if (!redAudioPath.empty()) {
+            std::printf("audio: %d ch @ %d Hz (SDK -> AU -> mux)\n", redClip.audioChannels,
+                        redClip.audioSampleRate);
+        } else if (redClip.audioChannels > 0) {
+            std::printf("audio: extraction failed; output is video-only\n");
         } else {
             std::printf("audio: none in the R3D clip\n");
         }
@@ -2566,18 +2613,9 @@ int cmdVideo(const Args& args) {
 
     std::string finishError;
     if (red) {
-        // The R3D path is video-only for now: no source audio is muxed. The
-        // encoder already stamped the timecode, so just move the temp file.
-        std::error_code ec;
-        std::filesystem::remove(outPath, ec);
-        ec.clear();
-        std::filesystem::rename(tempVideo, outPath, ec);
-        if (ec) {
-            std::filesystem::copy_file(tempVideo, outPath,
-                                       std::filesystem::copy_options::overwrite_existing, ec);
-        }
-        if (ec) {
-            return fail("could not move the rendered video: " + ec.message());
+        if (!finishRedVideo(ffmpeg, videoInput, redAudioPath, startFrame, totalFrames, fps, codec,
+                            outPath, finishError)) {
+            return fail(finishError);
         }
     } else if (!finishVideo(ffmpeg, videoInput, inPath, startFrame, totalFrames, fps, outPath,
                             finishError)) {
@@ -2586,6 +2624,7 @@ int cmdVideo(const Args& args) {
 
     std::error_code cleanupError;
     if (!tempVideo.empty()) std::filesystem::remove(tempVideo, cleanupError);
+    if (!redAudioPath.empty()) std::filesystem::remove(redAudioPath, cleanupError);
     if (segmented && !args.has("keep-parts")) {
         std::filesystem::remove_all(workDir, cleanupError);
     }

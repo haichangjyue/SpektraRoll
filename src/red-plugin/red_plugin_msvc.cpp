@@ -193,6 +193,8 @@ int sr_red_open(const char* utf8_path, SrRedPluginClip* out, SrRedPluginHandle* 
         out->frames = static_cast<int64_t>(reader->clip->VideoFrameCount());
         out->fps = static_cast<double>(reader->clip->VideoAudioFramerate());
         out->audio_channels = static_cast<int>(reader->clip->AudioChannelCount());
+        out->audio_sample_rate =
+            static_cast<int>(reader->clip->MetadataItemAsInt(R3DSDK::RMD_SAMPLERATE));
         out->min_color_version = static_cast<int>(reader->clip->MinimumColorVersion());
         if (const char* tc = reader->clip->Timecode(0)) {
             std::snprintf(out->timecode, sizeof(out->timecode), "%s", tc);
@@ -282,6 +284,91 @@ int sr_red_decode(SrRedPluginHandle handle, int64_t frame, int format, int scale
     *pixels = static_cast<const uint16_t*>(reader->buffer);
     *width = reader->width;
     *height = reader->height;
+    return 1;
+}
+
+int sr_red_has_audio(SrRedPluginHandle handle) {
+    if (handle == nullptr) return 0;
+    auto* reader = static_cast<Reader*>(handle);
+    if (reader->clip == nullptr) return 0;
+    size_t maxBlock = 0;
+    return reader->clip->AudioChannelCount() > 0 &&
+                   reader->clip->AudioBlockCountAndSize(&maxBlock) > 0
+               ? 1
+               : 0;
+}
+
+int sr_red_write_audio(SrRedPluginHandle handle, const char* utf8_path, int* sample_rate,
+                       int* channels, char* error, int errorSize) {
+    if (handle == nullptr || utf8_path == nullptr) {
+        copyError(error, errorSize, "null clip handle or output path");
+        return 0;
+    }
+    auto* reader = static_cast<Reader*>(handle);
+    size_t maxBlock = 0;
+    const size_t blocks = reader->clip->AudioBlockCountAndSize(&maxBlock);
+    const int count = static_cast<int>(reader->clip->AudioChannelCount());
+    int rate = static_cast<int>(reader->clip->MetadataItemAsInt(R3DSDK::RMD_SAMPLERATE));
+    if (rate <= 0) rate = 48000;
+    if (blocks == 0 || count <= 0 || maxBlock == 0) {
+        copyError(error, errorSize, "the R3D clip has no audio");
+        return 0;
+    }
+
+    FILE* file = std::fopen(utf8_path, "wb");
+    if (file == nullptr) {
+        copyError(error, errorSize, "could not create the temporary audio file");
+        return 0;
+    }
+
+    // Sun AU, 32-bit linear PCM, matching the SDK's ExtractAudioSample example.
+    unsigned char header[28] = {};
+    header[0] = '.';
+    header[1] = 's';
+    header[2] = 'n';
+    header[3] = 'd';
+    header[7] = 28;
+    header[8] = header[9] = header[10] = header[11] = 0xFF;
+    header[15] = 5;
+    header[18] = static_cast<unsigned char>((rate >> 8) & 0xFF);
+    header[19] = static_cast<unsigned char>(rate & 0xFF);
+    header[23] = static_cast<unsigned char>(count & 0xFF);
+    if (std::fwrite(header, 1, sizeof(header), file) != sizeof(header)) {
+        std::fclose(file);
+        copyError(error, errorSize, "could not write the audio header");
+        return 0;
+    }
+
+    void* buffer = _aligned_malloc(maxBlock, 512);
+    if (buffer == nullptr) {
+        std::fclose(file);
+        copyError(error, errorSize, "could not allocate the audio buffer");
+        return 0;
+    }
+    for (size_t block = 0; block < blocks; ++block) {
+        size_t size = maxBlock;
+        const R3DSDK::DecodeStatus status = reader->clip->DecodeAudioBlock(block, buffer, &size);
+        if (status != R3DSDK::DSDecodeOK) {
+            _aligned_free(buffer);
+            std::fclose(file);
+            copyError(error, errorSize,
+                      "R3D audio decode failed at block " + std::to_string(block));
+            return 0;
+        }
+        if (size > 0 && std::fwrite(buffer, 1, size, file) != size) {
+            _aligned_free(buffer);
+            std::fclose(file);
+            copyError(error, errorSize, "could not write the audio data");
+            return 0;
+        }
+    }
+    _aligned_free(buffer);
+    if (std::fclose(file) != 0) {
+        copyError(error, errorSize, "could not close the audio file");
+        return 0;
+    }
+    if (sample_rate != nullptr) *sample_rate = rate;
+    if (channels != nullptr) *channels = count;
     return 1;
 }
 
