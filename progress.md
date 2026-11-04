@@ -50,6 +50,7 @@
 - 本机：`ctest` **11/11**（新增 `test_red`）；`verify-m1` **88.07 dB** 不变；UI `stocks selftest` 正常。
 - `CMake -DSR_WITH_REDSDK=ON` 无 SDK 时在配置阶段明确报错；`red_sdk.cpp` 用最小假头文件通过 `-Wall -Wextra -Wpedantic` 语法/接口检查。
 - 假 `libR3DSDK.a` 走通 `-DSR_WITH_REDSDK=ON` 的配置 + 编译 + `red-info --in`（fake 4096×2160 / 120 帧 / 25 fps）。
+- CI：run **113** Windows + macOS 双绿（官方构建只跑 stub）。
 - 双击/命令行验收：`build\spektra-roll-cli.exe red-info`（应是 `not built`）；`red-info --in sample.r3d --json` 给出指引。
 - 最新代码提交：`4a5353b`（D068）；之后只有文档更新（DECISIONS / STATUS / RUN / README / docs/red-sdk.md / 本文件）。
 

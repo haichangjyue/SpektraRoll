@@ -1258,6 +1258,7 @@
   - `CMake -DSR_WITH_REDSDK=ON` 无 SDK 时在配置阶段报错，不会生成半成品。
   - `red_sdk.cpp` 用最小假头文件做过 `-Wall -Wextra -Wpedantic` 语法/接口检查；并用假 `libR3DSDK.a` 完整走通 `-DSR_WITH_REDSDK=ON` 的配置、编译和 `red-info --in`（fake 4096×2160 / 120 帧），真实 SDK 仍需用户机器验证。
   - `ctest` **11/11**；`verify-m1` 88.07 dB 不变；UI `stocks selftest` 正常。
+  - CI：run **113** Windows + macOS 双绿；官方构建的 `red-info` 断言 `built=false`，`.r3d` 视频输入断言返回 RED 指引。
 - **后果**：
   - 官方包仍无 RED 支持；有 SDK 的用户可以本地编译并先用 `red-info` 验证文件和 SDK。
   - 下一步若继续：把 `red_sdk.cpp` 接上 `Clip::DecodeVideoFrame` / 新 SDK 解码，抽象 `video` 的帧源（ffmpeg / RED），再处理音频、timecode、预览代理；约 1.5–2.5 D，CI 只能测 stub。
