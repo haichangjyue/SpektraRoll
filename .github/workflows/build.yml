@@ -180,12 +180,14 @@ jobs:
           if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
           "$exe" red-info
           "$exe" red-info --json | grep -q '"built": false'
-          "$exe" red-info --json | grep -q 'without the RED R3D SDK'
+          "$exe" red-info --json | grep -q 'RED plugin not found'
           # A .r3d path is recognized in every build, but video refuses it with
           # the BYO-SDK / REDCINE-X guidance rather than failing in ffprobe.
           if "$exe" video --lut placeholder.cube --in sample.r3d \
                --out should-not.mov 2> red.txt; then exit 1; fi
           grep -q "RED R3D" red.txt
+          if "$exe" red-decode --in sample.r3d --out should-not.png 2> red.txt; then exit 1; fi
+          grep -q "RED plugin not found" red.txt
 
       - name: Bake the M1 film LUT and compare with the frozen reference
         shell: bash

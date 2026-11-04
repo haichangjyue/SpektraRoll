@@ -248,8 +248,18 @@ void printUsage() {
         "      the SDK version, and (with --in) the clip metadata. The SDK is\n"
         "      not bundled: build with -DSR_WITH_REDSDK=ON and SR_REDSDK_ROOT\n"
         "      pointing at your own SDK. See docs/red-sdk.md. Frame decoding is\n"
-        "      not wired in the D068 skeleton; `video` explains the REDCINE-X\n"
-        "      ProRes 4444 (RWG/Log3G10) route instead.\n"
+        "      Local BYO-SDK plugin. `red-decode` writes frames for `lut apply`.\n"
+        "\n"
+        "  spektra-roll-cli red-decode --in <clip.R3D> --out <frame.png>\n"
+        "                              [--frame 0] [--format log3g10|linear|srgb]\n"
+        "                              [--scale full|half|quarter]\n"
+        "  spektra-roll-cli red-decode --in <clip.R3D> --out-dir <dir>\n"
+        "                              [--start 0] [--frames N] [--out-ext png|exr]\n"
+        "                              [--format ...] [--scale ...]\n"
+        "      Decode R3D / R3D NE through the local spektra-red plugin. The\n"
+        "      default log3g10 format is REDWideGamutRGB + Log3G10, the domain of\n"
+        "      `lut bake --ocio-input \"Log3G10 REDWideGamutRGB\"`. Use half scale\n"
+        "      for 6K source previews. Requires scripts/build-red.cmd + your SDK.\n"
         "\n"
         "Notes:\n"
         "  * Only .cube LUTs are supported for now.\n"
@@ -321,8 +331,9 @@ std::string redGuidance(const std::string& path) {
         if (sr::redProbeClip(path, clip, error)) {
             message = "RED R3D was recognized (" + std::to_string(clip.width) + "x" +
                       std::to_string(clip.height) + ", " + std::to_string(clip.frames) +
-                      " frames, " + std::to_string(clip.fps) + " fps), but frame decoding is "
-                      "not wired in the D068 skeleton";
+                      " frames, " + std::to_string(clip.fps) +
+                      " fps); use `red-decode` to write frames and `lut apply` to grade them "
+                      "(direct video/preview integration is the next delivery)";
         } else {
             message = "RED R3D probe failed: " + error;
         }
@@ -826,13 +837,96 @@ int cmdRedInfo(const Args& args) {
             std::printf("  minimum color version: %d\n", clip.minimumColorVersion);
             if (!clip.timecode.empty()) std::printf("  timecode: %s\n", clip.timecode.c_str());
             std::printf(
-                "  frame decoding is not wired in the D068 skeleton; use the "
-                "REDCINE-X ProRes 4444 route for rendering\n");
+                "  use `red-decode` to write frames (log3g10 default), then grade them "
+                "with a `lut bake --ocio-input \"Log3G10 REDWideGamutRGB\"` table\n");
         } else {
             std::printf("clip error:    %s\n", clipError.c_str());
         }
     }
     return 0;
+}
+
+int cmdRedDecode(const Args& args) {
+    const std::string in = args.get("in");
+    const std::string out = args.get("out");
+    const std::string outDir = args.get("out-dir");
+    if (in.empty()) return fail("red-decode requires --in <clip.R3D>");
+    if (!sr::redIsRedFile(in)) return fail("red-decode expects an .r3d file: " + in);
+    if (out.empty() == outDir.empty()) {
+        return fail("red-decode needs exactly one of --out <frame.png> or --out-dir <dir>");
+    }
+
+    sr::RedFormat format = sr::RedFormat::Log3G10;
+    const std::string formatName = args.get("format", "log3g10");
+    if (formatName == "log3g10" || formatName == "log") {
+        format = sr::RedFormat::Log3G10;
+    } else if (formatName == "linear") {
+        format = sr::RedFormat::Linear;
+    } else if (formatName == "srgb") {
+        format = sr::RedFormat::Srgb;
+    } else {
+        return fail("--format expects log3g10, linear or srgb");
+    }
+
+    sr::RedScale scale = sr::RedScale::Full;
+    const std::string scaleName = args.get("scale", "full");
+    if (scaleName == "full") {
+        scale = sr::RedScale::Full;
+    } else if (scaleName == "half") {
+        scale = sr::RedScale::Half;
+    } else if (scaleName == "quarter") {
+        scale = sr::RedScale::Quarter;
+    } else {
+        return fail("--scale expects full, half or quarter");
+    }
+
+    sr::RedReader reader;
+    sr::RedClip clip;
+    std::string error;
+    if (!reader.open(in, clip, error)) return fail(error);
+    std::printf("RED:               %s\n", sr::redRuntime().sdkVersion.c_str());
+    std::printf("clip:              %dx%d, %lld frames, %.6f fps\n", clip.width, clip.height,
+                clip.frames, clip.fps);
+    if (!clip.timecode.empty()) std::printf("timecode:          %s\n", clip.timecode.c_str());
+    std::printf("format:            %s\n", formatName.c_str());
+    std::printf("scale:             %s\n", scaleName.c_str());
+
+    const auto save = [&](long long frame, const std::string& path) -> bool {
+        sr::Image image;
+        if (!reader.decode(frame, format, scale, image, error)) {
+            return fail(error) == 0;
+        }
+        if (!sr::saveImage(path, image, error, 16)) return fail(error) == 0;
+        std::printf("wrote %s (%d x %d, frame %lld)\n", path.c_str(), image.width, image.height,
+                    frame);
+        return true;
+    };
+
+    if (!outDir.empty()) {
+        const std::string ext = args.get("out-ext", "png");
+        if (ext != "png" && ext != "exr") return fail("--out-ext expects png or exr");
+        long long start = std::atoll(args.get("start", "0").c_str());
+        long long count = args.has("frames") ? std::atoll(args.get("frames").c_str()) : 0;
+        if (start < 0 || start >= clip.frames) return fail("--start is outside the clip");
+        if (count <= 0) count = clip.frames - start;
+        if (start + count > clip.frames) count = clip.frames - start;
+        std::filesystem::path directory(outDir);
+        std::error_code ec;
+        std::filesystem::create_directories(directory, ec);
+        if (ec) return fail("could not create " + outDir + ": " + ec.message());
+        const std::string stem = std::filesystem::path(in).stem().string();
+        for (long long i = 0; i < count; ++i) {
+            const long long frame = start + i;
+            char name[64];
+            std::snprintf(name, sizeof(name), "_%04lld.", frame);
+            const std::string path = (directory / (stem + name + ext)).string();
+            if (!save(frame, path)) return 1;
+        }
+        return 0;
+    }
+
+    const long long frame = std::atoll(args.get("frame", "0").c_str());
+    return save(frame, out) ? 0 : 1;
 }
 
 int cmdLutBake(const Args& args) {
@@ -3228,6 +3322,7 @@ int main(int argc, char** argv) {
     if (command == "preview") return cmdPreview(args);
     if (command == "ocio-info") return cmdOcioInfo(args);
     if (command == "red-info") return cmdRedInfo(args);
+    if (command == "red-decode") return cmdRedDecode(args);
 
     if (command == "gpu-info") {
         std::printf("%s", sr::GpuFilm::deviceInfo().c_str());

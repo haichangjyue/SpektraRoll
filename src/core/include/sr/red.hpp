@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 SpektraRoll contributors
 //
-// Optional RED R3D reader (D068). The RED SDK is never bundled with the
-// project or an official binary: a user who has accepted RED's EULA points the
-// build at their own SDK with -DSR_WITH_REDSDK=ON. Without that option this
-// header is backed by red_stub.cpp, so every command still links and can give a
-// clear "this build has no RED support" message.
+// Optional RED R3D reader (D068/D069). The RED SDK is never bundled with the
+// project or an official binary. A local `spektra-red` plugin (built with MSVC
+// against the user's own SDK) is loaded at runtime; the core executable only
+// speaks this C++ interface and never includes RED headers.
 #pragma once
 
 #include <cctype>
+#include <memory>
 #include <string>
+
+#include "sr/image.hpp"
 
 namespace sr {
 
@@ -26,10 +28,10 @@ inline bool redIsRedFile(const std::string& path) {
 }
 
 struct RedRuntime {
-    bool built = false;      // compiled with SR_WITH_REDSDK
-    bool available = false;  // SDK initialized successfully
+    bool built = false;      // the optional plugin was found and loaded
+    bool available = false;  // the plugin initialized the RED SDK
     std::string sdkVersion;
-    std::string libraryPath;  // folder passed to InitializeSdk
+    std::string libraryPath;  // plugin path, for diagnostics
     std::string message;      // human-readable state / failure
 };
 
@@ -43,13 +45,38 @@ struct RedClip {
     std::string timecode;
 };
 
-// Initializes the SDK once per process (lazily) and reports the result. Safe to
-// call from any command; the stub returns built=false.
+enum class RedFormat { Log3G10, Linear, Srgb };
+enum class RedScale { Full, Half, Quarter };
+
+// Holds one open R3D clip and reuses the plugin's aligned decode buffer.
+class RedReader {
+public:
+    RedReader();
+    ~RedReader();
+    RedReader(RedReader&&) noexcept;
+    RedReader& operator=(RedReader&&) noexcept;
+    RedReader(const RedReader&) = delete;
+    RedReader& operator=(const RedReader&) = delete;
+
+    bool open(const std::string& path, RedClip& clip, std::string& error);
+    void close();
+    bool isOpen() const;
+
+    // Decodes one frame into `out` as 0..1 samples. Log3G10 is the LUT-domain
+    // format; Linear/Srgb are Rec.709 for direct viewing.
+    bool decode(long long frame, RedFormat format, RedScale scale, Image& out,
+                std::string& error);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Returns the plugin/SDK state. Safe to call from any command.
 RedRuntime redRuntime();
 
-// Reads clip metadata through the SDK if this build has it. Frame decoding is
-// intentionally not part of the D068 skeleton; `video` still explains that it
-// needs the REDCINE-X / ProRes 4444 path for now.
+// Convenience wrapper for `red-info --in`: opens the clip, fills metadata,
+// closes it.
 bool redProbeClip(const std::string& path, RedClip& out, std::string& error);
 
 }  // namespace sr

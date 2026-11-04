@@ -1915,9 +1915,9 @@ private:
         }
         const QJsonObject clip = red.value(QStringLiteral("clip")).toObject();
         if (!clip.isEmpty()) {
-            return QStringLiteral("R3D 元数据已读到（%1×%2，%3 帧），但 D068 骨架还没有接入"
-                                  "帧解码。\n先用 REDCINE-X 导出 ProRes 4444"
-                                  "（REDWideGamutRGB + Log3G10）再渲染。")
+            return QStringLiteral("R3D 元数据已读到（%1×%2，%3 帧）。\n"
+                                  "用 build-red 的 `red-decode` 出帧（默认 Log3G10/RWG），"
+                                  "再用 `lut apply` 上胶片；界面预览/渲染的直连是下一阶段。")
                 .arg(clip.value(QStringLiteral("width")).toInt())
                 .arg(clip.value(QStringLiteral("height")).toInt())
                 .arg(clip.value(QStringLiteral("frames")).toVariant().toLongLong());
@@ -2110,7 +2110,7 @@ private:
                                 .arg(clip.value(QStringLiteral("frames")).toVariant().toLongLong());
                     const QString timecode = clip.value(QStringLiteral("timecode")).toString();
                     if (!timecode.isEmpty()) label += QStringLiteral(" · TC ") + timecode;
-                    label += QStringLiteral(" · 元数据已读；解码待接入（D068）");
+                    label += QStringLiteral(" · 元数据已读；用 red-decode 出帧（D069）");
                 } else {
                     label = QStringLiteral("R3D：SDK 已启用，但读不到元数据：") +
                             red.value(QStringLiteral("clipError")).toString();

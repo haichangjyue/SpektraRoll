@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 SpektraRoll contributors
 //
-// Contract for the optional RED R3D reader (D068). The default build compiles
-// the stub, so this test asserts that `.r3d` is still recognized and that every
-// entry point explains how to get a BYO-SDK build instead of failing silently.
+// Contract for the optional RED R3D reader (D068/D069). The default build has
+// no plugin, so this test asserts that `.r3d` is still recognized and that every
+// entry point explains how to build/load the BYO-SDK plugin instead of failing
+// silently.
 #include <cstdio>
 #include <string>
 
@@ -39,7 +40,7 @@ int main() {
         std::string error;
         check(!sr::redProbeClip("missing.r3d", clip, error), "stub cannot probe a clip");
         check(!error.empty(), "stub probe explains why");
-        std::printf("RED stub: %s\n", runtime.message.c_str());
+        std::printf("RED no plugin: %s\n", runtime.message.c_str());
     } else {
         std::printf("RED SDK build: available=%d, version=%s, note=%s\n",
                     runtime.available ? 1 : 0, runtime.sdkVersion.c_str(),
