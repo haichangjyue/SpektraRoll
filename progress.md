@@ -2,17 +2,101 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D073：macOS SwiftUI 三栏初版）
-> **当前里程碑**：**M5 进行中 · macOS SwiftUI 骨架（D073）+ Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D074：macOS UI v1 验收反馈，待做）
+> **当前里程碑**：**M5 进行中 · macOS UI v1 已验收，v1.1 反馈待做（D074）+ Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
 
+## 最新：D074 · macOS UI v1 验收反馈（2026-11-05 晚，未开工）
+
+> 产品负责人已在 Mac 上实际验收 D073：**效果比预期好**。以下 6 点是下一轮（macOS UI v1.1）要改的，**目前都没有实现**。
+
+### 一、这轮已完成的事
+
+**远程接管**
+- 通过局域网 SSH 连上 Mac：`wenyutao@192.168.5.142`，macOS 14.7.5 / Xcode 16.2 / Swift 6.0.3。
+- 克隆仓库到 `/Users/wenyutao/Documents/SpektraRoll`；非交互 SSH 的 PATH 只有 `/usr/bin:/bin`，所有脚本显式加 `/opt/homebrew/bin`。
+- Mac 上直接编译、打包、启动、验收，不再依赖 GitHub macOS runner 排队。
+
+**构建与打包**
+- `scripts/build-macos-ui.sh` 成功：CLI + SwiftUI + `.app`（约 167 MB），包含 `spektra-roll-cli`、ffmpeg/ffprobe 9.0.2、`data/profiles`、`data/ocio`、Noto Sans CJK SC Regular/Bold。
+- `scripts/fetch-macos-fonts.sh` 下载并打包字体；ad-hoc 签名通过。
+- 修复：`AppState.inspectorTab` 缺失（CI #125/#126 失败原因）、播放器时长 00:00、`video` 未传 `--ffmpeg` 绝对路径、深色标题栏、白色 `+` 按钮、导入按钮白色药丸。
+- 增加**仅环境变量生效**的调试钩子：`SPEKTRA_ALL_SPACES` / `SPEKTRA_CAPTURE` / `SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTORENDER`；正常启动不受影响。
+
+**验收结果**
+- 三栏、字体、白色药丸、缩略图、AVPlayer 播放、空格、INFO、胶片效果、UI 渲染均正常。
+- 真实 `C0113.MP4`：3840×2160 / 50p / 312 帧 / 00:06；缩略图、播放、INFO、4K 单帧胶片预览成功（`~/Library/Caches/SpektraRoll/preview/graded.png`）。
+- 合成 3 秒测试片：UI 触发渲染 → 640×360 / 3.00 s / H.264 / yuv420p。
+- 远程截图坑：SSH 在 `Background` launchd domain，`screencapture` 抓不到 GUI 窗口；用 app 内 `SPEKTRA_CAPTURE` 自截图。Stage Manager 临时关闭后已恢复。
+
+**GitHub**
+- 最新两个 run 的 macOS job 是 **cancelled**（runner 容量/取消），不是编译红。
+- #125/#126 确实失败于缺少 `inspectorTab`，已修；**#128 `swift build` 通过**。之后以 Mac 本机编译为准。
+
+**环境改动 / 已知限制**
+- OCIO **当前不可用**：macOS 14 上 Homebrew 无 OCIO bottle，源码构建 `python@3.15` 被 clang tail-call 错误挡住。
+- 为装 OCIO，把原来的手动 cmake 4.4.4 备份到 `/opt/homebrew/opt/cmake-manual-4.4.4`，切到 Homebrew cmake 4.4.5（正常可用）。
+- 首版用内置 10 种 Log 输入；R3D 在 macOS 仍禁用。
+- `.app` 未公证；ffmpeg/OCIO 仍是 Homebrew 动态依赖，分发前要静态链接/捆绑。
+
+### 二、你这次提出的 6 点反馈（全部待做）
+
+1. **直方图 + 宽容度等数据参考**：放在中间视频画面下方、`胶片效果` 按钮那一排的上方。
+2. **视频画面缩放**：能放大/平移仔细看；至少支持适合窗口 / 100% / 滚轮缩放。
+3. **播放时实时胶片预览**：现在只有暂停时单帧；希望在按下播放时做**预渲染缓存**，然后实时播放胶片效果。
+4. **关闭胶片效果时的“原片”**：应该显示**对应色彩空间解码到标准显示（sRGB）**的画面，而不是 Log 灰片；否则对比没有意义。
+5. **参数即时刷新**：胶片效果开启时，任何参数变化都应立即反映到画面，不需要用户重新开关。
+6. **导出按钮**：放在 `胶片效果` 按钮左侧；按下直接跳到 **OUTPUT** tab。
+
+### 三、下一轮关键决策（D074）
+
+| 决策 | 结论 |
+|---|---|
+| 优先级 | 先做 UI v1.1 的 6 点反馈；**OCIO 单独一轮**，不混进来 |
+| 实时预览方向 | **播放时预渲染缓存**：按当前参数生成低分辨率/代理预览片段，缓存后交给播放器；参数变化使缓存失效 |
+| 关闭胶片效果 | 不能直接放 AVPlayer 原片；要显示“输入色彩空间 → 标准显示 sRGB”的解码结果 |
+| 参数变化 | 防抖 + 使预览缓存失效 + 自动刷新当前帧（胶片效果开启时） |
+| 导出按钮 | 播放器控制条增加“导出”白色药丸，点击 `inspectorTab = .output` |
+| Windows Qt | 继续冻结（只修 bug，不加功能），等 macOS v1.1 设计稳定 |
+
+### 四、未完成待办（按建议顺序）
+
+**P0 · 低风险、先做**
+- [ ] #4 关闭胶片效果时显示“输入解码到 sRGB”的显示画面（不是 Log 灰片）。
+- [ ] #6 播放器增加“导出”按钮，跳 OUTPUT。
+- [ ] #1 视频下方加直方图 + 宽容度/亮度范围/高光暗部裁切参考。
+- [ ] #2 画面缩放/平移/适合/100%。
+
+**P1 · 实时预览（最大块）**
+- [ ] #3 播放时预渲染缓存：按参数 hash 生成低分辨率显示代理 + 胶片代理；AVPlayer 切换；缓存失效/清理。
+- [ ] #5 参数变化自动刷新（防抖 + 缓存失效 + 当前帧重渲染）。
+
+**P2 · 后续**
+- [ ] OCIO：MacPorts / 自建静态 OCIO / 升级 macOS / 固定 python 版本，四选一。
+- [ ] 真实 4K50 `C0113.MP4` 的整段渲染（音频/timecode/ProRes）验收。
+- [ ] 时间线拖动/逐帧预览、渲染队列、区间输入。
+- [ ] macOS 公证/DMG、ffmpeg/OCIO 静态依赖。
+- [ ] R3D macOS（单独立项）。
+
+### 五、实现提示（给下一个 AI）
+
+- **直方图/宽容度**：可先在 Swift 里从预览 RGBA 计算 RGB/luma 直方图、min/max、0.1%/99.9% 分位、高光/暗部裁切百分比；若要和 CLI 完全一致，再加 `preview` 协议的 `histogram` 字段。
+- **缩放**：播放器与静帧共用 `zoom`/`offset`；双击切适合/100%；AVPlayerView 可用 `NSScrollView` 包一层或对 SwiftUI 层做 scale/offset。
+- **预渲染缓存**：建议新增 CLI 侧“预览片段”能力（低分辨率代理 + 参数 hash），不要让 UI 复制颜色逻辑；缓存目录 `~/Library/Caches/SpektraRoll/preview-cache/`；播放前先生成，生成期间显示进度/源片。
+- **关闭胶片效果**：用同一套代理管线生成“display”版本（`convert --from <input>` 或等价 LUT），与“film”版本成对缓存。
+- **参数变化**：`LookSettings` 变更时 `objectWillChange`/`onChange` 触发防抖 150–250 ms，使缓存失效并刷新当前帧。
+
+---
+
 ## 最新：D073 · macOS SwiftUI 三栏初版
 
-> 新开对话先读这一节；D072 是引擎契约，D071 及更早是 CLI/引擎历史。
+> **状态**：Mac 上已构建并验收（2026-11-05）；产品负责人提出 6 点改进，见上方 **D074**（下一轮做）。
+>
+> 新开对话先读 D074；D072 是引擎契约，D071 及更早是 CLI/引擎历史。
 
 ### 一、这次做了什么
 
