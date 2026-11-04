@@ -126,6 +126,13 @@ It only drives `spektra-roll-cli` — preview extracts one frame with ffmpeg and
 grades it with `lut apply`, Render streams the CLI log and progress — so the UI
 cannot drift from the pipeline CI tests.
 
+> **macOS (D072):** the macOS shell is **SwiftUI**, not Qt. It drives the same
+> CLI. The shared contract is `docs/engine-api.md`, the parameter source is
+> `data/ui-schema.json`, the design tokens are `design/tokens.json`, and the
+> feature matrix is `docs/ui-parity.md`. The Windows Qt shell is frozen (bug
+> fixes only) until the macOS v1 design is frozen; then Windows UI v3 is rebuilt
+> from the same design spec.
+
 ```powershell
 .\scripts\build-ui.cmd          # configure + build + windeployqt + launch
 ```
@@ -244,6 +251,10 @@ the server protocol.
 ## Use
 
 ```
+# what this build can do and which stocks it ships (UI contract, D072)
+spektra-roll-cli capabilities --json
+spektra-roll-cli catalog --json
+
 # bake the default Kodak Portra 400 + Portra Endura LUT
 spektra-roll-cli lut bake --out portra400_endura.cube --size 33
 

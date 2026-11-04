@@ -1,0 +1,545 @@
+{
+  "version": 1,
+  "updated": "2026-11-04",
+  "note": "D072 Phase 0: single source of truth for the Qt and SwiftUI parameter panels. Labels, ranges, defaults and CLI flags live here; neither UI should hardcode them. The CLI contract is documented in docs/engine-api.md.",
+  "visibleWhenSyntax": "Simple expressions: <id> == <value>, <id> != <value>, or true. String literals are unquoted.",
+  "groups": [
+    { "id": "input", "label": { "zh": "素材", "en": "Input" } },
+    { "id": "materials", "label": { "zh": "材料", "en": "Materials" } },
+    { "id": "develop", "label": { "zh": "显影前", "en": "Before development" } },
+    { "id": "print", "label": { "zh": "显影后", "en": "After development" } },
+    { "id": "texture", "label": { "zh": "质感", "en": "Texture" } },
+    { "id": "color", "label": { "zh": "色彩管理", "en": "Color management" } },
+    { "id": "output", "label": { "zh": "输出", "en": "Output" } },
+    { "id": "render", "label": { "zh": "渲染", "en": "Render" } },
+    { "id": "r3d", "label": { "zh": "R3D 解码", "en": "R3D decode" } }
+  ],
+  "parameters": [
+    {
+      "id": "engine",
+      "group": "input",
+      "label": { "zh": "引擎", "en": "Engine" },
+      "type": "enum",
+      "default": "lut",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--engine", "style": "value" },
+      "values": [
+        { "value": "lut", "label": { "zh": "LUT（快）", "en": "LUT (fast)" } },
+        { "value": "spectral", "label": { "zh": "光谱（物理，慢）", "en": "Spectral (physical, slow)" } },
+        { "value": "spectral-gpu", "label": { "zh": "光谱 GPU（物理，快）", "en": "Spectral GPU (physical, fast)" } }
+      ],
+      "help": { "zh": "LUT 先把胶片烘焙成 3D 表；光谱引擎逐像素计算，GPU 引擎在无设备时自动回退 CPU。", "en": "LUT bakes the film into a 3D table; spectral computes per pixel, and the GPU engine falls back to CPU when no device is available." }
+    },
+    {
+      "id": "input",
+      "group": "input",
+      "label": { "zh": "画面类型", "en": "Input transform" },
+      "type": "enum",
+      "default": "s-log3",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--input", "style": "value" },
+      "values": [
+        { "value": "srgb", "label": { "zh": "sRGB", "en": "sRGB" } },
+        { "value": "apple-log", "label": { "zh": "Apple Log", "en": "Apple Log" } },
+        { "value": "s-log3", "label": { "zh": "Sony S-Log3（S-Gamut3.Cine）", "en": "Sony S-Log3 (S-Gamut3.Cine)" } },
+        { "value": "s-log3-sgamut3", "label": { "zh": "Sony S-Log3（S-Gamut3）", "en": "Sony S-Log3 (S-Gamut3)" } },
+        { "value": "c-log3", "label": { "zh": "Canon C-Log3", "en": "Canon C-Log3" } },
+        { "value": "v-log", "label": { "zh": "Panasonic V-Log", "en": "Panasonic V-Log" } },
+        { "value": "logc3", "label": { "zh": "ARRI LogC3", "en": "ARRI LogC3" } },
+        { "value": "logc4", "label": { "zh": "ARRI LogC4", "en": "ARRI LogC4" } },
+        { "value": "bmd-film", "label": { "zh": "Blackmagic Film Gen 5", "en": "Blackmagic Film Gen 5" } },
+        { "value": "davinci", "label": { "zh": "DaVinci Intermediate", "en": "DaVinci Intermediate" } }
+      ],
+      "help": { "zh": "必须是素材真实的 Log 编码；无标签的 Sony XAVC 还要把容器矩阵设为 bt709。", "en": "Must match the clip's real log encoding; untagged Sony XAVC also needs the container matrix set to bt709." }
+    },
+    {
+      "id": "ocioEnabled",
+      "group": "color",
+      "label": { "zh": "使用 OCIO 输入", "en": "Use OCIO input" },
+      "type": "bool",
+      "default": false,
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "style": "virtual" },
+      "help": { "zh": "勾选后替代“画面类型”；UI 把配置和色彩空间分别传给 --ocio-config / --ocio-input。", "en": "Replaces the input transform; the UI passes --ocio-config and --ocio-input instead." },
+      "visibleWhen": "true"
+    },
+    {
+      "id": "ocioConfig",
+      "group": "color",
+      "label": { "zh": "OCIO 配置", "en": "OCIO config" },
+      "type": "path",
+      "default": "data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--ocio-config", "style": "value" },
+      "visibleWhen": "ocioEnabled == true",
+      "help": { "zh": "留空时使用 $OCIO；仓库自带 ACES 2.0 studio 配置。", "en": "Empty means $OCIO; the repo ships an ACES 2.0 studio config." }
+    },
+    {
+      "id": "ocioInput",
+      "group": "color",
+      "label": { "zh": "输入色彩空间", "en": "Input color space" },
+      "type": "enum",
+      "default": "S-Log3 S-Gamut3.Cine",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--ocio-input", "style": "value" },
+      "source": "ocio-info.colorSpaces",
+      "visibleWhen": "ocioEnabled == true",
+      "help": { "zh": "名字来自 `ocio-info --json`，不要手写猜测。", "en": "Names come from `ocio-info --json`; do not guess." }
+    },
+    {
+      "id": "film",
+      "group": "materials",
+      "label": { "zh": "胶片", "en": "Film" },
+      "type": "stock",
+      "default": "kodak_portra_400",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--film", "style": "value" },
+      "source": "catalog.films",
+      "help": { "zh": "列表来自 `catalog --json`；反转片会自动切直扫并停用相纸。", "en": "The list comes from `catalog --json`; reversal stocks switch to direct scan and disable paper." }
+    },
+    {
+      "id": "paper",
+      "group": "materials",
+      "label": { "zh": "相纸 / 印片", "en": "Paper / print film" },
+      "type": "stock",
+      "default": "kodak_portra_endura",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--paper", "style": "value" },
+      "source": "catalog.papers",
+      "visibleWhen": "scan != slide",
+      "help": { "zh": "负片选目标相纸；Vision3 会自动切到 2383，列表里标注“电影印片”。", "en": "Negatives use their target paper; Vision3 switches to 2383, marked as a cinema print film." }
+    },
+    {
+      "id": "scan",
+      "group": "materials",
+      "label": { "zh": "扫描方式", "en": "Scan mode" },
+      "type": "enum",
+      "default": "negative",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--scan", "style": "value" },
+      "values": [
+        { "value": "negative", "label": { "zh": "扫描负片", "en": "Scan negative" } },
+        { "value": "print", "label": { "zh": "扫描印片", "en": "Scan print" } },
+        { "value": "slide", "label": { "zh": "扫描反转片（直扫）", "en": "Scan slide (direct)" } }
+      ],
+      "help": { "zh": "正片 + 印片/负片、负片 + 直扫都是非法组合，CLI 会明确报错。", "en": "Reversal + print/negative and negative + slide are rejected with a clear error." }
+    },
+    {
+      "id": "exposure",
+      "group": "develop",
+      "label": { "zh": "曝光", "en": "Exposure" },
+      "type": "number",
+      "default": 0.7,
+      "range": [-3.0, 3.0, 0.05],
+      "unit": "EV",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--exposure", "style": "value" }
+    },
+    {
+      "id": "contrast",
+      "group": "develop",
+      "label": { "zh": "反差", "en": "Contrast" },
+      "type": "number",
+      "default": 1.15,
+      "range": [0.5, 2.0, 0.01],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--contrast", "style": "value" },
+      "notes": { "zh": "负片默认 1.15，印片默认 1.0，反转片直扫默认 1.0；支点是 18% 中灰。", "en": "Negative defaults to 1.15, print and slide to 1.0; the pivot is 18% grey." }
+    },
+    {
+      "id": "couplers",
+      "group": "develop",
+      "label": { "zh": "DIR 耦合剂", "en": "DIR couplers" },
+      "type": "bool",
+      "default": false,
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--couplers", "style": "onoff", "true": "on", "false": "off" },
+      "notes": { "zh": "Apple Log 默认开启；sRGB 参考默认关闭。", "en": "On by default for Apple Log, off for the sRGB reference." }
+    },
+    {
+      "id": "gamut",
+      "group": "print",
+      "label": { "zh": "OkLCh 色域压缩", "en": "OkLCh gamut mapping" },
+      "type": "enum",
+      "default": "oklch",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--gamut", "style": "value" },
+      "values": [
+        { "value": "oklch", "label": { "zh": "开", "en": "On" } },
+        { "value": "off", "label": { "zh": "关", "en": "Off" } }
+      ],
+      "notes": { "zh": "负片默认开，印片默认关。", "en": "On for negative scans, off for print scans." }
+    },
+    {
+      "id": "grain",
+      "group": "texture",
+      "label": { "zh": "颗粒", "en": "Grain" },
+      "type": "number",
+      "default": 0.4,
+      "range": [0.0, 1.0, 0.01],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--grain", "style": "value" }
+    },
+    {
+      "id": "grainRate",
+      "group": "texture",
+      "label": { "zh": "颗粒稳定度", "en": "Grain rate" },
+      "type": "integer",
+      "default": 3,
+      "range": [1, 8, 1],
+      "appliesTo": ["preview", "render"],
+      "cli": { "flag": "--grain-rate", "style": "value" }
+    },
+    {
+      "id": "halation",
+      "group": "texture",
+      "label": { "zh": "光晕", "en": "Halation" },
+      "type": "number",
+      "default": 0.45,
+      "range": [0.0, 1.0, 0.01],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--halation", "style": "value" }
+    },
+    {
+      "id": "glare",
+      "group": "texture",
+      "label": { "zh": "眩光", "en": "Glare" },
+      "type": "number",
+      "default": 0.2,
+      "range": [0.0, 1.0, 0.01],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--glare", "style": "value" }
+    },
+    {
+      "id": "diffusion",
+      "group": "texture",
+      "label": { "zh": "扩散", "en": "Diffusion" },
+      "type": "number",
+      "default": 0.1,
+      "range": [0.0, 1.0, 0.01],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--diffusion", "style": "value" }
+    },
+    {
+      "id": "spreadModel",
+      "group": "texture",
+      "label": { "zh": "扩散模型", "en": "Spread model" },
+      "type": "enum",
+      "default": "physical",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--spread-model", "style": "value" },
+      "values": [
+        { "value": "physical", "label": { "zh": "物理（微米）", "en": "Physical (microns)" } },
+        { "value": "box", "label": { "zh": "盒状（旧观感）", "en": "Box (legacy)" } }
+      ]
+    },
+    {
+      "id": "frameWidthMm",
+      "group": "texture",
+      "label": { "zh": "画幅宽度", "en": "Frame width" },
+      "type": "number",
+      "default": 36.0,
+      "range": [8.0, 70.0, 0.1],
+      "unit": "mm",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--frame-width-mm", "style": "value" },
+      "visibleWhen": "spreadModel == physical"
+    },
+    {
+      "id": "halationSpread",
+      "group": "texture",
+      "label": { "zh": "光晕扩散", "en": "Halation spread" },
+      "type": "number",
+      "default": 225.0,
+      "range": [10.0, 2000.0, 1.0],
+      "unit": "um",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--halation-spread", "style": "value" },
+      "visibleWhen": "spreadModel == physical"
+    },
+    {
+      "id": "glareSpread",
+      "group": "texture",
+      "label": { "zh": "眩光扩散", "en": "Glare spread" },
+      "type": "number",
+      "default": 725.0,
+      "range": [100.0, 4000.0, 1.0],
+      "unit": "um",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--glare-spread", "style": "value" },
+      "visibleWhen": "spreadModel == physical"
+    },
+    {
+      "id": "diffusionSpread",
+      "group": "texture",
+      "label": { "zh": "扩散半径", "en": "Diffusion spread" },
+      "type": "number",
+      "default": 122.0,
+      "range": [10.0, 2000.0, 1.0],
+      "unit": "um",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--diffusion-spread", "style": "value" },
+      "visibleWhen": "spreadModel == physical"
+    },
+    {
+      "id": "textureEngine",
+      "group": "texture",
+      "label": { "zh": "GPU 质感", "en": "GPU texture" },
+      "type": "enum",
+      "default": "auto",
+      "appliesTo": ["preview", "render"],
+      "cli": { "flag": "--texture-engine", "style": "value" },
+      "values": [
+        { "value": "auto", "label": { "zh": "自动", "en": "Auto" } },
+        { "value": "cpu", "label": { "zh": "CPU", "en": "CPU" } },
+        { "value": "gpu", "label": { "zh": "GPU", "en": "GPU" } }
+      ],
+      "notes": { "zh": "auto 只在光谱 GPU 时启用；GPU 失败会自动回退 CPU。", "en": "auto only enables it with spectral-gpu; GPU failure falls back to CPU." }
+    },
+    {
+      "id": "trc",
+      "group": "output",
+      "label": { "zh": "传输函数", "en": "Transfer" },
+      "type": "enum",
+      "default": "srgb",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--trc", "style": "value" },
+      "values": [
+        { "value": "srgb", "label": { "zh": "SDR（sRGB）", "en": "SDR (sRGB)" } },
+        { "value": "pq", "label": { "zh": "HDR PQ", "en": "HDR PQ" } },
+        { "value": "hlg", "label": { "zh": "HDR HLG", "en": "HDR HLG" } }
+      ]
+    },
+    {
+      "id": "codec",
+      "group": "output",
+      "label": { "zh": "编码", "en": "Codec" },
+      "type": "enum",
+      "default": "h264",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--codec", "style": "value" },
+      "values": [
+        { "value": "h264", "label": { "zh": "H.264", "en": "H.264" } },
+        { "value": "hevc", "label": { "zh": "HEVC Main10", "en": "HEVC Main10" } },
+        { "value": "prores", "label": { "zh": "ProRes 422 HQ", "en": "ProRes 422 HQ" } }
+      ],
+      "notes": { "zh": "HDR 默认 HEVC；R3D 默认 ProRes；奇数高度只能用 ProRes。", "en": "HDR defaults to HEVC, R3D to ProRes; odd heights require ProRes." }
+    },
+    {
+      "id": "crf",
+      "group": "output",
+      "label": { "zh": "质量 CRF", "en": "Quality CRF" },
+      "type": "integer",
+      "default": 16,
+      "range": [0, 51, 1],
+      "appliesTo": ["render"],
+      "cli": { "flag": "--crf", "style": "value" },
+      "visibleWhen": "codec != prores"
+    },
+    {
+      "id": "preset",
+      "group": "output",
+      "label": { "zh": "编码预设", "en": "Encoder preset" },
+      "type": "enum",
+      "default": "medium",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--preset", "style": "value" },
+      "values": [
+        { "value": "ultrafast", "label": { "zh": "ultrafast", "en": "ultrafast" } },
+        { "value": "fast", "label": { "zh": "fast", "en": "fast" } },
+        { "value": "medium", "label": { "zh": "medium", "en": "medium" } },
+        { "value": "slow", "label": { "zh": "slow", "en": "slow" } },
+        { "value": "veryslow", "label": { "zh": "veryslow", "en": "veryslow" } }
+      ],
+      "visibleWhen": "codec != prores"
+    },
+    {
+      "id": "encoder",
+      "group": "output",
+      "label": { "zh": "编码器", "en": "Encoder" },
+      "type": "enum",
+      "default": "sw",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--encoder", "style": "value" },
+      "values": [
+        { "value": "sw", "label": { "zh": "软件", "en": "Software" } },
+        { "value": "qsv", "label": { "zh": "Intel Quick Sync", "en": "Intel Quick Sync" } }
+      ],
+      "visibleWhen": "codec != prores"
+    },
+    {
+      "id": "bits",
+      "group": "output",
+      "label": { "zh": "位深", "en": "Bit depth" },
+      "type": "enum",
+      "default": 16,
+      "appliesTo": ["preview", "bake"],
+      "cli": { "flag": "--bits", "style": "value" },
+      "values": [
+        { "value": 8, "label": { "zh": "8-bit", "en": "8-bit" } },
+        { "value": 16, "label": { "zh": "16-bit", "en": "16-bit" } }
+      ]
+    },
+    {
+      "id": "start",
+      "group": "render",
+      "label": { "zh": "起始", "en": "Start" },
+      "type": "number",
+      "default": 0.0,
+      "range": [0.0, 36000.0, 0.01],
+      "unit": "s",
+      "appliesTo": ["preview", "render"],
+      "cli": { "flag": "--start", "style": "value" }
+    },
+    {
+      "id": "duration",
+      "group": "render",
+      "label": { "zh": "时长", "en": "Duration" },
+      "type": "number",
+      "default": null,
+      "range": [0.0, 36000.0, 0.01],
+      "unit": "s",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--duration", "style": "value" }
+    },
+    {
+      "id": "frames",
+      "group": "render",
+      "label": { "zh": "帧数", "en": "Frames" },
+      "type": "integer",
+      "default": null,
+      "range": [0, 10000000, 1],
+      "appliesTo": ["render"],
+      "cli": { "flag": "--frames", "style": "value" }
+    },
+    {
+      "id": "segment",
+      "group": "render",
+      "label": { "zh": "分段", "en": "Segment" },
+      "type": "number",
+      "default": 0.0,
+      "range": [0.0, 3600.0, 0.1],
+      "unit": "s",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--segment", "style": "value" }
+    },
+    {
+      "id": "resume",
+      "group": "render",
+      "label": { "zh": "断点续渲", "en": "Resume" },
+      "type": "bool",
+      "default": false,
+      "appliesTo": ["render"],
+      "cli": { "flag": "--resume", "style": "presence" }
+    },
+    {
+      "id": "jobs",
+      "group": "render",
+      "label": { "zh": "并行段数", "en": "Parallel parts" },
+      "type": "integer",
+      "default": 0,
+      "range": [0, 64, 1],
+      "appliesTo": ["render"],
+      "cli": { "flag": "--jobs", "style": "value" },
+      "notes": { "zh": "0 = 自动（min(3, 核数/4, 段数)）。", "en": "0 = auto (min(3, cores/4, parts))." }
+    },
+    {
+      "id": "timecode",
+      "group": "render",
+      "label": { "zh": "时间码", "en": "Timecode" },
+      "type": "string",
+      "default": "",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--timecode", "style": "value" }
+    },
+    {
+      "id": "noTimecode",
+      "group": "render",
+      "label": { "zh": "不写时间码", "en": "No timecode" },
+      "type": "bool",
+      "default": false,
+      "appliesTo": ["render"],
+      "cli": { "flag": "--no-timecode", "style": "presence" }
+    },
+    {
+      "id": "progress",
+      "group": "render",
+      "label": { "zh": "进度格式", "en": "Progress format" },
+      "type": "enum",
+      "default": "text",
+      "appliesTo": ["render"],
+      "cli": { "flag": "--progress", "style": "value" },
+      "values": [
+        { "value": "text", "label": { "zh": "文本", "en": "Text" } },
+        { "value": "json", "label": { "zh": "JSON 事件", "en": "JSON events" } }
+      ]
+    },
+    {
+      "id": "interp",
+      "group": "output",
+      "label": { "zh": "LUT 插值", "en": "LUT interpolation" },
+      "type": "enum",
+      "default": "tetra",
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--interp", "style": "value" },
+      "values": [
+        { "value": "tetra", "label": { "zh": "四面体", "en": "Tetrahedral" } },
+        { "value": "tri", "label": { "zh": "三线性", "en": "Trilinear" } }
+      ]
+    },
+    {
+      "id": "strength",
+      "group": "output",
+      "label": { "zh": "强度", "en": "Strength" },
+      "type": "number",
+      "default": 1.0,
+      "range": [0.0, 1.0, 0.01],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--strength", "style": "value" }
+    },
+    {
+      "id": "threads",
+      "group": "render",
+      "label": { "zh": "线程", "en": "Threads" },
+      "type": "integer",
+      "default": 0,
+      "range": [0, 256, 1],
+      "appliesTo": ["bake", "preview", "render"],
+      "cli": { "flag": "--threads", "style": "value" },
+      "notes": { "zh": "0 = 自动。", "en": "0 = auto." }
+    },
+    {
+      "id": "redScale",
+      "group": "r3d",
+      "label": { "zh": "R3D 解码尺寸", "en": "R3D decode scale" },
+      "type": "enum",
+      "default": "half",
+      "appliesTo": ["preview", "render"],
+      "cli": { "flag": "--red-scale", "style": "value" },
+      "values": [
+        { "value": "full", "label": { "zh": "全分辨率（慢）", "en": "Full (slow)" } },
+        { "value": "half", "label": { "zh": "一半（推荐）", "en": "Half (recommended)" } },
+        { "value": "quarter", "label": { "zh": "四分之一（快）", "en": "Quarter (fast)" } }
+      ],
+      "visibleWhen": "inputIsR3D == true",
+      "notes": { "zh": "只有装了 RED 插件的 Windows 构建可用；macOS 首版明确禁用。", "en": "Only available in Windows builds with the RED plugin; disabled on macOS v1." }
+    }
+  ],
+  "ui": {
+    "preview": {
+      "maxSide": 1600,
+      "proxyMaxSide": 960,
+      "cacheMb": 1024,
+      "scrubIntervalMs": 90
+    },
+    "queue": {
+      "persistFile": "queue.json",
+      "autoUniqueNames": true
+    },
+    "window": {
+      "minWidth": 1200,
+      "minHeight": 760
+    },
+    "theme": "design/tokens.json"
+  }
+}

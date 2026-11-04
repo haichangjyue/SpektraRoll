@@ -70,6 +70,22 @@ jobs:
           "$exe" lut apply --lut warm.cube --in chart.png --out chart_warm.png
           ls -l chart.png chart_warm.png
 
+      - name: Engine contract (D072)
+        shell: bash
+        run: |
+          set -e
+          exe=build/spektra-roll-cli
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          py=python3
+          command -v python3 >/dev/null 2>&1 || py=python
+          "$exe" capabilities --json > capabilities.json
+          "$py" -c "import json; d=json.load(open('capabilities.json')); assert d['version']; assert d['preview']['protocol']==2; assert 'catalog' in d['commands']; print('capabilities ok:', d['platform'], d['gpu']['backend'])"
+          "$exe" catalog --json > catalog.json
+          "$py" -c "import json; d=json.load(open('catalog.json')); assert d['counts']['films']==20, d['counts']; assert d['counts']['papers']==8, d['counts']; print('catalog ok:', d['counts'])"
+          printf 'hello\nquit\n' | "$exe" preview > hello.txt
+          grep -q '"protocol":2' hello.txt
+          cat hello.txt
+
       - name: Smoke test floating point EXR (D055)
         shell: bash
         run: |

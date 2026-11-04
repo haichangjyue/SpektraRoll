@@ -32,6 +32,7 @@
 
 #include "sr/film_model.hpp"
 #include "sr/image.hpp"
+#include "sr/json.hpp"
 #include "sr/lut3d.hpp"
 #include "sr/metrics.hpp"
 #include "sr/parallel.hpp"
@@ -55,6 +56,14 @@ void printUsage() {
         "spektra-roll-cli %s\n"
         "\n"
         "Usage:\n"
+        "  spektra-roll-cli capabilities [--json]\n"
+        "      Report build features, platform, GPU/OCIO/RED availability and the\n"
+        "      preview protocol. Machine-readable contract for the desktop UIs (D072).\n"
+        "\n"
+        "  spektra-roll-cli catalog [--dir data/profiles] [--json]\n"
+        "      List the validated film/paper/print stocks exactly as the UIs show\n"
+        "      them (D072).\n"
+        "\n"
         "  spektra-roll-cli gen --out <file.png|file.exr> [--width N] [--height N]\n"
         "                       [--bits 8|16] [--exr-half] [--exr-raw] [--exr-linear]\n"
         "      Write the built-in test chart (grey ramp + colour patches). An .exr\n"
@@ -89,7 +98,7 @@ void printUsage() {
         "                         [--segment SEC] [--resume] [--keep-parts] [--jobs N]\n"
         "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
         "                         [--texture-engine auto|cpu|gpu] [--ffmpeg <path>]\n"
-        "                         [--red-scale full|half|quarter]\n"
+        "                         [--red-scale full|half|quarter] [--progress text|json]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
         "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
@@ -100,8 +109,9 @@ void printUsage() {
         "      An .R3D / R3D NE input uses the local RED plugin: the LUT engine\n"
         "      decodes Log3G10/REDWideGamutRGB (bake the LUT with --ocio-input\n"
         "      \"Log3G10 REDWideGamutRGB\"), the spectral engine decodes sRGB; use\n"
-        "      --red-scale full|half|quarter. R3D output is video-only for now\n"
-        "      (audio is not muxed) and --segment/--resume is not supported.\n"
+        "      --red-scale full|half|quarter. R3D audio is muxed when the clip has\n"
+        "      it; --segment/--resume/--jobs work as usual. --progress json emits\n"
+        "      machine-readable start/progress/done lines on stdout (D072).\n"
         "      The source timecode is copied\n"
         "      to the output unless --no-timecode is given. With\n"
         "      --engine spectral the LUT is bypassed and every pixel runs the\n"
@@ -223,6 +233,7 @@ void printUsage() {
         "                           [--texture-engine auto|cpu|gpu]\n"
         "      Long-lived preview server for the UI (D048). Decodes the clip once\n"
         "      into a bounded frame cache, then answers line commands on stdin:\n"
+        "        hello                 protocol 2 handshake (JSON)\n"
         "        look <args...>        load a LUT or the spectral engine\n"
         "        open <clip>           decode the clip into the cache\n"
         "        texture <11 numbers>  grain/halation/glare/diffusion\n"
@@ -727,6 +738,304 @@ std::string jsonQuote(const std::string& value) {
     }
     out.push_back('"');
     return out;
+}
+
+// D072: machine-readable build contract for the desktop UIs. The UIs must not
+// guess from the platform or scrape prose: they ask this command once and then
+// enable/disable OCIO, RED and GPU controls accordingly.
+std::string platformName() {
+#if defined(_WIN32)
+    return "windows";
+#elif defined(__APPLE__)
+    return "macos";
+#else
+    return "linux";
+#endif
+}
+
+std::string archName() {
+#if defined(_M_X64) || defined(__x86_64__)
+    return "x86_64";
+#elif defined(_M_ARM64) || defined(__aarch64__)
+    return "arm64";
+#else
+    return "unknown";
+#endif
+}
+
+std::string jsonBool(bool value) { return value ? "true" : "false"; }
+
+// One mutex for every JSON event: parallel segment workers may emit progress
+// lines at the same time, and a half-written line breaks the client parser.
+std::mutex& progressMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+void emitJsonEvent(const std::string& line) {
+    std::lock_guard<std::mutex> lock(progressMutex());
+    std::printf("%s\n", line.c_str());
+    std::fflush(stdout);
+}
+
+int cmdCapabilities(const Args& args) {
+    const std::string platform = platformName();
+    const std::string arch = archName();
+    std::string gpuError;
+    const bool gpu = sr::GpuFilm::available(gpuError);
+    std::string textureError;
+    const bool textureGpu = sr::GpuTexture::available(textureError);
+    if (!textureGpu) {
+        if (!gpuError.empty()) gpuError += "; ";
+        gpuError += textureError;
+    }
+    const sr::RedRuntime red = sr::redRuntime();
+    const bool ocio = sr::ocioAvailable();
+
+    const char* inputs[] = {"srgb",     "apple-log", "s-log3", "s-log3-sgamut3",
+                            "c-log3",   "v-log",     "logc3",  "logc4",
+                            "bmd-film", "davinci"};
+    const char* commands[] = {"version",   "capabilities", "catalog",   "gen",
+                              "convert",   "video",        "preview",   "ocio-info",
+                              "red-info",  "red-decode",   "gpu-info",  "lut info",
+                              "lut gen",   "lut bake",     "lut apply", "lut compare"};
+    const char* previewCommands[] = {"hello", "look", "open", "backend",
+                                     "texture", "frame", "raw", "quit"};
+
+    if (args.has("json")) {
+        std::printf("{\n");
+        std::printf("  \"version\": %s,\n", jsonQuote(kVersion).c_str());
+        std::printf("  \"platform\": %s,\n", jsonQuote(platform).c_str());
+        std::printf("  \"arch\": %s,\n", jsonQuote(arch).c_str());
+        std::printf("  \"build\": {\"ocio\": %s, \"redLoader\": true, \"d3d11\": %s, "
+                    "\"metal\": %s, \"exr\": true, \"exrZip\": true},\n",
+                    jsonBool(ocio).c_str(), jsonBool(platform == "windows").c_str(),
+                    jsonBool(platform == "macos").c_str());
+        std::printf("  \"ocio\": {\"available\": %s, \"version\": %s},\n",
+                    jsonBool(ocio).c_str(),
+                    jsonQuote(ocio ? sr::ocioVersion() : std::string()).c_str());
+        std::printf("  \"red\": {\"built\": %s, \"available\": %s, \"sdkVersion\": %s, "
+                    "\"message\": %s},\n",
+                    jsonBool(red.built).c_str(), jsonBool(red.available).c_str(),
+                    jsonQuote(red.sdkVersion).c_str(), jsonQuote(red.message).c_str());
+        std::printf("  \"gpu\": {\"backend\": %s, \"spectralAvailable\": %s, "
+                    "\"textureAvailable\": %s, \"error\": %s},\n",
+                    jsonQuote(platform == "windows" ? "d3d11"
+                                                     : (platform == "macos" ? "metal" : "none"))
+                        .c_str(),
+                    jsonBool(gpu).c_str(), jsonBool(textureGpu).c_str(),
+                    jsonQuote(gpuError).c_str());
+        std::printf("  \"engines\": [\"lut\", \"spectral\", \"spectral-gpu\"],\n");
+        std::printf("  \"textureEngines\": [\"auto\", \"cpu\", \"gpu\"],\n");
+        std::printf("  \"inputs\": [");
+        for (size_t i = 0; i < sizeof(inputs) / sizeof(inputs[0]); ++i) {
+            std::printf("%s%s", i == 0 ? "" : ", ", jsonQuote(inputs[i]).c_str());
+        }
+        std::printf("],\n");
+        std::printf("  \"scans\": [\"print\", \"negative\", \"slide\"],\n");
+        std::printf("  \"codecs\": [\"h264\", \"hevc\", \"prores\"],\n");
+        std::printf("  \"progress\": [\"text\", \"json\"],\n");
+        std::printf("  \"preview\": {\"protocol\": 2, \"frameTransport\": \"file\", "
+                    "\"commands\": [");
+        for (size_t i = 0; i < sizeof(previewCommands) / sizeof(previewCommands[0]); ++i) {
+            std::printf("%s%s", i == 0 ? "" : ", ",
+                        jsonQuote(previewCommands[i]).c_str());
+        }
+        std::printf("]},\n");
+        std::printf("  \"commands\": [");
+        for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
+            std::printf("%s%s", i == 0 ? "" : ", ", jsonQuote(commands[i]).c_str());
+        }
+        std::printf("],\n");
+        std::printf("  \"dataRoots\": [\"data/profiles\", \"data/ocio\"]\n");
+        std::printf("}\n");
+        return 0;
+    }
+
+    std::printf("spektra-roll-cli %s\n", kVersion);
+    std::printf("platform:        %s %s\n", platform.c_str(), arch.c_str());
+    if (ocio) {
+        std::printf("ocio:            available (%s)\n", sr::ocioVersion().c_str());
+    } else {
+        std::printf("ocio:            not built (--ocio-* reports it is unavailable)\n");
+    }
+    std::printf("red:             %s%s\n",
+                red.available ? "available" : (red.built ? "built but not initialized" : "not built"),
+                red.sdkVersion.empty() ? "" : (" (" + red.sdkVersion + ")").c_str());
+    std::printf("gpu:             %s, spectral %s, texture %s\n",
+                platform == "windows" ? "d3d11" : (platform == "macos" ? "metal" : "none"),
+                gpu ? "available" : "unavailable", textureGpu ? "available" : "unavailable");
+    if (!gpuError.empty()) std::printf("gpu note:        %s\n", gpuError.c_str());
+    std::printf("engines:         lut, spectral, spectral-gpu\n");
+    std::printf("inputs:          srgb, apple-log, s-log3, s-log3-sgamut3, c-log3, v-log, "
+                "logc3, logc4, bmd-film, davinci\n");
+    std::printf("codecs:          h264, hevc, prores\n");
+    std::printf("preview:         protocol 2, file transport\n");
+    return 0;
+}
+
+struct CatalogStock {
+    std::string id;
+    std::string name;
+    std::string path;
+    std::string type;
+    std::string support;
+    std::string stage;
+    std::string referenceIlluminant;
+    std::string viewingIlluminant;
+    std::string targetPrint;
+    std::string use;
+    std::string antihalation;
+    bool positive = false;
+    bool printFilm = false;
+};
+
+std::string infoString(const sr::JsonValue& info, const char* key,
+                       const std::string& fallback = {}) {
+    const sr::JsonValue* value = info.find(key);
+    return value != nullptr && value->isString() ? value->string() : fallback;
+}
+
+// D072: the exact stock list the UIs should show. This mirrors the Qt UI's
+// filter (D043/D065/D067) so SwiftUI does not reimplement profile rules.
+int cmdCatalog(const Args& args) {
+    const std::string root = args.get("dir", "data/profiles");
+    std::error_code ec;
+    if (!std::filesystem::is_directory(root, ec)) {
+        return fail("catalog: cannot find " + root +
+                    " (run from the repo root or pass --dir <profiles>)");
+    }
+
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() != ".json") continue;
+        if (entry.path().filename() == "neutral_print_filters.json") continue;
+        files.push_back(entry.path());
+    }
+    std::sort(files.begin(), files.end());
+
+    std::vector<CatalogStock> films;
+    std::vector<CatalogStock> papers;
+    for (const auto& path : files) {
+        std::ifstream input(path, std::ios::binary);
+        if (!input) continue;
+        std::ostringstream text;
+        text << input.rdbuf();
+        sr::JsonValue document;
+        std::string parseError;
+        if (!sr::JsonValue::parse(text.str(), document, parseError)) {
+            std::fprintf(stderr, "warning: %s: %s\n", path.string().c_str(),
+                         parseError.c_str());
+            continue;
+        }
+        const sr::JsonValue* info = document.find("info");
+        if (info == nullptr || !info->isObject()) continue;
+
+        CatalogStock stock;
+        stock.id = infoString(*info, "stock", path.stem().string());
+        stock.name = infoString(*info, "name", stock.id);
+        std::error_code absoluteError;
+        const std::filesystem::path absolute =
+            std::filesystem::absolute(path, absoluteError);
+        stock.path = absoluteError ? path.string() : absolute.lexically_normal().string();
+        stock.type = infoString(*info, "type");
+        stock.support = infoString(*info, "support");
+        stock.stage = infoString(*info, "stage");
+        stock.referenceIlluminant = infoString(*info, "reference_illuminant");
+        stock.viewingIlluminant = infoString(*info, "viewing_illuminant");
+        stock.targetPrint = infoString(*info, "target_print");
+        stock.use = infoString(*info, "use");
+        stock.antihalation = infoString(*info, "antihalation");
+
+        const bool filming = stock.support == "film" && stock.stage == "filming" &&
+                             (stock.type == "negative" || stock.type == "positive") &&
+                             (stock.referenceIlluminant == "D55" ||
+                              stock.referenceIlluminant == "T");
+        const bool printFilm = stock.support == "film" && stock.stage == "printing";
+        if (filming) {
+            stock.positive = stock.type == "positive";
+            films.push_back(stock);
+        } else if (stock.support == "paper" || printFilm) {
+            stock.printFilm = printFilm;
+            papers.push_back(stock);
+        }
+    }
+
+    // A negative is only offered when its target second medium is present; a
+    // reversal has no target and is offered directly (D067).
+    std::vector<CatalogStock> usable;
+    for (const auto& film : films) {
+        if (film.targetPrint.empty()) {
+            usable.push_back(film);
+            continue;
+        }
+        for (const auto& paper : papers) {
+            if (paper.id == film.targetPrint) {
+                usable.push_back(film);
+                break;
+            }
+        }
+    }
+    const auto byId = [](const CatalogStock& a, const CatalogStock& b) {
+        return a.id < b.id;
+    };
+    std::sort(usable.begin(), usable.end(), byId);
+    std::sort(papers.begin(), papers.end(), byId);
+
+    if (args.has("json")) {
+        const auto printStock = [](const CatalogStock& stock) {
+            std::printf(
+                "{\"id\": %s, \"name\": %s, \"path\": %s, \"type\": %s, "
+                "\"support\": %s, \"stage\": %s, \"referenceIlluminant\": %s, "
+                "\"viewingIlluminant\": %s, \"targetPrint\": %s, \"use\": %s, "
+                "\"antihalation\": %s, \"positive\": %s, \"printFilm\": %s}",
+                jsonQuote(stock.id).c_str(), jsonQuote(stock.name).c_str(),
+                jsonQuote(stock.path).c_str(), jsonQuote(stock.type).c_str(),
+                jsonQuote(stock.support).c_str(), jsonQuote(stock.stage).c_str(),
+                jsonQuote(stock.referenceIlluminant).c_str(),
+                jsonQuote(stock.viewingIlluminant).c_str(),
+                jsonQuote(stock.targetPrint).c_str(), jsonQuote(stock.use).c_str(),
+                jsonQuote(stock.antihalation).c_str(), jsonBool(stock.positive).c_str(),
+                jsonBool(stock.printFilm).c_str());
+        };
+        std::printf("{\n");
+        std::printf("  \"version\": %s,\n", jsonQuote(kVersion).c_str());
+        std::printf("  \"root\": %s,\n", jsonQuote(root).c_str());
+        std::printf("  \"counts\": {\"films\": %zu, \"papers\": %zu},\n", usable.size(),
+                    papers.size());
+        std::printf("  \"films\": [\n");
+        for (size_t i = 0; i < usable.size(); ++i) {
+            std::printf("    ");
+            printStock(usable[i]);
+            std::printf("%s\n", i + 1 == usable.size() ? "" : ",");
+        }
+        std::printf("  ],\n");
+        std::printf("  \"papers\": [\n");
+        for (size_t i = 0; i < papers.size(); ++i) {
+            std::printf("    ");
+            printStock(papers[i]);
+            std::printf("%s\n", i + 1 == papers.size() ? "" : ",");
+        }
+        std::printf("  ]\n");
+        std::printf("}\n");
+        return 0;
+    }
+
+    std::printf("catalog: %zu films, %zu papers (%s)\n", usable.size(), papers.size(),
+                root.c_str());
+    std::printf("films:\n");
+    for (const auto& film : usable) {
+        std::printf("  [%s] %s", film.positive ? "slide" : "negative", film.name.c_str());
+        if (!film.targetPrint.empty()) std::printf(" -> %s", film.targetPrint.c_str());
+        std::printf("\n");
+    }
+    std::printf("papers:\n");
+    for (const auto& paper : papers) {
+        std::printf("  [%s] %s\n", paper.printFilm ? "print" : "paper", paper.name.c_str());
+    }
+    return 0;
 }
 
 // D062: list what an OCIO config offers, and which linear space the film model
@@ -1622,6 +1931,9 @@ struct VideoRender {
     std::string matrix;
     std::string transfer;
     std::string primaries;
+    // D072: machine-readable progress for the SwiftUI/Qt clients. Text output
+    // stays the default; `--progress json` adds JSON events on stdout.
+    bool progressJson = false;
 };
 
 // Content hash of a small file (LUTs are ~130 KB), used to notice that the
@@ -1999,13 +2311,26 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
         writer.submit(out);
         ++frames;
         if (frames % 24 == 0) {
-            if (rangeTotal > 0) {
+            if (job.progressJson) {
+                const long current = rangeFrameBase + static_cast<long>(frames);
+                const double percent =
+                    rangeTotal > 0
+                        ? 100.0 * static_cast<double>(current) / static_cast<double>(rangeTotal)
+                        : -1.0;
+                char event[160];
+                std::snprintf(event, sizeof(event),
+                              "{\"event\":\"progress\",\"frame\":%ld,\"total\":%ld,"
+                              "\"percent\":%.2f}",
+                              current, rangeTotal, percent);
+                emitJsonEvent(event);
+            } else if (rangeTotal > 0) {
                 std::printf("  %ld/%ld frames...\n",
                             rangeFrameBase + static_cast<long>(frames), rangeTotal);
+                std::fflush(stdout);
             } else {
                 std::printf("  %zu frames...\n", frames);
+                std::fflush(stdout);
             }
-            std::fflush(stdout);
         }
     }
     if (reader != nullptr) reader->stop();
@@ -2096,6 +2421,11 @@ int cmdVideo(const Args& args) {
     if (!spectral && lutPath.empty()) return fail("video requires --lut <file.cube>");
     if (inPath.empty()) return fail("video requires --in <clip>");
     if (outPath.empty()) return fail("video requires --out <clip>");
+    const std::string progressMode = args.get("progress", "text");
+    if (progressMode != "text" && progressMode != "json") {
+        return fail("--progress expects 'text' or 'json'");
+    }
+    const bool progressJson = progressMode == "json";
 
     std::string error;
     const bool red = sr::redIsRedFile(inPath);
@@ -2347,6 +2677,7 @@ int cmdVideo(const Args& args) {
     job.matrix = matrix;
     job.transfer = transfer;
     job.primaries = primaries;
+    job.progressJson = progressJson;
 
     // Segments keep finished parts on disk so an interrupted render resumes
     // (D040). --resume alone picks a 10 s chunk.
@@ -2382,6 +2713,19 @@ int cmdVideo(const Args& args) {
         std::printf("engine: lut %s\n", lutPath.c_str());
     }
     if (job.textureGpu != nullptr) std::printf("texture: gpu\n");
+    if (progressJson) {
+        const std::string outputJson = jsonQuote(outPath);
+        char event[512];
+        std::snprintf(event, sizeof(event),
+                      "{\"event\":\"start\",\"version\":\"%s\",\"width\":%d,\"height\":%d,"
+                      "\"fps\":%.6f,\"totalFrames\":%ld,\"segmented\":%s,\"engine\":\"%s\","
+                      "\"codec\":\"%s\",\"output\":%s}",
+                      kVersion, width, height, fps, totalFrames,
+                      segmented ? "true" : "false",
+                      spectral ? (gpu ? "spectral-gpu" : "spectral") : "lut", codec.c_str(),
+                      outputJson.c_str());
+        emitJsonEvent(event);
+    }
     std::string redAudioPath;
     if (red && redClip.audioChannels > 0) {
         redAudioPath = outPath + ".audio.au";
@@ -2647,6 +2991,15 @@ int cmdVideo(const Args& args) {
         std::printf("wrote %s: %zu frames in %zu part%s, %.1f ms/frame, %.2f s total\n",
                     outPath.c_str(), renderedFrames, partCount, partCount == 1 ? "" : "s",
                     elapsed / static_cast<double>(renderedFrames), elapsed / 1000.0);
+    }
+    if (progressJson) {
+        const std::string outputJson = jsonQuote(outPath);
+        char event[512];
+        std::snprintf(event, sizeof(event),
+                      "{\"event\":\"done\",\"frames\":%zu,\"parts\":%zu,\"elapsedMs\":%.0f,"
+                      "\"output\":%s}",
+                      renderedFrames, partCount, elapsed, outputJson.c_str());
+        emitJsonEvent(event);
     }
     return 0;
 }
@@ -3379,6 +3732,16 @@ int run(const Args& startup) {
         const std::string& command = tokens[0];
         std::string error;
 
+        if (command == "hello") {
+            std::printf(
+                "{\"event\":\"hello\",\"protocol\":2,\"version\":%s,"
+                "\"frameTransport\":\"file\",\"histogram\":false,"
+                "\"commands\":[\"hello\",\"look\",\"open\",\"backend\",\"texture\","
+                "\"frame\",\"raw\",\"quit\"]}\n",
+                jsonQuote(kVersion).c_str());
+            std::fflush(stdout);
+            continue;
+        }
         if (command == "quit") {
             std::printf("ok bye\n");
             std::fflush(stdout);
@@ -3485,6 +3848,8 @@ int main(int argc, char** argv) {
         printUsage();
         return 0;
     }
+    if (command == "capabilities") return cmdCapabilities(args);
+    if (command == "catalog") return cmdCatalog(args);
     if (command == "gen") return cmdGen(args);
     if (command == "convert") return cmdConvert(args);
     if (command == "video") return cmdVideo(args);

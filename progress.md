@@ -2,11 +2,69 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-04（D071：R3D 音频 + UI 直连 + segment）
-> **当前里程碑**：**M5 进行中 · 全片库接通（负片 + 电影片库 + 反转片）+ 双平台 GPU + 九种相机 Log + OpenColorIO（CLI + UI）+ 线性/压缩浮点 + R3D NE 本地解码/直读视频/UI**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-04（D072：macOS SwiftUI 决策 + 引擎契约 Phase 0）
+> **当前里程碑**：**M5 进行中 · macOS SwiftUI 启动（D072）+ Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
+
+---
+
+## 最新：D072 · macOS SwiftUI 决策 + 引擎契约（Phase 0）
+
+> 新开对话先读这一节；下面“零之零”的 D067–D071 仍是上一轮摘要。
+
+### 一、这次定了什么
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D072 | macOS UI | **SwiftUI 壳 + 现有 CLI**（不直接链接 C++ 核心） |
+| D072 | 分发 | 先做**未签名 `.app` 本地验收**；公证/Developer ID 后补 |
+| D072 | v1 范围 | **与 Qt 功能对齐**，不是精简 MVP |
+| D072 | 双 UI 策略 | macOS 是**参考实现**，`design/` 是设计源；macOS v1 + 设计冻结前，Windows Qt 只修 bug；之后 M6 按规格重做 Windows UI v3 |
+| D072 | 防漂移 | `data/ui-schema.json` + `docs/ui-parity.md` + golden argv + CI 双 UI 编译 |
+| D072 | macOS R3D | **本期不做**；UI 明确显示“R3D 仅 Windows” |
+
+### 二、Phase 0 已交付（CLI + 契约，不碰 UI）
+
+- `capabilities --json`：版本、平台、OCIO/RED/GPU 能力、输入/编码/预览协议；UI 用它决定控件可用性。
+- `catalog --json`：直接输出 UI 应显示的 **20 底片 / 8 相纸印片**，含 `targetPrint`、`positive`、`printFilm`；SwiftUI 不再重写过滤规则。
+- `video --progress json`：输出 `start` / `progress` / `done` 单行 JSON；并行分段有互斥锁，行不会写坏。
+- `preview` 协议升到 **2**，新增 `hello` 握手；`frame`/`raw` 仍是 8-bit RGBA 文件传输。
+- `data/ui-schema.json`：42 个参数的标签、范围、默认值、CLI flag、显示条件（Qt 与 SwiftUI 共用）。
+- `design/tokens.json`：v0 基线（当前 Qt 配色/字号/间距），等 macOS 设计替换。
+- `docs/engine-api.md`：两个 UI 共同遵守的引擎契约。
+- `docs/ui-parity.md`：功能矩阵、v1 范围、防漂移五道闸。
+- `scripts\verify-d072.cmd`：双击验收（capabilities / catalog / preview hello / ctest / JSON 进度）。
+- 顺手修掉 CLI `help` 里“R3D 无音频、不支持 segment”的过期说明。
+
+### 三、验证
+
+| 项 | 结果 |
+|---|---|
+| `capabilities --json` | 合法 JSON；Windows/d3d11/OCIO 2.4.2/RED stub 正确 |
+| `catalog --json` | 合法 JSON；**20 films / 8 papers**；约 213 ms |
+| `preview hello` | `protocol: 2` |
+| `video --progress json` | 48 帧：`start` + 2×`progress` + `done`；`--segment 1 --jobs 2` 下 JSON 行完整 |
+| `ctest` | **11/11**（含 GPU / OCIO / RED stub） |
+| `scripts\verify-d072.cmd` | **5/5 OK**：capabilities / catalog / preview hello / ctest / JSON 进度 |
+| Qt UI | 未改；本轮不碰 `src/ui-qt/main.cpp` |
+
+### 四、下一步（Phase 1）
+
+1. 在 Mac 上装 **Xcode + command line tools**。
+2. 建 `ui-macos/`（建议 XcodeGen，不要手改 `.pbxproj`）。
+3. `scripts/build-macos-ui.sh`：CMake 编 CLI → Xcode 编 app → 把 CLI/ffmpeg/data 打进 `.app` → ad-hoc 签名。
+4. 最小验收：双击 `.app` → 选 `C0113.MP4` → 显示首帧。
+5. 之后才是素材/片库/烘焙/预览/渲染/队列的逐项对齐。
+
+### 五、当前限制
+
+- Phase 0 只做了 CLI/文档；macOS UI 还是一行代码都没写。
+- 设计输入还没给：需要产品负责人提供参考图/布局思路，并明确“macOS 原生感”还是“品牌统一专业工具感”。
+- macOS 上 OCIO 仍是 Homebrew 动态库；`.app` 交付前必须静态链接或捆绑 dylib + 签名。
+- ffmpeg/ffprobe 还没打包；R3D 插件 macOS 仍不可用。
+- Windows Qt 已进入冻结：只修 bug，不加新功能，避免两遍开发。
 
 ---
 

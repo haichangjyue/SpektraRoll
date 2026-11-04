@@ -1355,6 +1355,42 @@
 
 ---
 
+## D072 · macOS UI 用 SwiftUI + 引擎契约（Phase 0）
+
+- **日期**：2026-11-04
+- **背景**：产品负责人对 Windows Qt UI 的观感不满意；项目 M0 的原始策略是 **共享 C++ 引擎 + macOS SwiftUI / Windows 原生 UI**，D009 只拍了 Windows 用 Qt，并没有否决 macOS SwiftUI。现在决定先把 macOS UI 做出来，再以它为设计基准重做 Windows UI。
+- **三个选择**：
+  - 架构：**A · SwiftUI 壳 + 现有 CLI**（不让 SwiftUI 直接链接 C++ 核心）。
+  - 分发：**B · 先做未签名 `.app` 本地验收**，公证/Developer ID 后补。
+  - v1 范围：**A · 与 Qt 功能对齐**（不是精简 MVP）。
+- **决定**：
+  - macOS UI 用 **SwiftUI**；所有颜色/胶片/渲染逻辑仍在 `spektra-roll-cli`，UI 不复制引擎。
+  - **macOS 是参考实现，`design/` 是设计源**；不是“macOS 代码是永久标准”。
+  - macOS v1 + 设计冻结前，**Windows Qt UI 只修 bug、不加新功能**；之后进入 **M6：Windows UI v3**，按同一份设计规格重做。
+  - **两套 UI 的维护成本正式接受**；用 `data/ui-schema.json`、`docs/ui-parity.md`、golden argv、CI 双 UI 编译来防漂移。
+  - macOS R3D 插件**不在本期范围**；UI 明确显示“R3D 仅 Windows”，不阻塞 UI 交付。
+  - 分发先本地未签名；公证需要 Apple Developer Program，等 UI 稳定后再做。
+- **Phase 0 交付（本轮）**：
+  - CLI 新增 `capabilities --json`：版本、平台、OCIO/RED/GPU 能力、输入/编码/预览协议，UI 用它决定控件可用性。
+  - CLI 新增 `catalog --json`：直接从 `data/profiles` 输出 UI 应显示的 20 底片 / 8 相纸印片，含 `targetPrint`、`positive`、`printFilm`；SwiftUI 不再重写过滤规则。
+  - CLI `video --progress json`：输出 `start` / `progress` / `done` 单行 JSON 事件；并行分段有互斥锁，行不会写坏。
+  - `preview` 协议升到 2，新增 `hello` 握手；`frame`/`raw` 仍是 8-bit RGBA 文件传输。
+  - 新增 `data/ui-schema.json`（42 个参数：标签、范围、默认值、CLI flag、显示条件）、`design/tokens.json`（v0 基线）、`docs/engine-api.md`、`docs/ui-parity.md`。
+  - 顺手修掉 CLI `help` 里“R3D 无音频、不支持 segment”的过期说明。
+- **验证**：
+  - `capabilities --json` / `catalog --json` 都是合法 JSON；`catalog` 为 **20 films / 8 papers**，约 213 ms。
+  - `preview` 的 `hello` 返回 `protocol: 2`。
+  - `video --progress json` 48 帧输出 `start` + 2 条 `progress` + `done`；分段 `--jobs 2` 下 JSON 行完整。
+  - `scripts\verify-d072.cmd` **5/5 OK**（capabilities / catalog / preview hello / ctest / JSON 进度）。
+  - `ctest` **11/11**（含 GPU / OCIO / RED stub）。
+- **后果**：
+  - Phase 1 需要一台装了 Xcode 的 Mac；Windows 本机只能做 CLI/文档部分。
+  - Windows 用户会在一段时间内继续用旧 Qt UI；如果不可接受，M5.5 后可先做 1–2 个 D 的 Qt 换肤。
+  - 设计不冻结就不开始 M6，否则 Windows 复刻会追移动目标。
+  - 两套 UI 不是“一次成本”，是长期税；`ui-parity.md` 和 CI 是必须的，不是可选项。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
