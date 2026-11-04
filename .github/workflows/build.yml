@@ -61,8 +61,14 @@ jobs:
       - name: Build macOS SwiftUI shell (D073)
         if: runner.os == 'macOS'
         run: |
+          set +e
           swift --version
-          swift build --package-path ui-macos -c release
+          swift build --package-path ui-macos -c release 2>&1 | tee swift-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "error:" swift-build.log | head -40 | sed 's/^/::error::/' || true
+          fi
+          exit "$status"
 
       - name: Smoke test the CLI
         shell: bash
