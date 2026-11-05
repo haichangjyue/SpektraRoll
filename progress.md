@@ -43,7 +43,7 @@
 
 ### 三、当前状态（截至最后一次操作）
 
-- 最新提交：`03f9793 docs: add D075–D080 handoff summary`（功能代码 `b2874b2`）
+- 最新功能代码：`b2874b2`（`git log -1` 查看其后的文档提交）
 - CI：功能代码 run **148** Windows + macOS 双绿（含 `swift build`）
 - Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，功能代码已同步到 `b2874b2`（再 `git pull` 可含本文档提交）
 - Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
