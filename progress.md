@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D081：光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows + Mac 已验，CI 待跑）
+> **最后更新**：2026-11-05（D081：光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows + Mac 已验，CI run 153 双绿）
 > **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D080），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO（D041–D081）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
