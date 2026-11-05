@@ -328,7 +328,7 @@ X:\agent\SpektraRoll\scripts\demo-ocio.cmd
 
 自己用的时候：
 
-- 先要有一个带 OCIO 的构建。Windows：双击 **`tools\ocio\build-ocio.cmd`** 编一次（约 15–20 分钟，编到 `X:\agent\tools\ocio`，之后不用再编）；macOS：`brew install opencolorio`，然后 `cmake -DCMAKE_PREFIX_PATH="$(brew --prefix)"`。
+- 先要有一个带 OCIO 的构建。Windows：双击 **`tools\ocio\build-ocio.cmd`** 编一次（约 15–20 分钟，编到 `X:\agent\tools\ocio`，之后不用再编）；macOS：`scripts/build-ocio-macos.sh` 编静态 OCIO 2.6.0（约 3–5 分钟，到 `~/Documents/ocio-2.6.0-static`），`scripts/build-macos-ui.sh` 会自动检测；也可 `OCIO_PREFIX=... scripts/build-macos-ui.sh` 覆盖。
 - 看配置里有什么：`spektra-roll-cli ocio-info --ocio-config <配置.ocio>`（不填 `--ocio-config` 就用环境变量 `$OCIO`）。
 - 用任意色彩空间烘 LUT：`lut bake --ocio-config <配置> --ocio-input "ARRI LogC3 (EI800)" --scan negative --out x.cube`。**解码已经烘进 LUT，之后 `lut apply` / `video` 不需要 OCIO。**
 - 只解码或看显示器变换：`convert --ocio-config <配置> --ocio-input "S-Log3 S-Gamut3.Cine" --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" --in a.png --out b.png`。

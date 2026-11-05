@@ -73,9 +73,10 @@ The colour management layer is optional. With a config you can use any camera
 or ACES space as the LUT domain, and render display views:
 
 ```bash
-# macOS
-brew install opencolorio
-cmake -S . -B build -DCMAKE_PREFIX_PATH="$(brew --prefix)"   # finds OpenColorIO
+# macOS: Homebrew's OCIO can pull python@3.15 and fail on macOS 14; build a
+# self-contained static prefix instead (the UI build script auto-detects it)
+scripts/build-ocio-macos.sh
+scripts/build-macos-ui.sh
 
 # Windows (MinGW): no package exists, so build the static prefix once
 tools\ocio\build-ocio.cmd

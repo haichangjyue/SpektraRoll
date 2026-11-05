@@ -9,16 +9,21 @@ D073 的 macOS 壳。它不是第二套引擎：所有颜色、胶片、渲染�
 - Xcode 16.2 + command line tools
 - `cmake`（`brew install cmake`）
 - `ffmpeg`（`brew install ffmpeg`；构建脚本会把它打进 app）
+- OpenColorIO（可选，推荐）：`scripts/build-ocio-macos.sh` 编一个静态 OCIO 2.6.0 到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 会自动检测。
 - 字体（可选但推荐）：`scripts/fetch-macos-fonts.sh`
 
 ## 构建
 
 ```bash
+# 可选：先编静态 OpenColorIO 2.6.0（约 3–5 分钟）
+scripts/build-ocio-macos.sh
+
 # 一次完成：编 CLI -> 编 SwiftUI -> 组装 .app -> ad-hoc 签名 -> 打开
 scripts/build-macos-ui.sh
 
 # 或者双击
 scripts/build-macos-ui.command
+# OCIO 也可双击 scripts/build-ocio-macos.command
 
 # 只编 SwiftUI（CLI 用已有 build/）
 scripts/build-macos-ui.sh --skip-cli
@@ -71,6 +76,7 @@ build-ui-macos/SpektraRoll.app
 - D076：`video --display/--max-side 960` CLI 已验证；Mac 本机 `swift build` 通过，显示代理/胶片代理已生成（`~/Library/Caches/SpektraRoll/preview-cache/`）。
 - D077：INFO Mac 面板截图通过；生成胶片代理时播放日志 `block film proxy` → `switch film` → `unblock`；缓存上限用 3 个 2 MB 假文件验证，超限后自动删除。
 - D079：配光在 `C0113.MP4` 上测得 **+0.66 EV**，ADVANCED 曝光滑块同步、胶片效果刷新；`SPEKTRA_AUTOGRADE=1` 可复现。
+- D080：静态 OCIO 2.6.0 在 Mac 上构建成功；bundle 的 `capabilities` 报 `ocio.available=true`，`ocio-info` 列出 S-Log3 空间，`lut bake --ocio-input "S-Log3 S-Gamut3.Cine"` 成功；`otool -L` 确认没有 Homebrew OCIO/Imath/yaml/pystring 等 dylib 依赖。
 - 远程验收见 `docs/macos-dev-notes.md`（SSH Background domain、自截图、Stage Manager）。
 
 ## 调试开关
@@ -93,7 +99,7 @@ open -F --env SPEKTRA_ALL_SPACES=1 --env SPEKTRA_CAPTURE=1 \
 - 防光晕层是 UI 级近似（开启后光晕 ×0.6），等引擎加独立参数。
 - 没有裁切、印片机 Y/M/预闪、扫描仪 unsharp、空间物理模型。
 - 未公证；首次打开需要右键 → 打开，或 `xattr -d com.apple.quarantine`。
-- **OCIO 当前不可用**：Homebrew `opencolorio` 在 macOS 14 上需要源码构建 `python@3.15`，clang 报 tail-call 错误；首版用内置 10 种 Log 输入。正式分发前还要解决 OCIO/ffmpeg 动态依赖。
+- **OCIO 已可用**（D080）：静态 OCIO 2.6.0 前缀，`build-macos-ui.sh` 自动检测；`ocio-info` / `lut bake --ocio-input` / 显示变换已验证。`--engine spectral-gpu` + OCIO 仍按 D062 回退 CPU 光谱；`--exr-linear` 的 OCIO 显示变换仍未接。
 
 ## 设计来源
 

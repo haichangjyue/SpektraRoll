@@ -12,12 +12,13 @@ project (release `v3.0.0`, asset
   contributors.
 - No modifications were made.
 
-Why this one: it needs OpenColorIO **2.4** (the version SpektraRoll builds
-against), it is a single self-contained `.ocio` file with no external LUTs, and
-it carries the camera transforms the demo uses (`ARRI LogC3 (EI800)`,
-`ARRI LogC4`, `BMDFilm WideGamut Gen5`, `DaVinci Intermediate WideGamut`,
-`S-Log3 S-Gamut3`, `S-Log3 S-Gamut3.Cine`, `Apple Log`) plus
-`Linear Rec.709 (sRGB)`, which is the space the film model is fed (D062).
+Why this one: it needs OpenColorIO **2.4 or newer** (tested with 2.4.2 on
+Windows and 2.6.0 on macOS, D080), it is a single self-contained `.ocio` file
+with no external LUTs, and it carries the camera transforms the demo uses
+(`ARRI LogC3 (EI800)`, `ARRI LogC4`, `BMDFilm WideGamut Gen5`,
+`DaVinci Intermediate WideGamut`, `S-Log3 S-Gamut3`, `S-Log3 S-Gamut3.Cine`,
+`Apple Log`) plus `Linear Rec.709 (sRGB)`, which is the space the film model is
+fed (D062).
 
 Any other config works too: pass `--ocio-config <file.ocio>`, or set `$OCIO`.
 Newer ACES 2.0 configs (`v4.x`, OCIO 2.5) need a matching OpenColorIO build.

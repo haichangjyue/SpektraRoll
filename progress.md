@@ -2,13 +2,54 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D079：配光按钮 + APP 版本升到 D079，Mac 已验收）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D079），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D080：macOS 静态 OCIO 2.6.0 已接入并验收）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D080），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
+
+## 最新：D080 · macOS 静态 OCIO 2.6.0（2026-11-05 晚；Mac 已验收）
+
+> 解决 D073 起 macOS 上 OCIO 不可用的问题。Homebrew 的 `opencolorio` 在 macOS 14 会尝试构建 `python@3.15`，clang tail-call 报错；改为自建静态 OCIO 核心（不编 Python 绑定）。
+
+### 一、这次做了什么
+
+- **新脚本** `scripts/build-ocio-macos.sh`（+ 双击 `build-ocio-macos.command`）：
+  - 从本机 Homebrew 缓存或 GitHub 取 OCIO **2.6.0**；
+  - `OCIO_BUILD_PYTHON=OFF`、APPS/TESTS/DOCS 全关，`BUILD_SHARED_LIBS=OFF`；
+  - `OCIO_INSTALL_EXT_PACKAGES=ALL` 编静态依赖；
+  - 安装到 `~/Documents/ocio-2.6.0-static`；
+  - 补 `pystring` 的 CMake config、移除指向缺失 dylib 的 zlib config，让 `CMAKE_PREFIX_PATH` 能用纯静态依赖。
+- **`scripts/build-macos-ui.sh`** 自动检测：
+  - 默认找 `$HOME/Documents/ocio-2.6.0-static`；
+  - `OCIO_PREFIX=...` 可覆盖；
+  - 找到静态前缀就用 `CMAKE_FIND_PACKAGE_PREFER_CONFIG=ON`；否则退回 Homebrew 包或 stub。
+- **结果**：app bundle 的 CLI `capabilities` 报 `ocio.available=true, version=2.6.0`；`otool -L` 不再依赖 Homebrew 的 OCIO/Imath/yaml-cpp/pystring/minizip dylib。
+- **UI**：INFO 引擎区 OCIO 行显示“可用 2.6.0”；ADVANCED 的 OCIO 输入启用，显示 `S-Log3 S-Gamut3.Cine`；显示代理的 CLI 参数已带 `--ocio-config/--ocio-input`。APP 版本升到 **D080**。
+- **调试**：`SPEKTRA_OCIO=1` 启动时自动启用 OCIO 并选 `S-Log3 S-Gamut3.Cine`。
+
+### 二、验证
+
+| 项 | 结果 |
+|---|---|
+| OCIO 静态构建 | 成功，`libOpenColorIO.a` 13 MB + Imath/expat/minizip-ng/pystring/yaml-cpp/zlib 静态库 |
+| `capabilities --json` | `ocio.available=true`, `version=2.6.0` |
+| `ocio-info` | 找到 `Linear Rec.709 (sRGB)` 和 S-Log3 系列空间 |
+| `lut bake --ocio-input "S-Log3 S-Gamut3.Cine"` | 成功，17³ 表 |
+| `otool -L` | 无 OCIO/Imath/yaml/pystring/minizip Homebrew dylib |
+| UI 截图 | INFO 显示 OCIO 可用 2.6.0；ADVANCED OCIO 输入启用 |
+| APP | `内部测试（D080） · 0.1.0` |
+
+### 三、仍未做
+
+- **光谱 GPU 的 OCIO**：仍按 D062 回退 CPU 光谱。
+- **`--exr-linear` 的 OCIO 显示变换**：仍只认 sRGB/PQ/HLG。
+- OCIO 代理生成/渲染速度：OCIO 输入走 CPU 光谱会比 LUT/GPU 慢。
+
+---
+
 
 ## 最新：D079 · 配光按钮（2026-11-05 晚；Mac 已验收）
 

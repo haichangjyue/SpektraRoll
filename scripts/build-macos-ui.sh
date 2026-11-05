@@ -49,10 +49,22 @@ if [[ "$SKIP_CLI" -eq 0 ]]; then
         exit 1
     fi
     CMAKE_ARGS=(-S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DSR_BUILD_TESTS=OFF)
-    if command -v brew >/dev/null 2>&1; then
-        # Let CMake find Homebrew OpenColorIO for local builds. The app bundle
-        # still needs static linking or dylib bundling before distribution.
-        CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(brew --prefix)")
+    # OCIO is optional. Prefer a self-contained static prefix (D080); fall back
+    # to Homebrew's package if it is installed. `OCIO_PREFIX` overrides both.
+    OCIO_PREFIX="${OCIO_PREFIX:-$HOME/Documents/ocio-2.6.0-static}"
+    CMAKE_PREFIX=""
+    if [[ -f "$OCIO_PREFIX/include/OpenColorIO/OpenColorIO.h" ]]; then
+        CMAKE_PREFIX="$OCIO_PREFIX"
+        echo "==> OpenColorIO: static prefix $OCIO_PREFIX"
+    elif command -v brew >/dev/null 2>&1 && brew --prefix opencolorio >/dev/null 2>&1; then
+        CMAKE_PREFIX="$(brew --prefix)"
+        echo "==> OpenColorIO: Homebrew package"
+    else
+        echo "==> OpenColorIO: not found (stub build; --ocio-* will be unavailable)"
+    fi
+    if [[ -n "$CMAKE_PREFIX" ]]; then
+        CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX")
+        CMAKE_ARGS+=("-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON")
     fi
     cmake "${CMAKE_ARGS[@]}"
     cmake --build "$BUILD_DIR" -j "$(sysctl -n hw.ncpu)"

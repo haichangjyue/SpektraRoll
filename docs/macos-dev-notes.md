@@ -129,6 +129,28 @@ open -F --env SPEKTRA_AUTOLOAD=/Users/wenyutao/Movies/C0113.MP4 \
 - ADVANCED 曝光滑块应同步到 `+0.66 EV`，胶片效果自动打开并刷新。
 - 调试日志/CLI 参数里 `--exposure 0.6626` 可确认测光结果。
 
+## D080 验收（OpenColorIO）
+
+```bash
+scripts/build-ocio-macos.sh          # 静态 OCIO 2.6.0 -> ~/Documents/ocio-2.6.0-static
+scripts/build-macos-ui.sh --no-open  # 自动检测并静态链接
+```
+
+```bash
+build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --json
+# "build": {"ocio": true}, "ocio": {"available": true, "version": "2.6.0"}
+
+build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli lut bake \
+  --ocio-config data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio \
+  --ocio-input "S-Log3 S-Gamut3.Cine" --size 17 --out /tmp/ocio-test.cube
+otool -L build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli | grep -i -E 'ocio|imath|yaml|pystring'
+# 应没有这些 Homebrew dylib 依赖
+```
+
+- `SPEKTRA_OCIO=1` 启动时自动启用 OCIO 并选 `S-Log3 S-Gamut3.Cine`，用于截图验收。
+- `--engine spectral-gpu` + OCIO 仍回退 CPU（D062）；`--exr-linear` 的 OCIO 显示变换仍未接。
+- 默认前缀可用 `OCIO_PREFIX=...` 覆盖。
+
 ## 已验证
 
 - `.app` 启动、三栏、字体、导入缩略图、AVPlayer 播放、空格、INFO、胶片效果、渲染。
@@ -138,11 +160,9 @@ open -F --env SPEKTRA_AUTOLOAD=/Users/wenyutao/Movies/C0113.MP4 \
 
 ## 未完成 / 已知问题
 
-- **OCIO 当前不可用**：
-  - 初次 `brew install opencolorio` 被已有的 `/opt/homebrew/opt/cmake` 真实目录挡住（cmake link 冲突）。
-  - 已把手动 cmake 备份到 `/opt/homebrew/opt/cmake-manual-4.4.4`，切到 Homebrew cmake 4.4.5；cmake 正常工作。
-  - 但 macOS 14 上 Homebrew 没有 OCIO bottle，安装会源码构建 `python@3.15`，clang 报 “does not have support for efficient tail calling”，失败。
-  - 首版用内置 10 种 Log 输入。后续可选：MacPorts、自建静态 OCIO、升级 macOS，或固定 python@3.13 的构建。
+- **OCIO 已可用（D080）**：静态 OCIO 2.6.0 前缀（`~/Documents/ocio-2.6.0-static`），`scripts/build-ocio-macos.sh` 可重建；bundle 的 CLI `ocio.available=true`，`ocio-info` / `lut bake --ocio-input` / UI OCIO 下拉已验证。
+  - 仍未做：`spectral-gpu` 的 OCIO（回退 CPU）、`--exr-linear` 的 OCIO 显示变换。
+  - Homebrew 的 `opencolorio` 在 macOS 14 仍会尝试构建 `python@3.15`，所以用静态脚本，不走 Homebrew 包。
 - 没有时间线拖动/逐帧预览、渲染队列、区间输入。
-- `.app` 未公证；ffmpeg/OCIO 仍是 Homebrew 动态依赖，分发给别人前要静态链接/捆绑。
+- `.app` 未公证；ffmpeg 仍是 Homebrew 动态依赖，OCIO 已静态链接；分发前要处理 ffmpeg 捆绑。
 - R3D macOS 不支持（无插件）。

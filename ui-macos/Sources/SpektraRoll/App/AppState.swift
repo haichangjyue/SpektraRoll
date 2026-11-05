@@ -157,6 +157,15 @@ final class AppState: ObservableObject {
                 settings.ocioEnabled = false
             }
             normalizeSelection()
+            if ProcessInfo.processInfo.environment["SPEKTRA_OCIO"] == "1",
+               ocioInfo != nil {
+                settings.ocioEnabled = true
+                if let space = ocioColorSpaces.first(where: {
+                    $0.contains("S-Log3") && $0.contains("S-Gamut3.Cine")
+                }) {
+                    settings.ocioInput = space
+                }
+            }
             if let raw = ProcessInfo.processInfo.environment["SPEKTRA_PROXY_LIMIT_GB"],
                let value = Double(raw) {
                 proxyCacheLimitGB = min(1000, max(0, value))
