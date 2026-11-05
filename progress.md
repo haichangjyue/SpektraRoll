@@ -2,13 +2,48 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D078：电影画幅 CINE 标识 + APP 内部测试版本，Mac 已验收）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D078），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D079：配光按钮 + APP 版本升到 D079，Mac 已验收）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D079），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
+
+## 最新：D079 · 配光按钮（2026-11-05 晚；Mac 已验收）
+
+> 产品负责人问 SpektraLab 的「配光」按钮怎么工作，并要求在 `导出` 右边也加一个。
+
+### 一、SpektraLab 的配光做了什么
+
+- 顶栏按钮中文「配光」，英文「Process」；调用引擎 `solve(target:"both")`。
+- **测光**：对当前帧跑 meter（balanced / center / protect highlights / protect shadows），返回 `exposure_compensation_ev`，自动曝光节点在底片前应用。
+- **滤色片**：用 `neutral_print_filters_from_database` + `digest` 解出当前胶片/相纸的中性 C/M/Y 放大机滤色片。
+- UI 把用户的 Y/M 偏移清零（偏移是相对解出的中性值），再 `reprint` 当前帧。它是用户说“印这一帧”的动作，不是打开文件时自动做。
+
+### 二、SpektraRoll 的配光按钮
+
+- 位置：播放器控制条 `导出` 右边、`胶片效果` 左边。
+- 中性滤色片：SpektraRoll 已经通过 `data/profiles/neutral_print_filters.json` 按胶片/相纸自动查表并烘进模型，UI 没有 Y/M 偏移控件，所以这一步不需要按钮再解。
+- 缺少的是 **自动曝光**：按钮现在会
+  1. 暂停播放，抽取当前帧；
+  2. 用 `convert --from <input>` 解到显示 sRGB；
+  3. 取画面亮度中位数，算出让 18% 线性中灰落在目标上的 EV（`FrameMeter`）；
+  4. 写入 `settings.exposure`，打开 `胶片效果`，重渲当前帧；
+  5. 状态栏显示例如 `配光：+0.66 EV（中性滤色片自动）`。
+- 实测 `C0113.MP4`：显示帧中位数 0.371 sRGB → 线性 0.1137 → **+0.66 EV**；ADVANCED 曝光滑块同步到 `+0.66 EV`，胶片效果刷新。
+- 仍未做：SpektraLab 那样的 Y/M 偏移控件和独立 `solve --filter-pack`；如果以后要严格对齐，可以给 CLI 加 `solve` 命令并暴露 C/M/Y 偏移。
+
+### 三、APP 版本
+
+- `AppVersion.testTag` 升到 **D079**；INFO 引擎区显示 `内部测试（D079） · 0.1.0`。
+
+### 四、调试开关
+
+- `SPEKTRA_AUTOGRADE=1`：启动后自动执行一次配光（配合 `SPEKTRA_AUTOLOAD` 验收）。
+
+---
+
 
 ## 最新：D078 · 电影画幅 CINE 标识 + APP 版本（2026-11-05 晚；Mac 已验收）
 

@@ -56,7 +56,8 @@ build-ui-macos/SpektraRoll.app
 - 画面缩放/平移：滚轮/双指缩放、拖拽、适合 / 100%、双击切换。
 - 播放器“导出”按钮直接跳到 OUTPUT。
 - INFO 底部显示 **Mac** 配置：系统、屏幕、CPU、GPU、内存、存储、HDR、屏幕色彩空间（Windows 版标题为 **PC**）。
-- INFO 引擎区首行 **APP**：未发布版本显示 `内部测试（D078） · 0.1.0`。
+- INFO 引擎区首行 **APP**：未发布版本显示 `内部测试（D079） · 0.1.0`。
+- 播放器 `导出` 右侧有 **配光** 按钮：暂停、测当前帧中灰、把曝光调到 18% 线性中灰、打开胶片效果并刷新；中性 C/M/Y 由胶片/相纸数据库自动查表。
 - 片库按彩色负片 / 电影负片 / 反转片分类；相纸 / 电影印片分类。
 - 画幅（Super 8 / 16mm / Super 16 / 35mm / Super 35 / 65mm / IMAX，全部 CINE）→ `--frame-width-mm`；画幅行显示物理宽度。
 - LUT / 光谱 / 光谱 GPU 引擎；LUT 自动烘焙并缓存。
@@ -69,6 +70,7 @@ build-ui-macos/SpektraRoll.app
 - 渲染输出：640×360 / 3.00 s / H.264 / yuv420p。
 - D076：`video --display/--max-side 960` CLI 已验证；Mac 本机 `swift build` 通过，显示代理/胶片代理已生成（`~/Library/Caches/SpektraRoll/preview-cache/`）。
 - D077：INFO Mac 面板截图通过；生成胶片代理时播放日志 `block film proxy` → `switch film` → `unblock`；缓存上限用 3 个 2 MB 假文件验证，超限后自动删除。
+- D079：配光在 `C0113.MP4` 上测得 **+0.66 EV**，ADVANCED 曝光滑块同步、胶片效果刷新；`SPEKTRA_AUTOGRADE=1` 可复现。
 - 远程验收见 `docs/macos-dev-notes.md`（SSH Background domain、自截图、Stage Manager）。
 
 ## 调试开关
@@ -80,7 +82,7 @@ open -F --env SPEKTRA_ALL_SPACES=1 --env SPEKTRA_CAPTURE=1 \
   build-ui-macos/SpektraRoll.app
 ```
 
-`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTOPLAY` / `SPEKTRA_PLAYER_DEBUG` / `SPEKTRA_TAB` / `SPEKTRA_PROXY_LIMIT_GB` / `SPEKTRA_AUTORENDER` 见 `docs/macos-dev-notes.md`。
+`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTOPLAY` / `SPEKTRA_AUTOGRADE` / `SPEKTRA_PLAYER_DEBUG` / `SPEKTRA_TAB` / `SPEKTRA_PROXY_LIMIT_GB` / `SPEKTRA_AUTORENDER` 见 `docs/macos-dev-notes.md`。
 
 ## 已知限制（v1）
 

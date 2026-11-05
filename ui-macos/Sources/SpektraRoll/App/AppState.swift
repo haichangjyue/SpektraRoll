@@ -64,6 +64,7 @@ final class AppState: ObservableObject {
     @Published var isGeneratingFilmProxy = false
     @Published var proxyProgress: Double = 0
     @Published var proxyStatus = ""
+    @Published var isAutoGrading = false
 
     // D077: proxies live in a user-selectable folder with a soft size cap.
     @Published var proxyCacheLimitGB: Double = 5.0
@@ -599,6 +600,56 @@ final class AppState: ObservableObject {
         clearProxyState()
     }
 
+    // MARK: - 配光 (D079)
+
+    /// Meter the current source frame and set the scene exposure so its median
+    /// lands on 18% linear grey, then print (refresh) the film effect. The
+    /// neutral enlarger pack is already chosen from the film/paper database.
+    func autoGrade(at seconds: Double) {
+        guard !isAutoGrading else { return }
+        guard let asset = selectedAsset, asset.isPlayable else {
+            statusMessage = "先选择一个素材。"
+            return
+        }
+        guard catalogueReady else {
+            statusMessage = "片库还没加载完成。"
+            return
+        }
+        isAutoGrading = true
+        statusMessage = "配光中…"
+        let frameURL = engine.cacheDirectory.appendingPathComponent("preview/meter-frame.png")
+        let displayURL = engine.cacheDirectory.appendingPathComponent("preview/meter-display.png")
+        Task {
+            defer { isAutoGrading = false }
+            do {
+                try await engine.extractFrame(url: asset.url, at: seconds, output: frameURL)
+                _ = try await engine.convertToDisplay(
+                    settings: settings,
+                    ocioConfig: engine.ocioConfigURL,
+                    input: frameURL,
+                    output: displayURL
+                )
+                guard let image = NSImage(contentsOf: displayURL),
+                      let stats = FrameStats.compute(from: image) else {
+                    throw EngineError.commandFailed("无法读取测光帧。")
+                }
+                let ev = FrameMeter.exposureEV(from: stats)
+                settings.exposure = ev
+                save()
+                showFilmPreview = true
+                filmPreview = nil
+                frameStats = nil
+                previewFrame(at: seconds, immediate: true)
+                statusMessage = String(
+                    format: "配光：%+.2f EV（中性滤色片自动）",
+                    ev
+                )
+            } catch {
+                statusMessage = "配光失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
     // MARK: - Playback proxies (D074 #3)
 
     private var proxyMaxSide: Int { 960 }
@@ -1086,6 +1137,10 @@ final class AppState: ObservableObject {
         if ProcessInfo.processInfo.environment["SPEKTRA_AUTOPREVIEW"] == "1" {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             setFilmPreview(true, at: 0)
+        }
+        if ProcessInfo.processInfo.environment["SPEKTRA_AUTOGRADE"] == "1" {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            autoGrade(at: 0)
         }
         if ProcessInfo.processInfo.environment["SPEKTRA_AUTORENDER"] == "1" {
             outputName = "spektra-debug-render"

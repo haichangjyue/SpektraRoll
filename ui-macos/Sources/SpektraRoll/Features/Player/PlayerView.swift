@@ -418,6 +418,21 @@ struct PlayerView: View {
             .buttonStyle(PillButtonStyle(filled: false))
 
             Button {
+                player.pause()
+                app.autoGrade(at: player.currentTime)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "sun.max")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(app.isAutoGrading ? "配光中…" : "配光")
+                        .font(Theme.font(11, weight: .semibold))
+                }
+            }
+            .buttonStyle(PillButtonStyle(filled: false))
+            .disabled(app.isAutoGrading || app.selectedAsset == nil)
+            .help("自动测光：当前帧中灰放到 18%，刷新胶片效果；中性滤色片按胶片/相纸自动查表")
+
+            Button {
                 app.setFilmPreview(!app.showFilmPreview, at: player.currentTime,
                                    renderStill: !player.isPlaying)
             } label: {

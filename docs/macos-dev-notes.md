@@ -48,6 +48,7 @@ open -F \
 | `SPEKTRA_AUTOLOAD=<path>` | 启动后自动导入一个视频并选中 |
 | `SPEKTRA_AUTOPREVIEW=1` | 自动打开「胶片效果」渲染当前帧 |
 | `SPEKTRA_AUTOPLAY=1` | 启动 3.5 秒后自动播放（配合 `AUTOLOAD`/`AUTOPREVIEW` 测播放代理） |
+| `SPEKTRA_AUTOGRADE=1` | 启动后自动执行一次「配光」（需配合 `AUTOLOAD`） |
 | `SPEKTRA_PLAYER_DEBUG=1` | 播放源切换写入 `/tmp/spektra-player.log`（original/display/film） |
 | `SPEKTRA_TAB=info|film|print|advanced|output` | 启动时直接打开指定检查器 tab |
 | `SPEKTRA_PROXY_LIMIT_GB=5` | 本次启动临时覆盖代理缓存上限（测试用） |
@@ -116,6 +117,17 @@ cat /tmp/spektra-player.log
 **系统信息**：INFO 底部应出现「Mac」面板；用 `SPEKTRA_TAB=info` 截图检查。
 
 **缓存目录**：ADVANCED「预览代理」→「选择」改目录；新代理写入新目录，旧文件不迁移。
+
+## D079 验收（配光）
+
+```bash
+open -F --env SPEKTRA_AUTOLOAD=/Users/wenyutao/Movies/C0113.MP4 \
+  --env SPEKTRA_AUTOGRADE=1 --env SPEKTRA_TAB=advanced -n build-ui-macos/SpektraRoll.app
+```
+
+- 配光按钮在 `导出` 右侧；完成后状态栏应显示 `配光：+0.66 EV（中性滤色片自动）`。
+- ADVANCED 曝光滑块应同步到 `+0.66 EV`，胶片效果自动打开并刷新。
+- 调试日志/CLI 参数里 `--exposure 0.6626` 可确认测光结果。
 
 ## 已验证
 

@@ -157,6 +157,10 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    func pause() {
+        player.pause()
+    }
+
     func toggle() {
         if isPlaybackBlocked {
             resumeAfterBlock.toggle()

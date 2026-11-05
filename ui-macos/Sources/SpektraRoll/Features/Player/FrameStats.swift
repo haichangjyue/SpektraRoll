@@ -16,6 +16,7 @@ struct FrameStats {
     let total: Int
     let lowPoint: Double
     let highPoint: Double
+    let medianLuma: Double
     /// Stops between the 0.1% and 99.9% luma percentiles, measured in linear
     /// light. Display-referred sRGB is decoded before the ratio is taken.
     let dynamicRange: Double
@@ -92,6 +93,7 @@ struct FrameStats {
         lumaValues.sort()
         let low = percentile(lumaValues, 0.001)
         let high = percentile(lumaValues, 0.999)
+        let median = percentile(lumaValues, 0.5)
         let lowLinear = max(srgbToLinear(low), 1.0 / 1000.0)
         let highLinear = max(srgbToLinear(high), lowLinear * 1.0001)
         let range = min(20.0, max(0.0, log2(highLinear / lowLinear)))
@@ -104,6 +106,7 @@ struct FrameStats {
             total: sampleCount,
             lowPoint: low,
             highPoint: high,
+            medianLuma: median,
             dynamicRange: range,
             highlightClip: Double(highlightCount) / Double(sampleCount),
             shadowClip: Double(shadowCount) / Double(sampleCount)
