@@ -13,11 +13,16 @@ struct OutputTab: View {
 
     private var usesRange: Binding<Bool> {
         Binding(
-            get: { app.settings.frames != nil },
+            get: { app.settings.rangeEnabled },
             set: { enabled in
-                app.settings.frames = enabled
-                    ? max(1, app.selectedAsset?.frames ?? 1)
-                    : nil
+                app.settings.rangeEnabled = enabled
+                if enabled {
+                    if app.settings.frames == nil {
+                        app.settings.frames = max(1, app.selectedAsset?.frames ?? 1)
+                    }
+                } else {
+                    app.settings.frames = nil
+                }
             }
         )
     }
@@ -25,7 +30,10 @@ struct OutputTab: View {
     private var frameCount: Binding<Int> {
         Binding(
             get: { app.settings.frames ?? max(1, app.selectedAsset?.frames ?? 1) },
-            set: { app.settings.frames = max(1, $0) }
+            set: {
+                app.settings.frames = max(1, $0)
+                app.settings.rangeEnabled = true
+            }
         )
     }
 
@@ -168,6 +176,7 @@ struct OutputTab: View {
                         .buttonStyle(CompactPillButtonStyle())
                         Button("整段") {
                             app.settings.start = 0
+                            app.settings.rangeEnabled = false
                             app.settings.frames = nil
                         }
                         .buttonStyle(CompactPillButtonStyle())
@@ -179,7 +188,7 @@ struct OutputTab: View {
                         detail: "关闭 = 从起点到片尾；起点会自动带上相机 timecode。"
                     )
 
-                    if app.settings.frames != nil {
+                    if app.settings.rangeEnabled {
                         HStack(spacing: 8) {
                             Text("帧数")
                                 .font(Theme.caption)
@@ -209,6 +218,7 @@ struct OutputTab: View {
                                 guard let asset = app.selectedAsset, asset.fps > 0 else { return }
                                 let remaining = max(0, asset.duration - app.settings.start)
                                 app.settings.frames = max(1, Int((remaining * asset.fps).rounded()))
+                                app.settings.rangeEnabled = true
                             }
                             .buttonStyle(CompactPillButtonStyle())
                         }

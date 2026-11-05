@@ -235,6 +235,9 @@ struct LookSettings: Codable, Equatable {
     var strength: Double = 1.0
     var threads: Int = 0
     var start: Double = 0
+    // D082: explicit switch so the OUTPUT toggle and the optional frame count
+    // cannot disagree. `frames` is only meaningful when this is true.
+    var rangeEnabled: Bool = false
     var frames: Int? = nil
     var segment: Double = 0
     var jobs: Int = 0
@@ -280,6 +283,7 @@ struct LookSettings: Codable, Equatable {
         threads = try c.decodeIfPresent(Int.self, forKey: .threads) ?? 0
         start = try c.decodeIfPresent(Double.self, forKey: .start) ?? 0
         frames = try c.decodeIfPresent(Int.self, forKey: .frames)
+        rangeEnabled = try c.decodeIfPresent(Bool.self, forKey: .rangeEnabled) ?? (frames != nil)
         segment = try c.decodeIfPresent(Double.self, forKey: .segment) ?? 0
         jobs = try c.decodeIfPresent(Int.self, forKey: .jobs) ?? 0
         resume = try c.decodeIfPresent(Bool.self, forKey: .resume) ?? false

@@ -995,6 +995,7 @@ final class AppState: ObservableObject {
         proxy.crf = 20
         proxy.preset = "veryfast"
         proxy.start = 0
+        proxy.rangeEnabled = false
         proxy.frames = nil
         proxy.segment = 0
         proxy.jobs = 0
@@ -1496,6 +1497,7 @@ final class AppState: ObservableObject {
             settings.codec = .h264
             settings.trc = .srgb
             settings.start = 0
+            settings.rangeEnabled = true
             settings.frames = 2
             outputName = "spektra-queue-selftest-1"
             enqueueRender()

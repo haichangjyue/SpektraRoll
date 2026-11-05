@@ -153,7 +153,7 @@ extension LookSettings {
         args += ["--progress", "json"]
         if maxSide > 0 { args += ["--max-side", "\(maxSide)"] }
         if start > 0 { args += ["--start", Self.number(start)] }
-        if let frames, frames > 0 { args += ["--frames", "\(frames)"] }
+        if rangeEnabled, let frames, frames > 0 { args += ["--frames", "\(frames)"] }
         if segment > 0 { args += ["--segment", Self.number(segment)] }
         if resume { args += ["--resume"] }
         if jobs > 0 { args += ["--jobs", "\(jobs)"] }
