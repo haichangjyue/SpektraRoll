@@ -176,7 +176,7 @@ struct PlayerView: View {
         guard let raw = ProcessInfo.processInfo.environment["SPEKTRA_SEEK"],
               let seconds = Double(raw) else { return }
         Task {
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
             player.pause()
             player.seek(to: seconds)
             refreshStill(at: seconds)

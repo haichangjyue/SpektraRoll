@@ -178,6 +178,14 @@ final class AppState: ObservableObject {
                let value = Double(raw) {
                 proxyCacheLimitGB = min(1000, max(0, value))
             }
+            if let path = ProcessInfo.processInfo.environment["SPEKTRA_PROXY_DIR"],
+               !path.isEmpty {
+                let target = URL(fileURLWithPath: path, isDirectory: true)
+                let old = proxyCacheDirectory
+                let moved = migrateProxyCache(from: old, to: target)
+                proxyCacheDirectory = target
+                statusMessage = "代理缓存迁移 \(moved) 个文件"
+            }
             cleanupProxyCache()
             if let tab = ProcessInfo.processInfo.environment["SPEKTRA_TAB"],
                let selected = InspectorTab(rawValue: tab.lowercased()) {

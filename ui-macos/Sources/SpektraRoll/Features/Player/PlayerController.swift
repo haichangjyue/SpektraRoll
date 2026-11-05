@@ -197,6 +197,7 @@ final class PlayerController: ObservableObject {
 
     func seek(to seconds: Double) {
         let clamped = max(0, min(seconds, max(duration, 0)))
+        debugLog("seek \(String(format: "%.3f", clamped))")
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
         currentTime = clamped
     }
