@@ -52,9 +52,9 @@
 
 ### 三、当前状态（截至最后一次操作）
 
-- 最新功能代码：`6cb8055`（D081；其后的 `5f2be7f` 是 D081 验收文档 + help 的 `%` 转义）
-- CI：D080 功能代码 run **148** Windows + macOS 双绿（含 `swift build`）；D081 run **153** Windows + macOS 双绿（含 Metal `gpu_film` 与 OCIO 步骤）
-- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 `6cb8055` 并本机验证（`build-macos-tests` 11/11）
+- 最新功能代码：`3b4f386`（D082；其后的 `68d5beb` 是验收文档）
+- CI：D080 run **148**、D081 run **153**、D082 功能代码 run **164** Windows + macOS 双绿（run 162 的 Windows exit 127 是单次环境抖动，随后 163/164 同代码均绿）
+- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 D082 并本机验证（`build-macos-tests` 11/11，整段 4K50 渲染、队列、代理、缓存迁移）
 - Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
 - Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
 - Mac 代理缓存：`~/Library/Caches/SpektraRoll/preview-cache/`，上限 5 GB，最后约 9 MB / 4 个代理
@@ -208,6 +208,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 播放代理 | 720 px LUT + GPU 质感，从启动到 `switch film` 约 **13 s**（原先 20–30 s） |
 | 缓存迁移 | 5 个代理移动到新目录、旧目录清空，再迁移回原目录 |
 | 时间线 seek | `SPEKTRA_SEEK=3.2` 日志确认 `seek 3.200`；截图显示帧号/滑杆/逐帧按钮 |
+| CI run **164** | Windows + macOS **双绿**（含 `ctest` / OCIO / 视频冒烟） |
 
 ### 三、仍未做 / 注意
 

@@ -1,6 +1,6 @@
 # STATUS
 
-**最后更新**：2026-11-06（D082 P1 一次完成：时间线/队列/区间/滤色片偏移/代理加速；Windows + Mac 已验） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D082；Windows Qt 冻结）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-06（D082 P1 一次完成：时间线/队列/区间/滤色片偏移/代理加速；Windows + Mac 已验，CI run 164 双绿） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D082；Windows Qt 冻结）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
@@ -87,7 +87,7 @@
 - [x] **配光按钮**（D079）：放在 `导出` 右侧；暂停、抽取当前帧、解码到 sRGB、取亮度中位数，算出让 18% 线性中灰落位的 EV，写入曝光并刷新胶片效果；中性 C/M/Y 由胶片/相纸数据库自动查表。`C0113.MP4` 实测 **+0.66 EV**，ADVANCED 曝光同步。未做 Y/M 偏移控件和独立 filter-pack solve。
 - [x] **macOS 静态 OCIO 2.6.0**（D080）：新增 `scripts/build-ocio-macos.sh` / `.command`，关 Python/APPS/TESTS/DOCS，静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测（`OCIO_PREFIX` 可覆盖）。bundle `capabilities` 报 `ocio.available=true, 2.6.0`；`ocio-info` / `lut bake --ocio-input "S-Log3 S-Gamut3.Cine"` 成功；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib。INFO 显示“可用 2.6.0”，ADVANCED OCIO 输入可用；APP 升到 D080。仍未做：spectral-gpu 的 OCIO、`--exr-linear` 的 OCIO 显示变换。
 - [x] **光谱 GPU 接 OCIO + 线性 EXR**（D081）：GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退。Windows + Mac `ctest` 均 **11/11**；Windows CPU vs D3D11 **109.43 dB**，Mac CPU vs Metal **113.70 dB**；strength 0.5 与线性 EXR 读回 **inf**；CI run **153** Windows + macOS 双绿。Qt 里旧的“OCIO 会回退 CPU”翻译/预提示也已删除。
-- [x] **P1 一次完成**（D082）：时间线拖动/逐帧预览；渲染队列（参数快照、顺序执行、持久化、停止/删除/清空）；区间起点/帧数/到片尾；`solve --filter-pack` + `--filter-offset` + PRINT 页 C/M/Y 偏移；35mm Academy 21.95 mm 与 135 全画幅 36.0 mm 拆分。播放代理固定 LUT + GPU 质感 + 360–720 px（6 秒 4K50 启动到就绪约 13 s），切换缓存目录会迁移旧代理；修复 `ffprobe` 旋转探测扫描整段。Mac 整段 4K50 312 帧 ProRes/音频/timecode 通过；Windows + Mac `ctest` 11/11。
+- [x] **P1 一次完成**（D082）：时间线拖动/逐帧预览；渲染队列（参数快照、顺序执行、持久化、停止/删除/清空）；区间起点/帧数/到片尾；`solve --filter-pack` + `--filter-offset` + PRINT 页 C/M/Y 偏移；35mm Academy 21.95 mm 与 135 全画幅 36.0 mm 拆分。播放代理固定 LUT + GPU 质感 + 360–720 px（6 秒 4K50 启动到就绪约 13 s），切换缓存目录会迁移旧代理；修复 `ffprobe` 旋转探测扫描整段。Mac 整段 4K50 312 帧 ProRes/音频/timecode 通过；Windows + Mac `ctest` 11/11；CI run **164** 双绿。
 - [x] `scripts\demo-log-inputs.cmd`：九种输入各烘一张 LUT + GPU/CPU 对照表
 - [x] `scripts\demo-ocio.cmd`：配置信息 / Apple Log 双实现 / ACES 显示器变换 / LUT 对比
 - [x] `scripts\demo-ocio-ui.cmd`：界面自检（52 个空间）/ UI LUT vs CLI / 用 UI 的 LUT 渲一帧
