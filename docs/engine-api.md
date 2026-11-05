@@ -281,7 +281,8 @@ UI 传参时以 `data/ui-schema.json` 为准。几个容易错的点：
 | `--resume` | presence flag；单独使用默认 10 s 分段 |
 | `--jobs` | `0` = 自动；`1` = 顺序 |
 | `--red-scale` | `full` / `half` / `quarter`；仅 R3D |
-| `--ocio-*` | 只对 `--engine spectral` 有效；LUT 路径要先 `lut bake --ocio-input` |
+| `--ocio-*` | 对 `--engine spectral` 和 `--engine spectral-gpu` 都有效（D081：GPU 后端在 CPU 上批量解码）；LUT 路径要先 `lut bake --ocio-input` |
+| `--exr-linear` + `--ocio-display/--ocio-view` | 跳过显示变换，直接写显示前线性 Rec.709（D081）；`--exr-trc` 不参与 |
 
 ---
 
