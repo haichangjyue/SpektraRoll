@@ -46,9 +46,9 @@
 
 ### 三、当前状态（截至最后一次操作）
 
-- 最新功能代码：`b2874b2`（`git log -1` 查看其后的文档提交）
-- CI：功能代码 run **148** Windows + macOS 双绿（含 `swift build`）
-- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，功能代码已同步到 `b2874b2`（再 `git pull` 可含本文档提交）
+- 最新功能代码：`6cb8055`（D081；其后的 `5f2be7f` 是 D081 验收文档 + help 的 `%` 转义）
+- CI：D080 功能代码 run **148** Windows + macOS 双绿（含 `swift build`）；D081 的 CI 待本轮提交后跑
+- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 `6cb8055` 并本机验证（`build-macos-tests` 11/11）
 - Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
 - Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
 - Mac 代理缓存：`~/Library/Caches/SpektraRoll/preview-cache/`，上限 5 GB，最后约 9 MB / 4 个代理
@@ -80,6 +80,13 @@ scripts/build-ocio-macos.sh
 # 之后
 scripts/build-macos-ui.sh --no-open
 open build-ui-macos/SpektraRoll.app
+
+# D081：带测试的构建（含 Metal gpu_film / OCIO 对拍）
+cmake -S . -B build-macos-tests -DCMAKE_BUILD_TYPE=Release -DSR_BUILD_TESTS=ON \
+  -DCMAKE_PREFIX_PATH="$HOME/Documents/ocio-2.6.0-static" \
+  -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON
+cmake --build build-macos-tests -j "$(sysctl -n hw.ncpu)"
+ctest --test-dir build-macos-tests --output-on-failure
 ```
 
 **调试环境变量（仅 `open -F --env` 生效）**
