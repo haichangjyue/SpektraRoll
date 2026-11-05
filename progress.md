@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D080：macOS 静态 OCIO 2.6.0 已接入并验收）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D080），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D081：光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows 已验，Mac/CI 待跑）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D080），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO（D041–D081）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -25,8 +25,9 @@
 | **D078** | 电影画幅 + APP 版本 | 新增 Super 8；16mm 10.26 / Super 16 12.52 / Super 35 24.89 / 65mm 52.63 对齐 SpektraLab 相机负片长边；35mm 36.0、IMAX 70.0；全部标 CINE；INFO 引擎区加 APP 行 |
 | **D079** | 配光按钮 | 放在 `导出` 右侧；暂停、抽取当前帧、解到 sRGB、按亮度中位数把 18% 线性中灰落位；`C0113.MP4` 实测 **+0.66 EV**；中性 C/M/Y 由胶片/相纸数据库自动查表 |
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
+| **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退 |
 
-**顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D080**。
+**顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D081**。
 
 ### 二、关键决策
 
@@ -40,6 +41,8 @@
 | D078 | APP 版本 | 未发布统一 `内部测试（测试号） · 版本`；每轮更新 `AppVersion.testTag`，发布后 `isReleased = true` |
 | D079 | 配光 | 中性滤色片已由数据库自动查表；按钮只补自动曝光（中位数 → 18% 线性中灰），不做 Y/M 偏移 |
 | D080 | macOS OCIO | 不走 Homebrew 包（macOS 14 会拉 `python@3.15` 失败）；自建静态 OCIO 2.6.0，不编 Python 绑定；纯静态依赖 |
+| D081 | GPU OCIO | 不把 OCIO 塞进着色器：CPU 批量解码后进现有光谱 GPU；额外保留原始编码帧做 `--strength` 混合 |
+| D081 | 线性 EXR | OCIO 显示变换的逆没有定义；`--exr-linear` 直接写显示前线性 Rec.709，`--exr-trc` 不再参与 |
 
 ### 三、当前状态（截至最后一次操作）
 
@@ -97,8 +100,8 @@ open build-ui-macos/SpektraRoll.app
 ### 四、未完成的待办（建议顺序）
 
 **P0 · OCIO 深度**
-- [ ] `--engine spectral-gpu` + OCIO：目前仍回退 CPU 光谱（D062 限制）；Metal 着色器还没有 OCIO 输入变换。
-- [ ] `--exr-linear` 的 OCIO 显示变换：目前只认 sRGB/PQ/HLG。
+- [x] `--engine spectral-gpu` + OCIO：D081 已接通（CPU 批量解码 → 线性 Rec.709 → 光谱 GPU）；Windows 已验证，Mac/CI 待跑。
+- [x] `--exr-linear` 的 OCIO 显示变换：D081 改为直接写显示前线性 Rec.709。
 
 **P1 · 实时预览/性能**
 - [ ] 4K50 6 秒素材的胶片代理生成在 M1 + spectral-gpu 约 **20–30 秒**；可考虑降到 720 px、代理固定走 LUT 引擎，或只预生成前几秒。
@@ -144,6 +147,42 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 
 ---
 
+## 最新：D081 · 光谱 GPU 接 OCIO + 线性 EXR（2026-11-05 晚；Windows 已验，Mac/CI 待跑）
+
+> 解决 D080 剩下的两个 P0 欠账：`--engine spectral-gpu` + `--ocio-input` 不再回退 CPU 光谱；`convert --ocio-display ... --exr-linear` 不再用 sRGB/PQ/HLG 猜显示变换的逆。
+
+### 一、这次做了什么
+
+- **GPU 的 OCIO 路径**（D3D11 + Metal）：
+  - 不在着色器里实现 OCIO，也不让 GPU 链接 OCIO。`GpuFilm::processToDevice` 在上传前把输入 RGB 复制一份，调用 `OcioProcessor::apply(float*, pixels)` 批量解码成线性 Rec.709，再打包成 GPU 的 `float4`。
+  - 着色器新增 `inputMode = 10`：表示输入已经是线性 Rec.709，只做 `max(0)` 钳制，不再跑内置 Log 曲线。
+  - 为保持 `--strength < 1` 与 CPU 的 `sr::mix(原始编码值, 胶片结果, strength)` 一致，OCIO 路径额外上传一份原始编码帧；着色器混合时用它，而不是线性值。
+  - `GpuFilm::configure` 复制 `OcioProcessor`（共享句柄），调用方的 recipe 可以先释放；重新 configure 会正确释放/重建编码缓冲。
+- **移除回退**：`lut apply`、`video`、`preview` 里三处 `warning: OpenColorIO input is CPU-only for now` 全部删除；GPU 配置失败仍按原逻辑回退 CPU 光谱。
+- **线性 EXR**：`convert --exr-linear` 遇到 `--ocio-display/--ocio-view` 时跳过显示变换，直接写显示前的线性 Rec.709。任意 view 的逆变换没有定义，之前按 sRGB 反推会得到错误的“线性”。`--exr-trc` 在这种组合下不参与。
+- **测试/CI**：`test_gpu_film` 新增 `ocio logc3 / negative +gamut` 对拍；macOS CI 的 OCIO 步骤改为断言 `spectral-gpu` 日志里没有 `warning:`，并新增 OCIO 线性 EXR 冒烟。
+- **UI/文档**：`AppVersion.testTag` 升到 **D081**；`docs/macos-dev-notes.md`、`docs/ui-parity.md`、`RUN.md`、`ui-macos/README.md` 更新为“已接通”。
+
+### 二、Windows 本机验证
+
+| 项 | 结果 |
+|---|---|
+| 构建 | Ninja Release 通过（`gpu_film.cpp` + `main.cpp`） |
+| `ctest` | **11/11**；`gpu_film` 新增 OCIO 用例 worst **1e-6** |
+| `lut apply` OCIO，CPU vs spectral-gpu | 320×180 / 16-bit，**109.43 dB** |
+| 同上 `--strength 0.5` | **inf**（16-bit 读回逐位一致） |
+| `convert --ocio-display ... --exr-linear` vs 普通线性 EXR | **inf** |
+| `video --engine spectral-gpu --ocio-input "S-Log3 S-Gamut3.Cine"` | 2 帧 320×180 H.264 正常出片，无回退 warning |
+
+### 三、仍未做 / 待验收
+
+- **Mac 真机**：Metal 后端代码路径已改，但本机无法编译 Metal；需要在 Mac 上 `scripts/build-macos-ui.sh --no-open` + 跑 `ctest`（含 `gpu_film`）并实际播一段 OCIO 代理。
+- **CI**：Windows + macOS 双平台待跑；macOS 的 `gpu_film` 会真正走 Metal 对拍。
+- **性能**：OCIO 的 CPU 批量解码仍在每帧上传前执行；4K 有成本但远低于回退 CPU 光谱。后续可把 OCIO 变换烘成 3D LUT 上 GPU。
+- **UI 提示**：Qt 里“OCIO 输入只能用 CPU 光谱”的旧翻译还留着（不会再触发），可下一轮清掉。
+
+---
+
 ## 最新：D080 · macOS 静态 OCIO 2.6.0（2026-11-05 晚；Mac 已验收）
 
 > 解决 D073 起 macOS 上 OCIO 不可用的问题。Homebrew 的 `opencolorio` 在 macOS 14 会尝试构建 `python@3.15`，clang tail-call 报错；改为自建静态 OCIO 核心（不编 Python 绑定）。
@@ -178,9 +217,9 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 
 ### 三、仍未做
 
-- **光谱 GPU 的 OCIO**：仍按 D062 回退 CPU 光谱。
-- **`--exr-linear` 的 OCIO 显示变换**：仍只认 sRGB/PQ/HLG。
-- OCIO 代理生成/渲染速度：OCIO 输入走 CPU 光谱会比 LUT/GPU 慢。
+- ~~**光谱 GPU 的 OCIO**：仍按 D062 回退 CPU 光谱。~~ → **D081 已完成**。
+- ~~**`--exr-linear` 的 OCIO 显示变换**：仍只认 sRGB/PQ/HLG。~~ → **D081 已完成**（写显示前线性 Rec.709）。
+- OCIO 代理生成/渲染速度：GPU 路径现在只多了每帧 CPU 批量解码，已远快于回退 CPU 光谱。
 
 ---
 

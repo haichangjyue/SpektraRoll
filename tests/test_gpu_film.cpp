@@ -15,6 +15,7 @@
 
 #include "sr/film_model.hpp"
 #include "sr/lut3d.hpp"
+#include "sr/ocio.hpp"
 #include "sr/profile.hpp"
 
 #include "../src/cli/gpu_film.hpp"
@@ -206,6 +207,30 @@ int main() {
         options.input = entry.first;
         runCase(srgbModel, options, entry.second, tolerance);
     }
+
+#if defined(SR_HAVE_OCIO)
+    // D081: OCIO input used to force the CPU spectral engine. The GPU backend
+    // now decodes on the CPU in bulk and keeps the original values for the
+    // strength blend; both paths must agree with transformFrom.
+    if (sr::ocioAvailable()) {
+        sr::OcioConfig ocioConfig;
+        std::string linear;
+        sr::OcioProcessor ocioInput;
+        const std::string ocioPath =
+            root + "/data/ocio/studio-config-v3.0.0_aces-v2.0_ocio-v2.4.ocio";
+        if (!sr::openOcioConfig(ocioPath, ocioConfig, error) ||
+            !sr::pickOcioLinearSpace(ocioConfig, "", linear, error) ||
+            !sr::makeOcioInputProcessor(ocioConfig, "ARRI LogC3 (EI800)", linear, ocioInput,
+                                        error)) {
+            std::fprintf(stderr, "FAIL: OCIO setup: %s\n", error.c_str());
+            return 1;
+        }
+        sr::BakeOptions ocioOptions = negative;
+        ocioOptions.ocio = &ocioInput;
+        ocioOptions.ocioInput = "ARRI LogC3 (EI800)";
+        runCase(srgbModel, ocioOptions, "ocio logc3 / negative +gamut", tolerance);
+    }
+#endif
 
     sr::FilmModelOptions couplerOptions;
     couplerOptions.couplers = true;

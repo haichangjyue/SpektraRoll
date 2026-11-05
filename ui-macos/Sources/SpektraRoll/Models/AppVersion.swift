@@ -10,7 +10,7 @@ enum AppVersion {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
     }()
 
-    static let testTag = "D080"
+    static let testTag = "D081"
     static let isReleased = false
 
     static var display: String {

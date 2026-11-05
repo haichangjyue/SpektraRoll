@@ -80,7 +80,8 @@ void printUsage() {
         "      to render an Apple Log frame as a plain SDR reference.\n"
         "      With --ocio-input the decode goes through OpenColorIO instead of a\n"
         "      built-in curve; --ocio-display/--ocio-view then write that display\n"
-        "      view instead of plain sRGB (D062).\n"
+        "      view instead of plain sRGB (D062). With --exr-linear that view is\n"
+        "      skipped and the pre-display linear Rec.709 is written (D081).\n"
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
         "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|<camera log>]\n"
@@ -136,8 +137,9 @@ void printUsage() {
         "      -diffusion-radius. --in-matrix auto (the default) reads the clip's\n"
         "      color_space tag for the YUV -> RGB step and falls back to bt2020; pass\n"
         "      bt2020 or bt709 to override a badly tagged file. --ocio-input works\n"
-        "      with --engine spectral only (the GPU shaders have no OCIO yet, D062);\n"
-        "      with a LUT, bake it once with `lut bake --ocio-input <space>`.\n"
+        "      with --engine spectral and spectral-gpu (D081: the GPU backend runs\n"
+        "      OCIO on the CPU first); with a LUT, bake it once with\n"
+        "      `lut bake --ocio-input <space>`.\n"
         "\n"
         "  spektra-roll-cli lut info --lut <file.cube>\n"
         "      Show table size, domain and title.\n"
@@ -1557,19 +1559,10 @@ int cmdLutApply(const Args& args) {
         if (!lut.loadCube(lutPath, error)) return fail(error);
     } else {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
-        bool gpuFellBackForOcio = false;
-        if (recipe.options.ocio != nullptr && gpu) {
-            // The shaders have no OCIO; the CPU spectral engine does (D062).
-            std::fprintf(stderr,
-                         "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
-                         "engine\n");
-            gpu = false;
-            gpuFellBackForOcio = true;
-        }
+        // D081: the GPU backend decodes OCIO on the CPU (bulk, vectorised) and
+        // then runs the same spectral shader, so it no longer falls back.
         if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
-        // The OCIO branch already explained the fallback; do not follow it with
-        // an empty "warning: ;" (D066).
-        if (!gpu && engine == "spectral-gpu" && !gpuFellBackForOcio) {
+        if (!gpu && engine == "spectral-gpu") {
             if (error.empty()) {
                 std::fprintf(stderr,
                              "warning: the GPU spectral engine is unavailable; using the CPU "
@@ -2515,19 +2508,10 @@ int cmdVideo(const Args& args) {
         displayOptions.threads = args.getInt("threads", 0);
     } else if (spectral) {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
-        bool gpuFellBackForOcio = false;
-        if (recipe.options.ocio != nullptr && gpu) {
-            // The shaders have no OCIO; the CPU spectral engine does (D062).
-            std::fprintf(stderr,
-                         "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
-                         "engine\n");
-            gpu = false;
-            gpuFellBackForOcio = true;
-        }
+        // D081: the GPU backend decodes OCIO on the CPU (bulk, vectorised) and
+        // then runs the same spectral shader, so it no longer falls back.
         if (gpu) gpu = gpuFilm.configure(recipe.model, recipe.options, error);
-        // The OCIO branch already explained the fallback; do not follow it with
-        // an empty "warning: ;" (D066).
-        if (!gpu && engine == "spectral-gpu" && !gpuFellBackForOcio) {
+        if (!gpu && engine == "spectral-gpu") {
             if (error.empty()) {
                 std::fprintf(stderr,
                              "warning: the GPU spectral engine is unavailable; using the CPU "
@@ -3160,6 +3144,16 @@ int cmdConvert(const Args& args) {
     if (!sr::loadImage(inPath, image, error, &sourceBits)) return fail(error);
     const int bits = requestedBits(args, std::min(sourceBits, 16));
 
+    ExrOptions exr;
+    if (!parseExrOptions(args, exr, error)) return fail(error);
+    if (exr.linear && !isExrPath(outPath)) {
+        return fail("--exr-linear needs an .exr output");
+    }
+    // D081: an OCIO display/view is not a simple TRC, so inverting it would be a
+    // guess. With --exr-linear we skip the view and write the linear Rec.709
+    // that would have fed it.
+    const bool ocioLinearOut = exr.linear && ocioOut != nullptr;
+
     const auto started = std::chrono::steady_clock::now();
     const size_t count = static_cast<size_t>(image.width) * image.height;
     const double gain = std::exp2(exposureEv);
@@ -3176,6 +3170,13 @@ int cmdConvert(const Args& args) {
         }
         for (int c = 0; c < 3; ++c) linear[c] *= gain;
         if (ocioOut) {
+            if (ocioLinearOut) {
+                for (int c = 0; c < 3; ++c) {
+                    px[c] = static_cast<float>(floatOut ? linear[c]
+                                                        : std::min(1.0, std::max(0.0, linear[c])));
+                }
+                continue;
+            }
             double shown[3];
             ocioOut->apply(linear, shown);
             for (int c = 0; c < 3; ++c) {
@@ -3194,19 +3195,25 @@ int cmdConvert(const Args& args) {
                              std::chrono::steady_clock::now() - started)
                              .count();
 
-    ExrOptions exr;
-    if (!parseExrOptions(args, exr, error)) return fail(error);
-    if (!prepareExr(image, outPath, exr, error)) return fail(error);
+    if (!ocioLinearOut && !prepareExr(image, outPath, exr, error)) return fail(error);
     if (!sr::saveImage(outPath, image, error, bits, args.has("exr-half"), !args.has("exr-raw"))) return fail(error);
     if (isExrPath(outPath) && exr.linear) {
-        std::printf("EXR: linear light (%s decode, 1.0 = white)\n",
-                    floatTransferName(exr.transfer));
+        if (ocioLinearOut) {
+            std::printf("EXR: linear light (pre-display Rec.709 from OpenColorIO, 1.0 = white)\n");
+        } else {
+            std::printf("EXR: linear light (%s decode, 1.0 = white)\n",
+                        floatTransferName(exr.transfer));
+        }
     }
     if (isExrPath(outPath)) reportFloatRange(image);
 
+    const char* outputDescription =
+        ocioOut ? (ocioLinearOut ? "linear pre-display (OpenColorIO)"
+                                 : "display/view (OpenColorIO)")
+                : "srgb";
     std::printf("converted %s (%s -> %s, %+.2f EV) to %s\n", inPath.c_str(),
                 ocioIn ? (ocioSource + " via OpenColorIO").c_str() : sr::inputTransferName(from),
-                ocioOut ? "display/view (OpenColorIO)" : "srgb", exposureEv, outPath.c_str());
+                outputDescription, exposureEv, outPath.c_str());
     std::printf("wrote %s (%dx%d, %zu pixels, %d-bit out from %d-bit in, %.1f ms)\n",
                 outPath.c_str(), image.width, image.height, count, outputBits(outPath, bits),
                 sourceBits, elapsed);
@@ -3414,15 +3421,8 @@ bool configureLook(Server& server, const Args& look, std::string& error) {
     server.ocioRaw = server.recipe.ocioProcessor;
     server.ocioSource = server.ocioSource.empty() ? server.recipe.ocioSource : server.ocioSource;
     server.ocioConfig = server.recipe.ocioConfig;
-    // D063: the GPU shader only knows the built-in camera curves, so an OCIO
-    // input must run on the CPU (same rule as `lut apply` / `video`). Without
-    // this the preview silently ignored OCIO and rendered the wrong frame.
-    if (server.gpuColor && !server.recipe.ocioSource.empty()) {
-        std::fprintf(stderr,
-                     "warning: OpenColorIO input is CPU-only for now; using the CPU spectral "
-                     "engine\n");
-        server.gpuColor = false;
-    }
+    // D081: the GPU backend decodes OCIO on the CPU before the spectral shader,
+    // so the preview no longer has to fall back to the CPU spectral engine.
     if (server.gpuColor &&
         !server.gpuFilm.configure(server.recipe.model, server.recipe.options, error)) {
         std::fprintf(stderr, "warning: %s; using the CPU spectral engine\n", error.c_str());

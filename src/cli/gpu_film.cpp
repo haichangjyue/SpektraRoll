@@ -7,6 +7,8 @@
 
 #include "gpu_film.hpp"
 
+#include "sr/ocio.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -88,6 +90,9 @@ cbuffer Params : register(b0) {
 };
 
 StructuredBuffer<float4> inputPixels : register(t0);
+// D081: when OCIO decodes the input, inputPixels already holds linear Rec.709
+// and this buffer keeps the original encoded values for the strength blend.
+StructuredBuffer<float4> encodedPixels : register(t1);
 RWStructuredBuffer<float4> outputPixels : register(u0);
 
 static const float kLog2Of10 = 3.321928094887362;
@@ -181,8 +186,13 @@ float3 camMatrix(float3 v, float3 r, float3 g, float3 b) {
 
 // inputMode: 0 sRGB, 1 Apple Log, 2 S-Log3, 3 C-Log3, 4 V-Log,
 //            5 S-Log3 + S-Gamut3, 6 LogC3, 7 LogC4, 8 Blackmagic Gen 5,
-//            9 DaVinci Intermediate.
+//            9 DaVinci Intermediate, 10 linear Rec.709 (OCIO already decoded).
 float3 decodeInput(float3 encoded) {
+    if (inputMode == 10) {
+        // D081: OpenColorIO ran on the CPU before upload and already returned
+        // linear Rec.709; clamp like the CPU reference does.
+        return max(encoded, 0.0);
+    }
     if (inputMode == 0) {
         return float3(srgbDecode(encoded.x), srgbDecode(encoded.y), srgbDecode(encoded.z));
     }
@@ -524,7 +534,10 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         if (gamutCompress != 0) rgb = compressGamut(rgb);
     }
 
-    outputPixels[id.x] = float4(lerp(encoded, encodeOutput(rgb), saturate(strength)), 1.0);
+    // D081: with OCIO the shader receives decoded linear values, so blend the
+    // film result with the original encoded sample instead.
+    float3 source = (inputMode == 10) ? encodedPixels[id.x].xyz : encoded;
+    outputPixels[id.x] = float4(lerp(source, encodeOutput(rgb), saturate(strength)), 1.0);
 }
 )HLSL";
 
@@ -542,13 +555,21 @@ struct GpuFilm::Impl {
     ID3D11Buffer* constantBuffer = nullptr;
     ID3D11Buffer* inputBuffer = nullptr;
     ID3D11Buffer* outputBuffer = nullptr;
+    // D081: only allocated when the OCIO input transform is active.
+    ID3D11Buffer* encodedBuffer = nullptr;
     ID3D11ShaderResourceView* inputView = nullptr;
+    ID3D11ShaderResourceView* encodedView = nullptr;
     ID3D11UnorderedAccessView* outputView = nullptr;
     ID3D11Buffer* staging = nullptr;
     ID3D11Query* stopQuery = nullptr;
     std::size_t capacity = 0;
     // Reused between frames so a video render does not allocate 42 MB per frame.
     std::vector<float> packed;
+    // Scratch RGB for the bulk OCIO decode (D081).
+    std::vector<float> linearized;
+    // The OCIO processor is copied (cheap shared handle) so the caller's recipe
+    // may go away while this backend is still in use.
+    OcioProcessor ocio;
 
     struct Params {
         float filmCurves[256][4];
@@ -673,6 +694,16 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
 #else
     if (!impl_->initialize(error)) return false;
 
+    // D081: keep the compiled OCIO input transform alive. configure() may run
+    // again on the same backend, so an old transform must not linger.
+    impl_->ocio = OcioProcessor();
+    if (options.ocio != nullptr) impl_->ocio = *options.ocio;
+    // An existing capacity may predate this transform; force a resize so the
+    // encoded-pixel buffer is allocated (or released) as needed.
+    if (impl_->capacity != 0 && impl_->ocio.valid() != (impl_->encodedBuffer != nullptr)) {
+        impl_->releaseSizeDependent();
+    }
+
     GpuFilmData data;
     if (!model.gpuData(data)) {
         error = "this profile uses a non-uniform curve axis; use --engine spectral";
@@ -731,7 +762,8 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
     p.scanMode = static_cast<int>(options.scan);
     p.gamutCompress = options.gamutCompress ? 1 : 0;
     p.hdrMode = options.hdr == HdrMode::Pq ? 1 : (options.hdr == HdrMode::Hlg ? 2 : 0);
-    p.inputMode = static_cast<int>(options.input);
+    // 10 = linear Rec.709 already decoded by OpenColorIO (D081).
+    p.inputMode = impl_->ocio.valid() ? 10 : static_cast<int>(options.input);
     p.exposureGain = static_cast<float>(std::exp2(options.exposureEv));
     p.contrast = static_cast<float>(options.contrast);
     p.peakNits = static_cast<float>(options.peakNits);
@@ -804,6 +836,21 @@ bool GpuFilm::processToDevice(const float* rgb, std::size_t pixels, float streng
         packed[i * 4 + 2] = rgb[i * 3 + 2];
         packed[i * 4 + 3] = 1.0f;
     }
+    if (impl_->ocio.valid()) {
+        // D081: OCIO's CPU processor is vectorised and far faster than the CPU
+        // spectral engine; the shader then receives linear Rec.709. Keep the
+        // encoded copy for the strength blend.
+        impl_->context->UpdateSubresource(impl_->encodedBuffer, 0, nullptr, packed.data(), 0, 0);
+        std::vector<float>& linear = impl_->linearized;
+        linear.resize(pixels * 3);
+        std::memcpy(linear.data(), rgb, pixels * 3 * sizeof(float));
+        impl_->ocio.apply(linear.data(), static_cast<long>(pixels));
+        for (std::size_t i = 0; i < pixels; ++i) {
+            packed[i * 4 + 0] = linear[i * 3 + 0];
+            packed[i * 4 + 1] = linear[i * 3 + 1];
+            packed[i * 4 + 2] = linear[i * 3 + 2];
+        }
+    }
     impl_->context->UpdateSubresource(impl_->inputBuffer, 0, nullptr, packed.data(), 0, 0);
 
     impl_->params.count = static_cast<unsigned int>(pixels);
@@ -818,19 +865,23 @@ bool GpuFilm::processToDevice(const float* rgb, std::size_t pixels, float streng
     impl_->context->Unmap(impl_->constantBuffer, 0);
 
     ID3D11Buffer* cbs[] = {impl_->constantBuffer};
-    ID3D11ShaderResourceView* srvs[] = {impl_->inputView};
+    // t1 is a dummy binding unless OCIO supplied the original encoded frame.
+    ID3D11ShaderResourceView* srvs[] = {
+        impl_->inputView,
+        impl_->encodedView != nullptr ? impl_->encodedView : impl_->inputView,
+    };
     ID3D11UnorderedAccessView* uavs[] = {impl_->outputView};
     impl_->context->CSSetShader(impl_->shader, nullptr, 0);
     impl_->context->CSSetConstantBuffers(0, 1, cbs);
-    impl_->context->CSSetShaderResources(0, 1, srvs);
+    impl_->context->CSSetShaderResources(0, 2, srvs);
     impl_->context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
     const UINT groups = static_cast<UINT>((pixels + 63) / 64);
     const auto started = std::chrono::steady_clock::now();
     impl_->context->Dispatch(groups, 1, 1);
     // Unbind before the texture backend reads the same buffer as an SRV (D049).
-    ID3D11ShaderResourceView* nullSrv[1] = {nullptr};
+    ID3D11ShaderResourceView* nullSrv[2] = {nullptr, nullptr};
     ID3D11UnorderedAccessView* nullUav[1] = {nullptr};
-    impl_->context->CSSetShaderResources(0, 1, nullSrv);
+    impl_->context->CSSetShaderResources(0, 2, nullSrv);
     impl_->context->CSSetUnorderedAccessViews(0, 1, nullUav, nullptr);
     impl_->context->End(impl_->stopQuery);
     impl_->context->Flush();
@@ -924,26 +975,31 @@ bool GpuFilm::Impl::initialize(std::string& error) {
 
 void GpuFilm::Impl::releaseSizeDependent() {
     if (context != nullptr) {
-        ID3D11ShaderResourceView* nullSrv[] = {nullptr};
+        ID3D11ShaderResourceView* nullSrv[] = {nullptr, nullptr};
         ID3D11UnorderedAccessView* nullUav[] = {nullptr};
-        context->CSSetShaderResources(0, 1, nullSrv);
+        context->CSSetShaderResources(0, 2, nullSrv);
         context->CSSetUnorderedAccessViews(0, 1, nullUav, nullptr);
     }
     if (inputView != nullptr) inputView->Release();
+    if (encodedView != nullptr) encodedView->Release();
     if (outputView != nullptr) outputView->Release();
     if (staging != nullptr) staging->Release();
     if (inputBuffer != nullptr) inputBuffer->Release();
+    if (encodedBuffer != nullptr) encodedBuffer->Release();
     if (outputBuffer != nullptr) outputBuffer->Release();
     inputView = nullptr;
+    encodedView = nullptr;
     outputView = nullptr;
     staging = nullptr;
     inputBuffer = nullptr;
+    encodedBuffer = nullptr;
     outputBuffer = nullptr;
     capacity = 0;
 }
 
 bool GpuFilm::Impl::ensureCapacity(std::size_t pixels, std::string& error) {
-    if (pixels <= capacity) return true;
+    // The OCIO path needs the extra encoded-pixel buffer; a plain run does not.
+    if (pixels <= capacity && (encodedBuffer != nullptr) == ocio.valid()) return true;
     releaseSizeDependent();
 
     D3D11_BUFFER_DESC inputDesc{};
@@ -972,6 +1028,18 @@ bool GpuFilm::Impl::ensureCapacity(std::size_t pixels, std::string& error) {
     if (FAILED(device->CreateShaderResourceView(inputBuffer, &srvDesc, &inputView))) {
         error = "could not create the GPU input view";
         return false;
+    }
+
+    if (ocio.valid()) {
+        // The encoded original is only uploaded on the OCIO path (D081).
+        if (FAILED(device->CreateBuffer(&inputDesc, nullptr, &encodedBuffer))) {
+            error = "could not allocate the GPU encoded-input buffer";
+            return false;
+        }
+        if (FAILED(device->CreateShaderResourceView(encodedBuffer, &srvDesc, &encodedView))) {
+            error = "could not create the GPU encoded-input view";
+            return false;
+        }
     }
 
     D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};

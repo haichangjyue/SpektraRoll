@@ -332,7 +332,7 @@ X:\agent\SpektraRoll\scripts\demo-ocio.cmd
 - 看配置里有什么：`spektra-roll-cli ocio-info --ocio-config <配置.ocio>`（不填 `--ocio-config` 就用环境变量 `$OCIO`）。
 - 用任意色彩空间烘 LUT：`lut bake --ocio-config <配置> --ocio-input "ARRI LogC3 (EI800)" --scan negative --out x.cube`。**解码已经烘进 LUT，之后 `lut apply` / `video` 不需要 OCIO。**
 - 只解码或看显示器变换：`convert --ocio-config <配置> --ocio-input "S-Log3 S-Gamut3.Cine" --ocio-display "sRGB - Display" --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" --in a.png --out b.png`。
-- 光谱视频（`--engine spectral`）也能直接吃 OCIO 输入；`--engine spectral-gpu` 会打 warning 并回退 CPU（着色器里还没有 OCIO）。
+- 光谱视频（`--engine spectral`）也能直接吃 OCIO 输入；`--engine spectral-gpu` 从 D081 起同样支持（OCIO 先在 CPU 上批量解码成线性 Rec.709，再交给 GPU 光谱着色器），不再回退。
 - 没有 OCIO 的构建**一切照旧**，只会明确告诉你“这个构建没有 OpenColorIO”，不会静默跳过。
 
 **界面里怎么用**（D063）：左栏 **“色彩管理（OCIO）”** → 勾选 → 配置文件默认就是仓库里的 ACES 2.0 → 点 **读取** → 在 **色彩空间** 里选 `S-Log3 S-Gamut3.Cine` / `ARRI LogC3 (EI800)` / `ACEScg` 等。勾选后“画面类型”会自动变灰；烘焙、光谱预览、渲染和“按住看原片”都走同一个 CLI。界面不链接 OCIO，所以它需要带 OCIO 的 CLI（完整构建 `build\spektra-roll-cli.exe`）；只有 `build-ui\` 的便携包会提示“这个构建没有 OpenColorIO”，可以用 `SPEKTRA_CLI` 指到别处。

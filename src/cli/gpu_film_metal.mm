@@ -11,6 +11,8 @@
 
 #include "gpu_film.hpp"
 
+#include "sr/ocio.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -175,8 +177,12 @@ float3 camMatrix(float3 v, float3 r, float3 g, float3 b) {
 
 // inputMode: 0 sRGB, 1 Apple Log, 2 S-Log3, 3 C-Log3, 4 V-Log,
 //            5 S-Log3 + S-Gamut3, 6 LogC3, 7 LogC4, 8 Blackmagic Gen 5,
-//            9 DaVinci Intermediate.
+//            9 DaVinci Intermediate, 10 linear Rec.709 (OCIO already decoded).
 float3 decodeInput(constant Params& p, float3 encoded) {
+    if (p.inputMode == 10) {
+        // D081: OpenColorIO ran on the CPU before upload; clamp like CPU.
+        return max(encoded, float3(0.0f));
+    }
     if (p.inputMode == 0) {
         return float3(srgbDecode(encoded.x), srgbDecode(encoded.y), srgbDecode(encoded.z));
     }
@@ -527,7 +533,8 @@ float3 encodeOutput(constant Params& p, float3 linRgb) {
 kernel void filmMain(uint gid [[thread_position_in_grid]],
                      constant Params& p [[buffer(0)]],
                      device const float4* inputPixels [[buffer(1)]],
-                     device float4* outputPixels [[buffer(2)]]) {
+                     device float4* outputPixels [[buffer(2)]],
+                     device const float4* encodedPixels [[buffer(3)]]) {
     if (gid >= p.count) return;
     float3 encoded = inputPixels[gid].xyz;
     float3 linRgb = decodeInput(p, encoded) * p.exposureGain;
@@ -579,8 +586,11 @@ kernel void filmMain(uint gid [[thread_position_in_grid]],
         if (p.gamutCompress != 0) rgb = compressGamut(rgb);
     }
 
+    // D081: with OCIO the shader receives decoded linear values, so blend the
+    // film result with the original encoded sample instead.
+    float3 source = (p.inputMode == 10) ? encodedPixels[gid].xyz : encoded;
     float blend = clamp(p.strength, 0.0f, 1.0f);
-    outputPixels[gid] = float4(mix(encoded, encodeOutput(p, rgb), blend), 1.0f);
+    outputPixels[gid] = float4(mix(source, encodeOutput(p, rgb), blend), 1.0f);
 }
 )MSL";
 
@@ -647,11 +657,17 @@ struct GpuFilm::Impl {
     id<MTLBuffer> paramsBuffer = nil;
     id<MTLBuffer> inputBuffer = nil;
     id<MTLBuffer> outputBuffer = nil;
+    // D081: only allocated when the OCIO input transform is active.
+    id<MTLBuffer> encodedBuffer = nil;
     // False when the device came from attach(); the owner releases it.
     bool ownsDevice = true;
     std::size_t capacity = 0;
     // Reused between frames so a video render does not allocate 42 MB per frame.
     std::vector<float> packed;
+    // Scratch RGB for the bulk OCIO decode (D081).
+    std::vector<float> linearized;
+    // Copied so the caller's recipe may go away while this backend is in use.
+    OcioProcessor ocio;
     Params params{};
 
     double lastMs = 0.0;
@@ -734,17 +750,22 @@ bool GpuFilm::Impl::initialize(std::string& error) {
 void GpuFilm::Impl::releaseSizeDependent() {
     inputBuffer = nil;
     outputBuffer = nil;
+    encodedBuffer = nil;
     capacity = 0;
 }
 
 bool GpuFilm::Impl::ensureCapacity(std::size_t pixels, std::string& error) {
-    if (pixels <= capacity) return true;
+    // The OCIO path needs the extra encoded-pixel buffer; a plain run does not.
+    if (pixels <= capacity && (encodedBuffer != nil) == ocio.valid()) return true;
     releaseSizeDependent();
 
     const NSUInteger bytes = static_cast<NSUInteger>(pixels) * 16u;
     inputBuffer = [device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
     outputBuffer = [device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
-    if (inputBuffer == nil || outputBuffer == nil) {
+    if (ocio.valid()) {
+        encodedBuffer = [device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
+    }
+    if (inputBuffer == nil || outputBuffer == nil || (ocio.valid() && encodedBuffer == nil)) {
         error = "could not allocate the Metal frame buffers";
         releaseSizeDependent();
         return false;
@@ -789,6 +810,14 @@ std::string GpuFilm::deviceInfo() {
 
 bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std::string& error) {
     if (!impl_->initialize(error)) return false;
+
+    // D081: keep the compiled OCIO input transform alive. Reconfiguring the same
+    // backend must not leave an old transform (or its buffer) behind.
+    impl_->ocio = OcioProcessor();
+    if (options.ocio != nullptr) impl_->ocio = *options.ocio;
+    if (impl_->capacity != 0 && impl_->ocio.valid() != (impl_->encodedBuffer != nil)) {
+        impl_->releaseSizeDependent();
+    }
 
     GpuFilmData data;
     if (!model.gpuData(data)) {
@@ -848,7 +877,8 @@ bool GpuFilm::configure(const FilmModel& model, const BakeOptions& options, std:
     p.scanMode = static_cast<int>(options.scan);
     p.gamutCompress = options.gamutCompress ? 1 : 0;
     p.hdrMode = options.hdr == HdrMode::Pq ? 1 : (options.hdr == HdrMode::Hlg ? 2 : 0);
-    p.inputMode = static_cast<int>(options.input);
+    // 10 = linear Rec.709 already decoded by OpenColorIO (D081).
+    p.inputMode = impl_->ocio.valid() ? 10 : static_cast<int>(options.input);
     p.exposureGain = static_cast<float>(std::exp2(options.exposureEv));
     p.contrast = static_cast<float>(options.contrast);
     p.peakNits = static_cast<float>(options.peakNits);
@@ -897,6 +927,21 @@ bool GpuFilm::processToDevice(const float* rgb, std::size_t pixels, float streng
         packed[i * 4 + 2] = rgb[i * 3 + 2];
         packed[i * 4 + 3] = 1.0f;
     }
+    if (impl_->ocio.valid()) {
+        // D081: OCIO's CPU processor is vectorised and far faster than the CPU
+        // spectral engine; the shader then receives linear Rec.709. Keep the
+        // encoded copy for the strength blend.
+        std::memcpy(impl_->encodedBuffer.contents, packed.data(), pixels * 16);
+        std::vector<float>& linear = impl_->linearized;
+        linear.resize(pixels * 3);
+        std::memcpy(linear.data(), rgb, pixels * 3 * sizeof(float));
+        impl_->ocio.apply(linear.data(), static_cast<long>(pixels));
+        for (std::size_t i = 0; i < pixels; ++i) {
+            packed[i * 4 + 0] = linear[i * 3 + 0];
+            packed[i * 4 + 1] = linear[i * 3 + 1];
+            packed[i * 4 + 2] = linear[i * 3 + 2];
+        }
+    }
     std::memcpy(impl_->inputBuffer.contents, packed.data(), pixels * 16);
 
     impl_->params.count = static_cast<unsigned int>(pixels);
@@ -911,6 +956,10 @@ bool GpuFilm::processToDevice(const float* rgb, std::size_t pixels, float streng
         [encoder setBuffer:impl_->paramsBuffer offset:0 atIndex:0];
         [encoder setBuffer:impl_->inputBuffer offset:0 atIndex:1];
         [encoder setBuffer:impl_->outputBuffer offset:0 atIndex:2];
+        // t3 is a dummy binding unless OCIO supplied the original encoded frame.
+        [encoder setBuffer:(impl_->encodedBuffer != nil ? impl_->encodedBuffer : impl_->inputBuffer)
+                    offset:0
+                   atIndex:3];
         [encoder dispatchThreads:MTLSizeMake(pixels, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
         [encoder endEncoding];

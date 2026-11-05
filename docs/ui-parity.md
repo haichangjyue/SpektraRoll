@@ -6,7 +6,7 @@
 >
 > 最后更新：2026-11-05（D080：macOS 静态 OCIO 2.6.0 可用）
 >
-> **注意**：D073 已在 Mac 上构建并验收：核心流程（导入/缩略图/播放/INFO/胶片效果/渲染）通过；macOS CI run #128 `swift build` 通过。D080 起 macOS 使用静态 OCIO 2.6.0（`scripts/build-ocio-macos.sh`），`ocio-info` / LUT 烘焙 / UI OCIO 下拉可用；`--engine spectral-gpu` + OCIO 仍回退 CPU（D062），R3D 禁用。表中标 🟡 的项表示“代码已写、部分验收”。
+> **注意**：D073 已在 Mac 上构建并验收：核心流程（导入/缩略图/播放/INFO/胶片效果/渲染）通过；macOS CI run #128 `swift build` 通过。D080 起 macOS 使用静态 OCIO 2.6.0（`scripts/build-ocio-macos.sh`），`ocio-info` / LUT 烘焙 / UI OCIO 下拉可用；D081 起 `--engine spectral-gpu` + OCIO 已接通（CPU 批量解码后进 Metal 光谱着色器），R3D 禁用。表中标 🟡 的项表示“代码已写、部分验收”。
 
 ## 1. 功能矩阵
 

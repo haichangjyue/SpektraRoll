@@ -148,7 +148,7 @@ otool -L build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli | grep
 ```
 
 - `SPEKTRA_OCIO=1` 启动时自动启用 OCIO 并选 `S-Log3 S-Gamut3.Cine`，用于截图验收。
-- `--engine spectral-gpu` + OCIO 仍回退 CPU（D062）；`--exr-linear` 的 OCIO 显示变换仍未接。
+- `--engine spectral-gpu` + OCIO 已接通（D081）：OCIO 在 CPU 上批量解码后交给 Metal 光谱着色器；`--exr-linear` 遇到 OCIO 显示变换时写显示前线性 Rec.709（D081）。
 - 默认前缀可用 `OCIO_PREFIX=...` 覆盖。
 
 ## 已验证
@@ -161,7 +161,7 @@ otool -L build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli | grep
 ## 未完成 / 已知问题
 
 - **OCIO 已可用（D080）**：静态 OCIO 2.6.0 前缀（`~/Documents/ocio-2.6.0-static`），`scripts/build-ocio-macos.sh` 可重建；bundle 的 CLI `ocio.available=true`，`ocio-info` / `lut bake --ocio-input` / UI OCIO 下拉已验证。
-  - 仍未做：`spectral-gpu` 的 OCIO（回退 CPU）、`--exr-linear` 的 OCIO 显示变换。
+  - D081 起：`spectral-gpu` 的 OCIO 已接通，`--exr-linear` 的 OCIO 显示变换已改为写显示前线性。
   - Homebrew 的 `opencolorio` 在 macOS 14 仍会尝试构建 `python@3.15`，所以用静态脚本，不走 Homebrew 包。
 - 没有时间线拖动/逐帧预览、渲染队列、区间输入。
 - `.app` 未公证；ffmpeg 仍是 Homebrew 动态依赖，OCIO 已静态链接；分发前要处理 ffmpeg 捆绑。

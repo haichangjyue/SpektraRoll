@@ -99,7 +99,7 @@ open -F --env SPEKTRA_ALL_SPACES=1 --env SPEKTRA_CAPTURE=1 \
 - 防光晕层是 UI 级近似（开启后光晕 ×0.6），等引擎加独立参数。
 - 没有裁切、印片机 Y/M/预闪、扫描仪 unsharp、空间物理模型。
 - 未公证；首次打开需要右键 → 打开，或 `xattr -d com.apple.quarantine`。
-- **OCIO 已可用**（D080）：静态 OCIO 2.6.0 前缀，`build-macos-ui.sh` 自动检测；`ocio-info` / `lut bake --ocio-input` / 显示变换已验证。`--engine spectral-gpu` + OCIO 仍按 D062 回退 CPU 光谱；`--exr-linear` 的 OCIO 显示变换仍未接。
+- **OCIO 已可用**（D080）：静态 OCIO 2.6.0 前缀，`build-macos-ui.sh` 自动检测；`ocio-info` / `lut bake --ocio-input` / 显示变换已验证。D081 起 `--engine spectral-gpu` + OCIO 已接通（CPU 批量解码后进 Metal 光谱着色器），`--exr-linear` 遇到 OCIO 显示变换时写显示前线性 Rec.709。
 
 ## 设计来源
 

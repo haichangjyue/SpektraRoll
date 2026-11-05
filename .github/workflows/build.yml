@@ -148,16 +148,20 @@ jobs:
           PY
             "$exe" convert --ocio-config "$cfg" --ocio-input "Apple Log" \
               --in chart16.png --out ocio-apple.png --bits 16
-            # D066: OCIO + spectral-gpu must emit one clear fallback warning,
-            # never the old empty "warning: ;".
+            # D081: OCIO no longer forces a CPU spectral fallback; the GPU
+            # backend decodes on the CPU and keeps the spectral shader.
             "$exe" lut apply --engine spectral-gpu --ocio-config "$cfg" \
               --ocio-input "S-Log3 S-Gamut3.Cine" --scan negative \
               --in chart16.png --out ocio-gpu.png 2> ocio-gpu.log
             cat ocio-gpu.log
-            if grep -q "warning: ;" ocio-gpu.log; then exit 1; fi
+            if grep -q "warning:" ocio-gpu.log; then exit 1; fi
+            # D081: --exr-linear with an OCIO display writes pre-display linear.
+            "$exe" convert --ocio-config "$cfg" --ocio-display "sRGB - Display" \
+              --ocio-view "ACES 2.0 - SDR 100 nits (Rec.709)" --exr-linear \
+              --in chart16.png --out ocio-linear.exr
             "$exe" lut bake --ocio-config "$cfg" --ocio-input "ARRI LogC3 (EI800)" \
               --scan negative --out ocio-logc3.cube
-            ls -l ocio-apple.png ocio-logc3.cube
+            ls -l ocio-apple.png ocio-gpu.png ocio-linear.exr ocio-logc3.cube
           else
             # Windows CI has no OCIO: the stub must say so, not pretend.
             cat ocio.txt

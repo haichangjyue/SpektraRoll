@@ -1454,6 +1454,26 @@
 
 ---
 
+## D081 · 光谱 GPU 接 OCIO + 线性 EXR 跳过显示变换
+
+- **日期**：2026-11-05
+- **背景**：D080 在 macOS 上接好了静态 OCIO 2.6.0，但两处仍是欠账：`--engine spectral-gpu` + `--ocio-input` 会回退 CPU 光谱（D062 的限制）；`--exr-linear` 遇到 `--ocio-display/--ocio-view` 时仍用 sRGB/PQ/HLG 反推，无法处理任意显示变换。
+- **决定**：
+  - 不把 OCIO 塞进 Metal / D3D11 着色器，也不要求 GPU 链接 OCIO。GPU 后端在**上传前用 OCIO 的 CPU 处理器批量解码**成线性 Rec.709，再交给现有光谱着色器；两个后端共用同一实现。
+  - 着色器新增 `inputMode = 10`（已是线性 Rec.709）。为了保持 `--strength < 1` 的语义与 CPU 参考一致，OCIO 路径额外保留原始编码帧的 GPU 缓冲，混合时用原始值而不是线性值。
+  - `convert --exr-linear` 遇到 OCIO 显示变换时**跳过显示变换，直接写显示前的线性 Rec.709**；任意 view 的逆变换没有定义，反推只会产生错误的“线性”。
+- **验证**：
+  - `test_gpu_film` 新增 `ocio logc3 / negative +gamut`，与 `FilmModel::transformFrom` worst **1e-6**；`ctest` **11/11**。
+  - `lut apply` 的 OCIO 路径 CPU vs `spectral-gpu`：16-bit 输出 **109.43 dB**；`--strength 0.5` 读回 **inf**。
+  - `convert --ocio-display ... --exr-linear` 与不带 OCIO 的线性 EXR 读回 **inf**。
+  - `video --engine spectral-gpu --ocio-input "S-Log3 S-Gamut3.Cine"` 正常出片，不再有回退 warning。
+  - CI macOS OCIO 步骤改为断言 `spectral-gpu` 日志里**没有** `warning:`，并新增 OCIO 线性 EXR 冒烟。
+- **后果**：
+  - OCIO 的逐帧 CPU 解码仍有成本（4K 每帧数十毫秒级），但远低于回退 CPU 光谱；后续如需再快，可把 OCIO 变换烘成 3D LUT 上 GPU。
+  - Metal 与 D3D11 行为一致；没有 OCIO 的构建完全不变。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）
