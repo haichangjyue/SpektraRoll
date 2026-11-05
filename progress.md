@@ -10,6 +10,140 @@
 
 ---
 
+## 本次对话交接摘要（D075–D080，2026-11-05 晚）
+
+> **新开对话先读这一节**；下面是逐轮细节（D080 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO。
+
+### 一、已完成的事项
+
+| 编号 | 交付 | 关键结果 |
+|---|---|---|
+| **README** | 去掉 Windows Qt Desktop UI 截图，换 macOS 最新截图 | `docs/ui-macos.png`；Desktop UI 改为 macOS 参考 + Windows Qt 冻结；`537ad1f` |
+| **D075** | macOS UI v1.1 P0 | 关闭胶片效果显示 sRGB 静帧；直方图/宽容度/裁切；滚轮/双指缩放、拖拽、适合/100%、双击；导出按钮跳 OUTPUT；参数 180 ms 防抖刷新 |
+| **D076** | 播放代理 P1 | CLI `video --display` + `--max-side`；960 px 显示/胶片代理；AVPlayer 保留时间切换；参数 hash 缓存；Mac 播放日志确认 `block film proxy` → `switch film` → `unblock` |
+| **D077** | 验收反馈 4 点 | ADVANCED 预览代理：默认 5 GB 上限（0 = 不限制）、自定义目录、当前占用、清理、超限删最旧；生成胶片代理时暂停播放并记住播放请求；进度胶囊移到标题行左下；INFO 新增 Mac 系统面板 |
+| **D078** | 电影画幅 + APP 版本 | 新增 Super 8；16mm 10.26 / Super 16 12.52 / Super 35 24.89 / 65mm 52.63 对齐 SpektraLab 相机负片长边；35mm 36.0、IMAX 70.0；全部标 CINE；INFO 引擎区加 APP 行 |
+| **D079** | 配光按钮 | 放在 `导出` 右侧；暂停、抽取当前帧、解到 sRGB、按亮度中位数把 18% 线性中灰落位；`C0113.MP4` 实测 **+0.66 EV**；中性 C/M/Y 由胶片/相纸数据库自动查表 |
+| **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
+
+**顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D080**。
+
+### 二、关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D075 | P0 范围 | 先做低风险 4 项 + 参数防抖；播放实时预览留 P1 |
+| D076 | 实时预览方向 | 不复制颜色逻辑；CLI 生成 960 px 显示/胶片代理，AVPlayer 切换，参数 hash 缓存 |
+| D077 | 代理缓存 | 默认 5 GB 软上限，可改目录/手动清理；超限删最旧，保留当前显示/胶片代理 |
+| D077 | 生成时播放 | 生成胶片代理期间暂停播放，完成后自动续播；按空格可取消/恢复待播放 |
+| D078 | 画幅 | 采用 SpektraLab 相机负片长边；所有当前画幅标 CINE；35mm 仍为 36 mm 全画幅，IMAX 70 mm |
+| D078 | APP 版本 | 未发布统一 `内部测试（测试号） · 版本`；每轮更新 `AppVersion.testTag`，发布后 `isReleased = true` |
+| D079 | 配光 | 中性滤色片已由数据库自动查表；按钮只补自动曝光（中位数 → 18% 线性中灰），不做 Y/M 偏移 |
+| D080 | macOS OCIO | 不走 Homebrew 包（macOS 14 会拉 `python@3.15` 失败）；自建静态 OCIO 2.6.0，不编 Python 绑定；纯静态依赖 |
+
+### 三、当前状态（截至最后一次操作）
+
+- 最新提交：`b2874b2 macos: static OCIO 2.6.0 build and UI availability (D080)`
+- CI：run **148** Windows + macOS 双绿（含 `swift build`）
+- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已 reset 到 `b2874b2`
+- Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
+- Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
+- Mac 代理缓存：`~/Library/Caches/SpektraRoll/preview-cache/`，上限 5 GB，最后约 9 MB / 4 个代理
+- Mac 测试素材：`~/Movies/C0113.MP4`（3840×2160 / 50p / 312 帧 / 00:06）
+- 当前 app state（最后一次检查）：`ocioEnabled=true`、`ocioInput=S-Log3 S-Gamut3.Cine`、`exposure≈0.664`、`filmID=kodak_portra_400`、`paperID=kodak_endura_premier`
+
+**Mac 远程访问**
+
+```powershell
+$key = "$env:TEMP\spektra-mac-ed25519"
+ssh -i $key wenyutao@192.168.5.142
+```
+
+- 非交互 SSH 的 PATH 只有 `/usr/bin:/bin`，脚本里要显式：
+  ```bash
+  export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+  ```
+- 如果 key 被临时目录清理，需要重新生成并让用户在 Mac 上加入 `authorized_keys`，或让用户本机操作。
+
+**Mac 构建/运行**
+
+```bash
+cd /Users/wenyutao/Documents/SpektraRoll
+export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# 第一次（或 OCIO 版本变化时）
+scripts/build-ocio-macos.sh
+
+# 之后
+scripts/build-macos-ui.sh --no-open
+open build-ui-macos/SpektraRoll.app
+```
+
+**调试环境变量（仅 `open -F --env` 生效）**
+
+| 变量 | 作用 |
+|---|---|
+| `SPEKTRA_AUTOLOAD=<path>` | 启动后自动导入并选中视频 |
+| `SPEKTRA_AUTOPREVIEW=1` | 自动打开胶片效果（暂停单帧） |
+| `SPEKTRA_AUTOPLAY=1` | 启动 3.5 s 后自动播放 |
+| `SPEKTRA_AUTOGRADE=1` | 启动后自动执行一次配光 |
+| `SPEKTRA_PLAYER_DEBUG=1` | 播放源切换写入 `/tmp/spektra-player.log` |
+| `SPEKTRA_TAB=info / film / print / advanced / output` | 启动时打开指定检查器 tab |
+| `SPEKTRA_PROXY_LIMIT_GB=<GB>` | 本次启动临时覆盖代理缓存上限 |
+| `SPEKTRA_OCIO=1` | 自动启用 OCIO 并选 `S-Log3 S-Gamut3.Cine` |
+| `SPEKTRA_CAPTURE=1` | app 自截图到 `/tmp/spektra-self-0.png`（触发：`touch /tmp/spektra-capture-now`） |
+| `SPEKTRA_ALL_SPACES=1` | 窗口所有 Space 可见、定时前置（远程验收用） |
+
+### 四、未完成的待办（建议顺序）
+
+**P0 · OCIO 深度**
+- [ ] `--engine spectral-gpu` + OCIO：目前仍回退 CPU 光谱（D062 限制）；Metal 着色器还没有 OCIO 输入变换。
+- [ ] `--exr-linear` 的 OCIO 显示变换：目前只认 sRGB/PQ/HLG。
+
+**P1 · 实时预览/性能**
+- [ ] 4K50 6 秒素材的胶片代理生成在 M1 + spectral-gpu 约 **20–30 秒**；可考虑降到 720 px、代理固定走 LUT 引擎，或只预生成前几秒。
+- [ ] 代理是整段预渲染；超长片段的首次播放等待需要优化。
+- [ ] 切换缓存目录不迁移旧目录文件（当前只影响新代理）。
+
+**P1 · 功能补齐**
+- [ ] 4K50 `C0113.MP4` 整段 312 帧渲染验收（音频/timecode/ProRes）。
+- [ ] 时间线拖动/逐帧预览、渲染队列、区间输入（macOS v1 仍没有）。
+- [ ] SpektraLab 式 Y/M 滤色片偏移控件 + 独立 `solve --filter-pack`；当前配光只做自动曝光。
+- [ ] 严格 35mm 电影画幅（Academy 21.95 mm）与 135 全画幅拆分；现在 35mm = 36 mm 全画幅并标 CINE。
+
+**P2 · 交付/平台**
+- [ ] macOS 公证/DMG；`.app` 仍未签名分发。
+- [ ] ffmpeg/ffprobe 仍是 Homebrew 动态依赖，分发前要静态链接或捆绑；OCIO 已静态。
+- [ ] R3D macOS（单独立项）。
+- [ ] 印片机 Y/M/预闪/光源、扫描仪 unsharp、空间物理模型、PIZ/DWA。
+- [ ] Windows Qt UI v3：等 macOS 设计冻结后按同一规格重做（当前只修 bug、冻结新功能）。
+
+### 五、新对话第一步
+
+```powershell
+# 本机（Windows）
+git -C X:\agent\SpektraRoll status
+git -C X:\agent\SpektraRoll log --oneline -8
+```
+
+```bash
+# Mac（如 SSH 可达）
+cd /Users/wenyutao/Documents/SpektraRoll
+export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+git reset --hard origin/main
+scripts/build-macos-ui.sh --no-open
+open build-ui-macos/SpektraRoll.app
+```
+
+检查：
+
+```bash
+build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --json
+# 应看到 "ocio": {"available": true, "version": "2.6.0"}
+```
+
+---
+
 ## 最新：D080 · macOS 静态 OCIO 2.6.0（2026-11-05 晚；Mac 已验收）
 
 > 解决 D073 起 macOS 上 OCIO 不可用的问题。Homebrew 的 `opencolorio` 在 macOS 14 会尝试构建 `python@3.15`，clang tail-call 报错；改为自建静态 OCIO 核心（不编 Python 绑定）。
