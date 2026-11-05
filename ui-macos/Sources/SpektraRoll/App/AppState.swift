@@ -48,11 +48,28 @@ final class AppState: ObservableObject {
     @Published var filmPreview: NSImage?
     @Published var isPreviewing = false
 
+    // D074 #4: the unfiltered view is the source decoded to display sRGB, not
+    // the log-coded AVPlayer frame.
+    @Published var sourcePreview: NSImage?
+    @Published var isSourcePreviewing = false
+
+    // D074 #1: histogram and exposure references for the frame on screen.
+    @Published var frameStats: FrameStats?
+
     @Published var outputDirectory: URL
     @Published var outputName = "grade"
 
     private var didBootstrap = false
     private var previewTask: Task<Void, Never>?
+    private var previewDebounceTask: Task<Void, Never>?
+    private var previewDirty = false
+    private var pendingPreviewTime: Double = 0
+    private var previewGeneration = 0
+
+    private var sourcePreviewTask: Task<Void, Never>?
+    private var sourceDirty = false
+    private var pendingSourceTime: Double = 0
+    private var sourceGeneration = 0
 
     init() {
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
@@ -208,7 +225,9 @@ final class AppState: ObservableObject {
         if !asset.ocioInput.isEmpty {
             settings.ocioInput = asset.ocioInput
         }
-        filmPreview = nil
+        if selectedAssetID != asset.id {
+            clearPreviews()
+        }
         statusMessage = asset.isPlayable ? asset.displayName : "R3D 仅 Windows"
         save()
     }
@@ -354,14 +373,17 @@ final class AppState: ObservableObject {
         renderStatus = "已取消"
     }
 
-    // MARK: - Film preview
+    // MARK: - Film / display preview
 
     func setFilmPreview(_ enabled: Bool, at seconds: Double) {
         showFilmPreview = enabled
         if enabled {
-            previewFrame(at: seconds)
+            filmPreview = nil
+            previewFrame(at: seconds, immediate: true)
         } else {
             filmPreview = nil
+            frameStats = nil
+            refreshSourcePreview(at: seconds)
         }
     }
 
@@ -370,11 +392,36 @@ final class AppState: ObservableObject {
         previewFrame(at: seconds)
     }
 
-    func previewFrame(at seconds: Double) {
+    /// D074 #5: coalesce slider changes so dragging a parameter does not spawn
+    /// one CLI process per pixel. The last value always wins.
+    func previewFrame(at seconds: Double, immediate: Bool = false) {
+        guard showFilmPreview else { return }
+        pendingPreviewTime = max(0, seconds)
+        previewDebounceTask?.cancel()
+        if immediate {
+            startFilmPreview()
+            return
+        }
+        previewDebounceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 180_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.startFilmPreview()
+        }
+    }
+
+    private func startFilmPreview() {
+        guard showFilmPreview else { return }
         guard let asset = selectedAsset, asset.isPlayable else { return }
-        guard !isPreviewing else { return }
         guard let catalog,
               let film = catalog.films.first(where: { $0.id == settings.filmID }) else {
+            return
+        }
+        if isPreviewing {
+            previewDirty = true
             return
         }
         let paper = catalog.papers.first { $0.id == settings.paperID }
@@ -382,39 +429,120 @@ final class AppState: ObservableObject {
         let paperURL = paper.map { URL(fileURLWithPath: $0.path) }
         let frameURL = engine.cacheDirectory.appendingPathComponent("preview/frame.png")
         let gradedURL = engine.cacheDirectory.appendingPathComponent("preview/graded.png")
+        let seconds = pendingPreviewTime
 
+        previewGeneration += 1
+        let generation = previewGeneration
         isPreviewing = true
-        filmPreview = nil
-        previewTask = Task {
+        previewDirty = false
+        previewTask = Task { [weak self] in
+            guard let self else { return }
             do {
-                try await engine.extractFrame(url: asset.url, at: seconds, output: frameURL)
+                try await self.engine.extractFrame(url: asset.url, at: seconds, output: frameURL)
                 var lut: URL?
-                if settings.engine == .lut {
-                    lut = try await engine.ensureLUT(
-                        settings: settings,
+                if self.settings.engine == .lut {
+                    lut = try await self.engine.ensureLUT(
+                        settings: self.settings,
                         filmPath: filmURL,
                         paperPath: paperURL,
-                        ocioConfig: engine.ocioConfigURL
+                        ocioConfig: self.engine.ocioConfigURL
                     )
                 }
-                _ = try await engine.renderStill(
-                    settings: settings,
+                _ = try await self.engine.renderStill(
+                    settings: self.settings,
                     asset: asset,
                     filmPath: filmURL,
                     paperPath: paperURL,
-                    ocioConfig: engine.ocioConfigURL,
+                    ocioConfig: self.engine.ocioConfigURL,
                     lutPath: lut,
                     inputImage: frameURL,
                     output: gradedURL
                 )
-                if let image = NSImage(contentsOf: gradedURL) {
-                    filmPreview = image
+                if !Task.isCancelled,
+                   self.previewGeneration == generation,
+                   self.showFilmPreview,
+                   !self.previewDirty,
+                   let image = NSImage(contentsOf: gradedURL) {
+                    self.filmPreview = image
+                    self.frameStats = FrameStats.compute(from: image)
                 }
             } catch {
-                statusMessage = "胶片预览失败：\(error.localizedDescription)"
+                if !Task.isCancelled {
+                    self.statusMessage = "胶片预览失败：\(error.localizedDescription)"
+                }
             }
-            isPreviewing = false
+            guard self.previewGeneration == generation else { return }
+            self.isPreviewing = false
+            if self.previewDirty {
+                self.previewDirty = false
+                self.startFilmPreview()
+            }
         }
+    }
+
+    /// D074 #4: decode the current source frame to display sRGB. This is what
+    /// the "original" side of the film-effect toggle shows when paused.
+    func refreshSourcePreview(at seconds: Double) {
+        guard !showFilmPreview else { return }
+        guard let asset = selectedAsset, asset.isPlayable else { return }
+        pendingSourceTime = max(0, seconds)
+        if isSourcePreviewing {
+            sourceDirty = true
+            return
+        }
+        let seconds = pendingSourceTime
+        let frameURL = engine.cacheDirectory.appendingPathComponent("preview/source-frame.png")
+        let displayURL = engine.cacheDirectory.appendingPathComponent("preview/display.png")
+
+        sourceGeneration += 1
+        let generation = sourceGeneration
+        isSourcePreviewing = true
+        sourceDirty = false
+        sourcePreviewTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.engine.extractFrame(url: asset.url, at: seconds, output: frameURL)
+                _ = try await self.engine.convertToDisplay(
+                    settings: self.settings,
+                    ocioConfig: self.engine.ocioConfigURL,
+                    input: frameURL,
+                    output: displayURL
+                )
+                if !Task.isCancelled,
+                   self.sourceGeneration == generation,
+                   !self.showFilmPreview,
+                   !self.sourceDirty,
+                   let image = NSImage(contentsOf: displayURL) {
+                    self.sourcePreview = image
+                    self.frameStats = FrameStats.compute(from: image)
+                }
+            } catch {
+                if !Task.isCancelled {
+                    self.statusMessage = "显示解码失败：\(error.localizedDescription)"
+                }
+            }
+            guard self.sourceGeneration == generation else { return }
+            self.isSourcePreviewing = false
+            if self.sourceDirty {
+                self.sourceDirty = false
+                self.refreshSourcePreview(at: self.pendingSourceTime)
+            }
+        }
+    }
+
+    private func clearPreviews() {
+        previewGeneration += 1
+        sourceGeneration += 1
+        previewDebounceTask?.cancel()
+        previewTask?.cancel()
+        sourcePreviewTask?.cancel()
+        previewDirty = false
+        sourceDirty = false
+        isPreviewing = false
+        isSourcePreviewing = false
+        filmPreview = nil
+        sourcePreview = nil
+        frameStats = nil
     }
 
     // MARK: - Persistence

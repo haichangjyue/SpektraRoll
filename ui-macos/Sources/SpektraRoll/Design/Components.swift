@@ -24,6 +24,25 @@ struct PillButtonStyle: ButtonStyle {
     }
 }
 
+struct CompactPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Theme.font(10, weight: .semibold))
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Theme.surfaceRaised)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Theme.border, lineWidth: 1)
+            )
+            .opacity(configuration.isPressed ? 0.72 : 1.0)
+    }
+}
+
 struct SectionTitle: View {
     let text: String
     var trailing: String? = nil

@@ -212,6 +212,24 @@ final class EngineClient: @unchecked Sendable {
         }
     }
 
+    /// D074 #4: decode the source to display sRGB without running the film
+    /// chain. `convert` is the same path as the CLI's "hold to compare" and
+    /// supports both the built-in camera transfers and OCIO inputs.
+    func convertToDisplay(settings: LookSettings, ocioConfig: URL?,
+                          input: URL, output: URL) async throws -> ProcessResult {
+        var args = ["convert", "--in", input.path, "--out", output.path, "--bits", "8"]
+        if settings.ocioEnabled, let ocioConfig, !settings.ocioInput.isEmpty {
+            args += ["--ocio-config", ocioConfig.path, "--ocio-input", settings.ocioInput]
+        } else {
+            args += ["--from", settings.input.rawValue]
+        }
+        let result = try await run(args)
+        guard result.status == 0 else {
+            throw EngineError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        return result
+    }
+
     func lutURL(for settings: LookSettings) -> URL {
         cacheDirectory
             .appendingPathComponent("luts", isDirectory: true)
