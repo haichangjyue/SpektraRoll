@@ -14,14 +14,15 @@ footage as input, can print it (`--scan print`), scan the negative
 (`--scan slide`, Ektachrome / Velvia / Provia / Kodachrome),
 writes SDR or **HDR (PQ/HLG)** as 16-bit PNG or unclipped **float/half EXR**,
 and renders clips in resumable segments while keeping the camera timecode. A
-**Qt 6 desktop UI** wraps the same pipeline. Colour management is optional:
+**SwiftUI desktop UI on macOS** (the reference shell) and a frozen **Qt 6**
+Windows shell wrap the same pipeline. Colour management is optional:
 linking **OpenColorIO** turns any camera or ACES space into a valid LUT domain
 and enables ACES display views. **RED R3D / R3D NE** is a bring-your-own-SDK
 optional plugin (D069–D071); official builds stay loader-only.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
-![SpektraRoll Qt UI](docs/ui-preview.png)
+![SpektraRoll macOS UI](docs/ui-macos.png)
 
 ## What this will become
 
@@ -119,22 +120,26 @@ previews and renders a single `.R3D` (batch R3D is not wired). Official
 `build/` keeps the loader + no-plugin message; the SDK, its headers, and any
 RED-linked binaries stay out of the repository. See `docs/red-sdk.md`.
 
-## Desktop UI (Qt 6)
+## Desktop UI
 
-The Windows shell is Qt 6 Widgets (D009); the CLI keeps working without it.
-It only drives `spektra-roll-cli` — preview extracts one frame with ffmpeg and
-grades it with `lut apply`, Render streams the CLI log and progress — so the UI
-cannot drift from the pipeline CI tests.
+**macOS is the reference shell (D072/D073).** It is SwiftUI, three columns, and
+drives the same `spektra-roll-cli` through the contracts in
+`docs/engine-api.md`; parameters come from `data/ui-schema.json`, design tokens
+from `design/tokens.json`, the spec is `docs/ui-design-macos.md`, and the feature
+matrix is `docs/ui-parity.md`. Build it with `scripts/build-macos-ui.sh` (see
+`ui-macos/README.md`).
 
-> **macOS (D072/D073):** the macOS shell is **SwiftUI**, not Qt. It drives the same
-> CLI. The shared contract is `docs/engine-api.md`, the parameter source is
-> `data/ui-schema.json`, the design tokens are `design/tokens.json`, the UI spec
-> is `docs/ui-design-macos.md`, and the feature matrix is `docs/ui-parity.md`.
-> Build it with `scripts/build-macos-ui.sh` (see `ui-macos/README.md`). The
-> Windows Qt shell is frozen (bug fixes only) until the macOS v1 design is frozen;
-> then Windows UI v3 is rebuilt from the same design spec.
+The **Windows Qt 6 shell** (D009) is frozen: bug fixes only until the macOS
+design is frozen; Windows UI v3 will be rebuilt from the same spec. Both shells
+only drive the CLI — preview extracts one frame with ffmpeg and grades it with
+`lut apply`, Render streams the CLI log and progress — so the UI cannot drift
+from the pipeline CI tests.
 
-```powershell
+```bash
+# macOS (SwiftUI)
+scripts/build-macos-ui.sh --no-open
+
+# Windows (Qt 6, frozen)
 .\scripts\build-ui.cmd          # configure + build + windeployqt + launch
 ```
 
@@ -244,10 +249,6 @@ LUT or model without re-decoding, and the timeline coalesces scrub moves to
 about 11 previews per second. `spektra-roll-ui.exe --preview-selftest` runs two
 real previews and prints their timings, which is also what CI exercises through
 the server protocol.
-
-![Post-dev inspector](docs/ui-postdev.png)
-
-![Render queue](docs/ui-queue.png)
 
 ## Use
 
@@ -410,7 +411,8 @@ docs/           architecture and licensing notes
   (`fastMathEnabled = NO`) because the spectral tables contain NaN densities.
 - Mallett 2019 spectral upsampling only; hanatos2025 is a later option.
 - `.cube` only; `.3dl` and OCIO configs come later.
-- Windows UI does not exist; the CLI is the first deliverable.
+- The Windows Qt UI is frozen (bug fixes only); new UI work happens in the
+  macOS SwiftUI shell until its design is frozen (D072).
 
 ## Licence
 
