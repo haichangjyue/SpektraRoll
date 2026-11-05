@@ -59,6 +59,7 @@ struct PlayerView: View {
         }
         .onAppear {
             loadCurrentAsset()
+            scheduleDebugAutoPlay()
         }
         .onChange(of: app.selectedAssetID) { _, _ in
             resetZoom()
@@ -128,6 +129,18 @@ struct PlayerView: View {
             player.switchSource(to: display, source: .display, autoPlay: true)
         } else {
             player.switchSource(to: asset.url, source: .original, autoPlay: true)
+        }
+    }
+
+    /// Debug-only hook for remote acceptance: `SPEKTRA_AUTOPLAY=1` starts
+    /// playback after the auto-loaded clip and AUTOPREVIEW have settled.
+    private func scheduleDebugAutoPlay() {
+        guard ProcessInfo.processInfo.environment["SPEKTRA_AUTOPLAY"] == "1" else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if !player.isPlaying {
+                player.toggle()
+            }
         }
     }
 

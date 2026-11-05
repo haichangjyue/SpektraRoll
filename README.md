@@ -126,8 +126,9 @@ RED-linked binaries stay out of the repository. See `docs/red-sdk.md`.
 drives the same `spektra-roll-cli` through the contracts in
 `docs/engine-api.md`; parameters come from `data/ui-schema.json`, design tokens
 from `design/tokens.json`, the spec is `docs/ui-design-macos.md`, and the feature
-matrix is `docs/ui-parity.md`. Build it with `scripts/build-macos-ui.sh` (see
-`ui-macos/README.md`).
+matrix is `docs/ui-parity.md`. Playback uses cached 960 px display/film proxies
+(`video --display --max-side`, D076) so the film look can play back in real time.
+Build it with `scripts/build-macos-ui.sh` (see `ui-macos/README.md`).
 
 The **Windows Qt 6 shell** (D009) is frozen: bug fixes only until the macOS
 design is frozen; Windows UI v3 will be rebuilt from the same spec. Both shells

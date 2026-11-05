@@ -66,6 +66,7 @@ final class PlayerController: ObservableObject {
     func load(url: URL) {
         currentURL = url
         source = .original
+        debugLog("load \(url.lastPathComponent)")
         install(url: url, seek: 0, autoPlay: false, resetTime: true)
     }
 
@@ -86,7 +87,30 @@ final class PlayerController: ObservableObject {
         let shouldPlay = autoPlay || isPlaying
         isSwitchingSource = true
         self.source = source
+        let position = String(format: "%.2f", target)
+        debugLog("switch \(sourceName(source)) \(url.lastPathComponent) at \(position)s play=\(shouldPlay)")
         install(url: url, seek: target, autoPlay: shouldPlay, resetTime: false)
+    }
+
+    private func sourceName(_ source: PlaybackSource) -> String {
+        switch source {
+        case .original: return "original"
+        case .display: return "display"
+        case .film: return "film"
+        }
+    }
+
+    private func debugLog(_ message: String) {
+        guard ProcessInfo.processInfo.environment["SPEKTRA_PLAYER_DEBUG"] == "1" else { return }
+        let url = URL(fileURLWithPath: "/tmp/spektra-player.log")
+        let line = message + "\n"
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(line.data(using: .utf8) ?? Data())
+            handle.closeFile()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 
     private func install(url: URL, seek seconds: Double, autoPlay: Bool, resetTime: Bool) {

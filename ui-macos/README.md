@@ -49,6 +49,7 @@ build-ui-macos/SpektraRoll.app
 - 双击缩略图载入播放器；空格播放/暂停。
 - 胶片效果单帧预览（暂停时用 CLI 渲染当前帧）；参数变化 180 ms 防抖自动刷新。
 - 关闭胶片效果时显示输入色彩空间解码到 sRGB 的静帧（不再直接显示 Log 画面）。
+- 播放时使用 960 px 代理：关闭胶片效果播显示代理；开启胶片效果播胶片代理，按参数 hash 缓存并自动切换。
 - 视频下方直方图 + 宽容度/亮度范围/高光暗部裁切参考。
 - 画面缩放/平移：滚轮/双指缩放、拖拽、适合 / 100%、双击切换。
 - 播放器“导出”按钮直接跳到 OUTPUT。
@@ -62,6 +63,7 @@ build-ui-macos/SpektraRoll.app
 
 - `.app` 启动、三栏、思源黑体/Noto Sans CJK SC、导入缩略图、AVPlayer 播放、空格、INFO、胶片效果、渲染。
 - 渲染输出：640×360 / 3.00 s / H.264 / yuv420p。
+- D076：`video --display/--max-side 960` CLI 已验证；Mac 本机 `swift build` 通过，显示代理已生成（`~/Library/Caches/SpektraRoll/preview-cache/`）；播放切换观感待验收。
 - 远程验收见 `docs/macos-dev-notes.md`（SSH Background domain、自截图、Stage Manager）。
 
 ## 调试开关
@@ -73,12 +75,12 @@ open -F --env SPEKTRA_ALL_SPACES=1 --env SPEKTRA_CAPTURE=1 \
   build-ui-macos/SpektraRoll.app
 ```
 
-`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTORENDER` 见 `docs/macos-dev-notes.md`。
+`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTOPLAY` / `SPEKTRA_PLAYER_DEBUG` / `SPEKTRA_AUTORENDER` 见 `docs/macos-dev-notes.md`。
 
 ## 已知限制（v1）
 
-- 没有时间线拖动/逐帧预览；`胶片效果` 是暂停时单帧渲染，播放时还没有实时胶片代理（D074 #3，P1）。
-- 播放中关闭胶片效果时仍是 AVPlayer 的 Log 画面；暂停才显示解码后的 sRGB 静帧。
+- 没有时间线拖动/逐帧预览；`胶片效果` 的实时播放依赖 960 px 代理，代理生成期间会先播显示代理或原片。
+- 代理是整段预渲染；6 秒 4K50 素材在 M1 上预计数秒到十几秒，首次播放需要等进度胶囊完成。
 - R3D 在 macOS 明确不支持（没有 RED 插件）；导入时提示。
 - 防光晕层是 UI 级近似（开启后光晕 ×0.6），等引擎加独立参数。
 - 没有裁切、印片机 Y/M/预闪、扫描仪 unsharp、空间物理模型。

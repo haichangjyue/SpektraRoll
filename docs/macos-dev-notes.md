@@ -47,6 +47,8 @@ open -F \
 | `SPEKTRA_CAPTURE=1` | 启动 6 秒后自截图到 `/tmp/spektra-self-0.png`；并监听 `/tmp/spektra-capture-now` 按需截图 |
 | `SPEKTRA_AUTOLOAD=<path>` | 启动后自动导入一个视频并选中 |
 | `SPEKTRA_AUTOPREVIEW=1` | 自动打开「胶片效果」渲染当前帧 |
+| `SPEKTRA_AUTOPLAY=1` | 启动 3.5 秒后自动播放（配合 `AUTOLOAD`/`AUTOPREVIEW` 测播放代理） |
+| `SPEKTRA_PLAYER_DEBUG=1` | 播放源切换写入 `/tmp/spektra-player.log`（original/display/film） |
 | `SPEKTRA_AUTORENDER=1` | 自动渲染到 `~/Movies/SpektraRoll/spektra-debug-render*.mov` |
 
 调试日志：`/tmp/spektra-debug.log`。
@@ -65,6 +67,28 @@ open build-ui-macos/SpektraRoll.app
 3. 开 `胶片效果`，拖动 FILM / PRINT / ADVANCED 任意滑块，画面应自动刷新（180 ms 防抖）。
 4. 点 `导出` 应跳到 OUTPUT。
 5. 已知未做：播放中的实时胶片预览（D074 #3 / P1）；播放中关闭胶片效果仍是 AVPlayer 的 Log 画面。
+
+## D076 验收（播放代理）
+
+```bash
+launchctl setenv SPEKTRA_AUTOLOAD /Users/wenyutao/Movies/C0113.MP4
+launchctl setenv SPEKTRA_AUTOPREVIEW 1
+launchctl setenv SPEKTRA_AUTOPLAY 1
+launchctl setenv SPEKTRA_PLAYER_DEBUG 1
+open -n build-ui-macos/SpektraRoll.app
+```
+
+- 观察 `~/Library/Caches/SpektraRoll/preview-cache/`：先出现 `*.mov`（显示代理），播放后出现胶片代理。
+- `pgrep -fl spektra-roll-cli` 应能看到 `--display --max-side 960` 或 `--max-side 960` 的代理进程。
+- `cat /tmp/spektra-player.log` 应看到 `switch display ...`，胶片代理就绪后再看到 `switch film ...`。
+- 验收完清除调试变量：
+
+```bash
+launchctl unsetenv SPEKTRA_AUTOLOAD
+launchctl unsetenv SPEKTRA_AUTOPREVIEW
+launchctl unsetenv SPEKTRA_AUTOPLAY
+launchctl unsetenv SPEKTRA_PLAYER_DEBUG
+```
 
 ## 已验证
 
