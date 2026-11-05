@@ -25,7 +25,7 @@
 | **D078** | 电影画幅 + APP 版本 | 新增 Super 8；16mm 10.26 / Super 16 12.52 / Super 35 24.89 / 65mm 52.63 对齐 SpektraLab 相机负片长边；35mm 36.0、IMAX 70.0；全部标 CINE；INFO 引擎区加 APP 行 |
 | **D079** | 配光按钮 | 放在 `导出` 右侧；暂停、抽取当前帧、解到 sRGB、按亮度中位数把 18% 线性中灰落位；`C0113.MP4` 实测 **+0.66 EV**；中性 C/M/Y 由胶片/相纸数据库自动查表 |
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
-| **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB** |
+| **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB**；CI run **153** 双绿 |
 
 **顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D081**。
 
@@ -47,7 +47,7 @@
 ### 三、当前状态（截至最后一次操作）
 
 - 最新功能代码：`6cb8055`（D081；其后的 `5f2be7f` 是 D081 验收文档 + help 的 `%` 转义）
-- CI：D080 功能代码 run **148** Windows + macOS 双绿（含 `swift build`）；D081 的 CI 待本轮提交后跑
+- CI：D080 功能代码 run **148** Windows + macOS 双绿（含 `swift build`）；D081 run **153** Windows + macOS 双绿（含 Metal `gpu_film` 与 OCIO 步骤）
 - Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 `6cb8055` 并本机验证（`build-macos-tests` 11/11）
 - Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
 - Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
@@ -186,12 +186,12 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | Mac OCIO CPU vs Metal | 320×180 / 16-bit，**113.70 dB** |
 | Mac `convert --ocio-display ... --exr-linear` | 与普通线性 EXR **inf** |
 | Mac `video --engine spectral-gpu --ocio-input` | 2 帧 320×180 H.264 正常出片，无 warning |
+| CI run **153** | Windows + macOS **双绿**（macOS 真跑 Metal `gpu_film` / OCIO 步骤） |
 
 ### 三、仍未做 / 待验收
 
-- **CI**：Windows + macOS 双平台待跑；macOS 的 `gpu_film` 会真正走 Metal 对拍。
-- **性能**：OCIO 的 CPU 批量解码仍在每帧上传前执行；4K 有成本但远低于回退 CPU 光谱。后续可把 OCIO 变换烘成 3D LUT 上 GPU。
 - **UI 提示**：Qt 里“OCIO 输入只能用 CPU 光谱”的旧翻译还留着（不会再触发），可下一轮清掉。
+- **性能**：OCIO 的 CPU 批量解码仍在每帧上传前执行；4K 有成本但远低于回退 CPU 光谱。后续可把 OCIO 变换烘成 3D LUT 上 GPU。
 
 ---
 
