@@ -635,6 +635,14 @@ final class AppState: ObservableObject {
         if !renderJobs.contains(where: { $0.status == .waiting || $0.status == .running }) {
             renderStatus = "队列完成"
         }
+        if ProcessInfo.processInfo.environment["SPEKTRA_QUEUE_SELFTEST"] == "1" {
+            let lines = renderJobs.map { job in
+                let exists = FileManager.default.fileExists(atPath: job.outputPath)
+                return "\(job.assetName)\t\(job.status.rawValue)\t\(job.message)\t\(job.outputPath)\texists=\(exists)"
+            }
+            try? lines.joined(separator: "\n")
+                .write(toFile: "/tmp/spektra-queue.log", atomically: true, encoding: .utf8)
+        }
     }
 
     private func updateJob(_ id: UUID, _ body: (inout RenderJob) -> Void) {
@@ -1482,6 +1490,20 @@ final class AppState: ObservableObject {
             outputName = "spektra-debug-render"
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             render()
+        }
+        if ProcessInfo.processInfo.environment["SPEKTRA_QUEUE_SELFTEST"] == "1" {
+            settings.engine = .lut
+            settings.codec = .h264
+            settings.trc = .srgb
+            settings.start = 0
+            settings.frames = 2
+            outputName = "spektra-queue-selftest-1"
+            enqueueRender()
+            settings.exposure += 0.3
+            settings.frames = 3
+            outputName = "spektra-queue-selftest-2"
+            enqueueRender()
+            startRenderQueue()
         }
     }
 
