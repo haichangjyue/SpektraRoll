@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-06（D082：P1 一次完成——时间线/逐帧、渲染队列、区间、滤色片偏移、代理加速；Windows + Mac 已验）
+> **最后更新**：2026-11-06（D082：P1 一次完成——时间线/逐帧、渲染队列、区间、滤色片偏移、代理加速；Windows + Mac 已验，CI run 166 双绿）
 > **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D082），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO + 时间线/队列/区间/滤色片偏移（D041–D082）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
@@ -53,7 +53,7 @@
 ### 三、当前状态（截至最后一次操作）
 
 - 最新功能代码：`3b4f386`（D082；其后的 `68d5beb` 是验收文档）
-- CI：D080 run **148**、D081 run **153**、D082 功能代码 run **164** Windows + macOS 双绿（run 162 的 Windows exit 127 是单次环境抖动，随后 163/164 同代码均绿）
+- CI：D080 run **148**、D081 run **153**、D082 run **166** Windows + macOS 双绿（含 solve / filter-offset 步骤；run 162 的 Windows exit 127 是单次环境抖动）
 - Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 D082 并本机验证（`build-macos-tests` 11/11，整段 4K50 渲染、队列、代理、缓存迁移）
 - Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
 - Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
@@ -208,7 +208,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 播放代理 | 720 px LUT + GPU 质感，从启动到 `switch film` 约 **13 s**（原先 20–30 s） |
 | 缓存迁移 | 5 个代理移动到新目录、旧目录清空，再迁移回原目录 |
 | 时间线 seek | `SPEKTRA_SEEK=3.2` 日志确认 `seek 3.200`；截图显示帧号/滑杆/逐帧按钮 |
-| CI run **164** | Windows + macOS **双绿**（含 `ctest` / OCIO / 视频冒烟） |
+| CI run **166** | Windows + macOS **双绿**（含 `ctest` / OCIO / solve+filter-offset / 视频冒烟） |
 
 ### 三、仍未做 / 注意
 
