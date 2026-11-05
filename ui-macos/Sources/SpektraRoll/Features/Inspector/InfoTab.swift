@@ -23,6 +23,7 @@ struct InfoRow: View {
 
 struct InfoTab: View {
     @EnvironmentObject private var app: AppState
+    private let system = SystemProfile.current()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -57,6 +58,20 @@ struct InfoTab: View {
                     InfoRow(label: "GPU", value: gpuText)
                     InfoRow(label: "RED", value: redText)
                     InfoRow(label: "预览协议", value: previewText)
+                }
+            }
+
+            SectionTitle(system.platformName)
+            Panel {
+                VStack(alignment: .leading, spacing: 8) {
+                    InfoRow(label: "系统", value: system.osVersion)
+                    InfoRow(label: "屏幕", value: system.screen)
+                    InfoRow(label: "CPU", value: system.cpu)
+                    InfoRow(label: "GPU", value: system.gpu)
+                    InfoRow(label: "内存", value: system.ram)
+                    InfoRow(label: "存储", value: system.storage)
+                    InfoRow(label: "HDR", value: system.hdr)
+                    InfoRow(label: "色彩空间", value: system.colorSpace)
                 }
             }
         }

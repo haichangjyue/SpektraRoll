@@ -81,6 +81,74 @@ struct AdvancedTab: View {
                 }
             }
 
+            SectionTitle("预览代理")
+            Panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Text("磁盘上限")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.textMuted)
+                        Spacer()
+                        TextField("5", value: $app.proxyCacheLimitGB,
+                                  format: .number.precision(.fractionLength(0...2)))
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .font(Theme.caption)
+                            .padding(.horizontal, 8)
+                            .frame(width: 66, height: 26)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(Theme.field)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .stroke(Theme.border, lineWidth: 1)
+                            )
+                            .onSubmit {
+                                app.proxyCacheLimitChanged()
+                            }
+                        Text("GB")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text("缓存位置")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.textMuted)
+                        Text(app.proxyCacheDirectory.path)
+                            .font(Theme.micro)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Button("选择") {
+                            app.chooseProxyCacheDirectory()
+                        }
+                        .buttonStyle(PillButtonStyle(filled: false))
+                    }
+
+                    HStack(spacing: 8) {
+                        Text("当前占用")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.textMuted)
+                        Text(app.proxyCacheUsageText)
+                            .font(Theme.micro)
+                            .foregroundStyle(Theme.text)
+                            .monospacedDigit()
+                        Spacer(minLength: 4)
+                        Button("清理") {
+                            app.clearProxyCache()
+                        }
+                        .buttonStyle(PillButtonStyle(filled: false))
+                    }
+
+                    Text("超过上限时自动删除最旧的代理；0 = 不限制。")
+                        .font(Theme.micro)
+                        .foregroundStyle(Theme.textDim)
+                }
+            }
+
             SectionTitle("色彩管理")
             Panel {
                 VStack(alignment: .leading, spacing: 10) {
@@ -112,6 +180,9 @@ struct AdvancedTab: View {
                     }
                 }
             }
+        }
+        .onChange(of: app.proxyCacheLimitGB) { _, _ in
+            app.proxyCacheLimitChanged()
         }
     }
 

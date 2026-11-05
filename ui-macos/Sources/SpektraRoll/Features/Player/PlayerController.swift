@@ -21,6 +21,11 @@ final class PlayerController: ObservableObject {
     /// True while `replaceCurrentItem` is settling; the pause event it emits
     /// must not trigger a still-preview refresh.
     @Published private(set) var isSwitchingSource = false
+    /// D077 #2: while a film proxy is being generated the player stays paused;
+    /// the user's play request is remembered and resumed when the proxy is
+    /// ready (pressing space again cancels the pending resume).
+    @Published private(set) var isPlaybackBlocked = false
+    private var resumeAfterBlock = false
 
     private(set) var currentURL: URL?
     private var timeObserver: Any?
@@ -66,6 +71,8 @@ final class PlayerController: ObservableObject {
     func load(url: URL) {
         currentURL = url
         source = .original
+        isPlaybackBlocked = false
+        resumeAfterBlock = false
         debugLog("load \(url.lastPathComponent)")
         install(url: url, seek: 0, autoPlay: false, resetTime: true)
     }
@@ -151,12 +158,35 @@ final class PlayerController: ObservableObject {
     }
 
     func toggle() {
+        if isPlaybackBlocked {
+            resumeAfterBlock.toggle()
+            return
+        }
         if isPlaying {
             player.pause()
         } else {
             if duration > 0, currentTime >= duration - 0.05 {
                 seek(to: 0)
             }
+            player.play()
+        }
+    }
+
+    func blockPlaybackForFilmProxy(rememberPlayRequest: Bool) {
+        if rememberPlayRequest || isPlaying {
+            resumeAfterBlock = true
+        }
+        isPlaybackBlocked = true
+        player.pause()
+        debugLog("block film proxy playing=\(isPlaying) resume=\(resumeAfterBlock)")
+    }
+
+    func unblockAfterFilmProxy(resume: Bool) {
+        isPlaybackBlocked = false
+        let shouldPlay = resume && resumeAfterBlock
+        resumeAfterBlock = false
+        debugLog("unblock film proxy play=\(shouldPlay)")
+        if shouldPlay {
             player.play()
         }
     }

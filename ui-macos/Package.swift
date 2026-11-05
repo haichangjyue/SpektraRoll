@@ -11,7 +11,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "SpektraRoll",
-            path: "Sources/SpektraRoll"
+            path: "Sources/SpektraRoll",
+            linkerSettings: [
+                .linkedFramework("Metal")
+            ]
         )
     ]
 )

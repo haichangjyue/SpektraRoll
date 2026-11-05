@@ -61,8 +61,14 @@ final class AppState: ObservableObject {
     @Published var displayProxyURL: URL?
     @Published var filmProxyURL: URL?
     @Published var isGeneratingProxy = false
+    @Published var isGeneratingFilmProxy = false
     @Published var proxyProgress: Double = 0
     @Published var proxyStatus = ""
+
+    // D077: proxies live in a user-selectable folder with a soft size cap.
+    @Published var proxyCacheLimitGB: Double = 5.0
+    @Published var proxyCacheDirectory: URL
+    @Published var proxyCacheBytes: Int64 = 0
 
     @Published var outputDirectory: URL
     @Published var outputName = "grade"
@@ -87,6 +93,10 @@ final class AppState: ObservableObject {
     private var sourceGeneration = 0
 
     init() {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        proxyCacheDirectory = (caches ?? URL(fileURLWithPath: NSTemporaryDirectory()))
+            .appendingPathComponent("SpektraRoll", isDirectory: true)
+            .appendingPathComponent("preview-cache", isDirectory: true)
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
         outputDirectory = (movies ?? URL(fileURLWithPath: NSTemporaryDirectory()))
             .appendingPathComponent("SpektraRoll", isDirectory: true)
@@ -146,7 +156,15 @@ final class AppState: ObservableObject {
                 settings.ocioEnabled = false
             }
             normalizeSelection()
+            if let raw = ProcessInfo.processInfo.environment["SPEKTRA_PROXY_LIMIT_GB"],
+               let value = Double(raw) {
+                proxyCacheLimitGB = min(1000, max(0, value))
+            }
             cleanupProxyCache()
+            if let tab = ProcessInfo.processInfo.environment["SPEKTRA_TAB"],
+               let selected = InspectorTab(rawValue: tab.lowercased()) {
+                inspectorTab = selected
+            }
             if let path = ProcessInfo.processInfo.environment["SPEKTRA_AUTOLOAD"], !path.isEmpty {
                 await debugAutoImport(URL(fileURLWithPath: path))
             }
@@ -232,6 +250,7 @@ final class AppState: ObservableObject {
                 }
                 imported.append(asset)
             }
+            assets.removeAll { existing in imported.contains { $0.path == existing.path } }
             assets.append(contentsOf: imported)
             if let first = imported.first {
                 selectedAssetID = first.id
@@ -414,6 +433,7 @@ final class AppState: ObservableObject {
         } else {
             filmPreview = nil
             frameStats = nil
+            cancelFilmProxyGeneration()
             if renderStill {
                 refreshSourcePreview(at: seconds)
             }
@@ -583,8 +603,13 @@ final class AppState: ObservableObject {
 
     private var proxyMaxSide: Int { 960 }
 
-    private var proxyCacheDirectory: URL {
-        engine.cacheDirectory.appendingPathComponent("preview-cache", isDirectory: true)
+    var proxyCacheUsageText: String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .binary
+        let used = formatter.string(fromByteCount: proxyCacheBytes)
+        guard proxyCacheLimitGB > 0 else { return "\(used)（不限制）" }
+        let limit = formatter.string(fromByteCount: Int64(proxyCacheLimitGB * 1_073_741_824))
+        return "\(used) / \(limit)"
     }
 
     private func proxyCacheURL(key: String) -> URL {
@@ -739,6 +764,7 @@ final class AppState: ObservableObject {
         let generation = proxyGeneration
         let temp = request.output.deletingPathExtension().appendingPathExtension("part.mov")
         isGeneratingProxy = true
+        isGeneratingFilmProxy = !request.displayOnly
         proxyProgress = 0
         proxyStatus = request.displayOnly ? "生成原片代理…" : "生成胶片代理…"
         try? FileManager.default.createDirectory(at: proxyCacheDirectory,
@@ -792,7 +818,7 @@ final class AppState: ObservableObject {
                 }
                 self.proxyProgress = 1
                 self.proxyStatus = "实时预览就绪"
-                self.cleanupProxyCache()
+                self.cleanupProxyCache(keeping: [request.output])
             } catch {
                 if !Task.isCancelled {
                     self.proxyStatus = "实时预览生成失败"
@@ -811,6 +837,8 @@ final class AppState: ObservableObject {
         if let pending = pendingProxy {
             pendingProxy = nil
             startProxy(pending)
+        } else {
+            isGeneratingFilmProxy = false
         }
     }
 
@@ -843,6 +871,7 @@ final class AppState: ObservableObject {
         pendingProxy = nil
         proxyGeneration += 1
         isGeneratingProxy = false
+        isGeneratingFilmProxy = false
         proxyProgress = 0
         proxyStatus = ""
         displayProxyURL = nil
@@ -858,26 +887,121 @@ final class AppState: ObservableObject {
         pendingProxy = nil
         proxyGeneration += 1
         isGeneratingProxy = false
+        isGeneratingFilmProxy = false
     }
 
-    private func cleanupProxyCache() {
+    private func cancelFilmProxyGeneration() {
+        guard isGeneratingFilmProxy else { return }
+        proxyEngine.cancel()
+        proxyTask?.cancel()
+        if let pending = pendingProxy, !pending.displayOnly {
+            pendingProxy = nil
+        }
+        if proxyTask == nil {
+            isGeneratingFilmProxy = false
+        }
+    }
+
+    private func cleanupProxyCache(keeping: Set<URL> = []) {
+        let fileManager = FileManager.default
         let directory = proxyCacheDirectory
-        guard let files = try? FileManager.default.contentsOfDirectory(
+        guard let files = try? fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
-        ) else { return }
-        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        let partCutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        ) else {
+            proxyCacheBytes = 0
+            return
+        }
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let partCutoff = now.addingTimeInterval(-24 * 60 * 60)
+        var entries: [(url: URL, size: Int64, date: Date, isPart: Bool)] = []
+
         for file in files {
             let isPart = file.lastPathComponent.hasSuffix(".part.mov")
             guard isPart || file.pathExtension.lowercased() == "mov" else { continue }
-            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
+            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             let modified = values?.contentModificationDate ?? .distantPast
-            if modified < (isPart ? partCutoff : cutoff) {
-                try? FileManager.default.removeItem(at: file)
+            let size = Int64(values?.fileSize ?? 0)
+            if isPart, modified < partCutoff {
+                try? fileManager.removeItem(at: file)
+                continue
+            }
+            if !isPart, modified < cutoff, !keeping.contains(file) {
+                try? fileManager.removeItem(at: file)
+                continue
+            }
+            entries.append((file, size, modified, isPart))
+        }
+
+        var total = entries.reduce(Int64(0)) { $0 + $1.size }
+        let limit = Int64(max(0, proxyCacheLimitGB) * 1_073_741_824)
+        if limit > 0, total > limit {
+            var protected = keeping
+            if let displayProxyURL { protected.insert(displayProxyURL) }
+            if let filmProxyURL { protected.insert(filmProxyURL) }
+            // Never delete an in-progress part; only finished proxies are
+            // candidates for the size cap.
+            for entry in entries.filter({ !$0.isPart }).sorted(by: { $0.date < $1.date }) {
+                if total <= limit { break }
+                guard !protected.contains(entry.url) else { continue }
+                try? fileManager.removeItem(at: entry.url)
+                if !fileManager.fileExists(atPath: entry.url.path) {
+                    total -= entry.size
+                }
             }
         }
+        proxyCacheBytes = total
+    }
+
+    /// D077: called from ADVANCED when the user edits the size cap.
+    func proxyCacheLimitChanged() {
+        proxyCacheLimitGB = min(1000, max(0, proxyCacheLimitGB))
+        cleanupProxyCache()
+        save()
+    }
+
+    func chooseProxyCacheDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "选择代理缓存目录"
+        panel.prompt = "选择"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = proxyCacheDirectory
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                self.proxyCacheDirectory = url
+                self.clearProxyState()
+                self.refreshProxyCacheUsage()
+                self.save()
+            }
+        }
+    }
+
+    func clearProxyCache() {
+        cancelProxyGeneration()
+        let fileManager = FileManager.default
+        if let files = try? fileManager.contentsOfDirectory(
+            at: proxyCacheDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for file in files {
+                try? fileManager.removeItem(at: file)
+            }
+        }
+        displayProxyURL = nil
+        filmProxyURL = nil
+        proxyCacheBytes = 0
+        statusMessage = "代理缓存已清理"
+    }
+
+    func refreshProxyCacheUsage() {
+        cleanupProxyCache()
     }
 
     // MARK: - Persistence
@@ -887,6 +1011,8 @@ final class AppState: ObservableObject {
         var settings: LookSettings
         var outputDirectory: String
         var outputName: String
+        var proxyCacheLimitGB: Double?
+        var proxyCacheDirectory: String?
     }
 
     private var stateURL: URL {
@@ -902,7 +1028,9 @@ final class AppState: ObservableObject {
             assets: assets,
             settings: settings,
             outputDirectory: outputDirectory.path,
-            outputName: outputName
+            outputName: outputName,
+            proxyCacheLimitGB: proxyCacheLimitGB,
+            proxyCacheDirectory: proxyCacheDirectory.path
         )
         do {
             let directory = stateURL.deletingLastPathComponent()
@@ -922,10 +1050,20 @@ final class AppState: ObservableObject {
             return
         }
         assets = state.assets
+        // Older debug runs could import the same path more than once; keep the
+        // first entry so the library does not grow duplicates.
+        var seenPaths = Set<String>()
+        assets = assets.filter { seenPaths.insert($0.path).inserted }
         settings = state.settings
         outputName = state.outputName
         if !state.outputDirectory.isEmpty {
             outputDirectory = URL(fileURLWithPath: state.outputDirectory)
+        }
+        if let limit = state.proxyCacheLimitGB {
+            proxyCacheLimitGB = min(1000, max(0, limit))
+        }
+        if let directory = state.proxyCacheDirectory, !directory.isEmpty {
+            proxyCacheDirectory = URL(fileURLWithPath: directory, isDirectory: true)
         }
         selectedAssetID = assets.first?.id
     }
@@ -938,6 +1076,7 @@ final class AppState: ObservableObject {
                                                       cacheDirectory: engine.cacheDirectory) {
             asset.thumbnailPath = thumb
         }
+        assets.removeAll { $0.path == asset.path }
         assets.append(asset)
         selectedAssetID = asset.id
         settings.input = .sLog3

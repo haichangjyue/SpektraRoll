@@ -68,7 +68,11 @@ struct PlayerView: View {
         .onChange(of: player.isPlaying) { _, playing in
             if playing {
                 app.preparePlaybackProxy()
-                syncPlayerSource()
+                if app.isGeneratingFilmProxy {
+                    player.blockPlaybackForFilmProxy(rememberPlayRequest: true)
+                } else {
+                    syncPlayerSource()
+                }
                 return
             }
             guard !player.isSwitchingSource else { return }
@@ -81,7 +85,24 @@ struct PlayerView: View {
         .onChange(of: app.showFilmPreview) { _, _ in
             guard player.isPlaying else { return }
             app.preparePlaybackProxy()
-            syncPlayerSource()
+            if app.isGeneratingFilmProxy {
+                player.blockPlaybackForFilmProxy(rememberPlayRequest: true)
+            } else {
+                syncPlayerSource()
+            }
+        }
+        .onChange(of: app.isGeneratingFilmProxy) { _, generating in
+            if generating {
+                player.blockPlaybackForFilmProxy(rememberPlayRequest: player.isPlaying)
+            } else {
+                let ready: URL? = app.showFilmPreview ? app.filmProxyURL : app.displayProxyURL
+                if ready != nil {
+                    syncPlayerSource(autoPlay: false)
+                    player.unblockAfterFilmProxy(resume: true)
+                } else {
+                    player.unblockAfterFilmProxy(resume: false)
+                }
+            }
         }
         .onChange(of: app.displayProxyURL) { _, _ in
             guard player.isPlaying else { return }
@@ -121,14 +142,14 @@ struct PlayerView: View {
 
     /// D074 #3: pick the source clip, the display proxy or the film proxy for
     /// the current playback mode, preserving the playhead.
-    private func syncPlayerSource() {
+    private func syncPlayerSource(autoPlay: Bool = true) {
         guard let asset = app.selectedAsset, asset.isPlayable else { return }
         if app.showFilmPreview, let film = app.filmProxyURL {
-            player.switchSource(to: film, source: .film, autoPlay: true)
+            player.switchSource(to: film, source: .film, autoPlay: autoPlay)
         } else if let display = app.displayProxyURL {
-            player.switchSource(to: display, source: .display, autoPlay: true)
+            player.switchSource(to: display, source: .display, autoPlay: autoPlay)
         } else {
-            player.switchSource(to: asset.url, source: .original, autoPlay: true)
+            player.switchSource(to: asset.url, source: .original, autoPlay: autoPlay)
         }
     }
 
@@ -316,8 +337,6 @@ struct PlayerView: View {
             .padding(.horizontal, 26)
             .padding(.top, 18)
 
-            Spacer()
-
             if app.isGeneratingProxy {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -331,10 +350,12 @@ struct PlayerView: View {
                 .padding(.vertical, 6)
                 .background(Capsule().fill(Theme.backgroundElevated.opacity(0.94)))
                 .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 26)
-                .padding(.bottom, 6)
+                .padding(.top, 6)
             }
+
+            Spacer()
 
             if !player.isPlaying, let stats = app.frameStats {
                 HistogramView(stats: stats)
