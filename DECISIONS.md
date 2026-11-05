@@ -1469,6 +1469,7 @@
   - `video --engine spectral-gpu --ocio-input "S-Log3 S-Gamut3.Cine"` 正常出片，不再有回退 warning。
   - CI macOS OCIO 步骤改为断言 `spectral-gpu` 日志里**没有** `warning:`，并新增 OCIO 线性 EXR 冒烟。
   - CI run **153** Windows + macOS 双绿（macOS 真跑 Metal `gpu_film` 和 OCIO 步骤）。
+  - Qt UI 删除旧回退翻译与预提示后重新构建通过，`--stocks-selftest` 正常（20 底片 / 8 相纸）。
 - **后果**：
   - OCIO 的逐帧 CPU 解码仍有成本（4K 每帧数十毫秒级），但远低于回退 CPU 光谱；后续如需再快，可把 OCIO 变换烘成 3D LUT 上 GPU。
   - Metal 与 D3D11 行为一致；没有 OCIO 的构建完全不变。

@@ -166,6 +166,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
   - 为保持 `--strength < 1` 与 CPU 的 `sr::mix(原始编码值, 胶片结果, strength)` 一致，OCIO 路径额外上传一份原始编码帧；着色器混合时用它，而不是线性值。
   - `GpuFilm::configure` 复制 `OcioProcessor`（共享句柄），调用方的 recipe 可以先释放；重新 configure 会正确释放/重建编码缓冲。
 - **移除回退**：`lut apply`、`video`、`preview` 里三处 `warning: OpenColorIO input is CPU-only for now` 全部删除；GPU 配置失败仍按原逻辑回退 CPU 光谱。
+- **清掉 Qt 旧文案**：删除 `src/ui-qt/main.cpp` 里“OCIO 输入只能用 CPU 光谱”的翻译分支、渲染/队列开始前“会自动回退 CPU”的预提示，以及不再使用的 `argsUseOcioWithGpu()`；通用 `warning:` → “提示：”仍保留。
 - **线性 EXR**：`convert --exr-linear` 遇到 `--ocio-display/--ocio-view` 时跳过显示变换，直接写显示前的线性 Rec.709。任意 view 的逆变换没有定义，之前按 sRGB 反推会得到错误的“线性”。`--exr-trc` 在这种组合下不参与。
 - **测试/CI**：`test_gpu_film` 新增 `ocio logc3 / negative +gamut` 对拍；macOS CI 的 OCIO 步骤改为断言 `spectral-gpu` 日志里没有 `warning:`，并新增 OCIO 线性 EXR 冒烟。
 - **UI/文档**：`AppVersion.testTag` 升到 **D081**；`docs/macos-dev-notes.md`、`docs/ui-parity.md`、`RUN.md`、`ui-macos/README.md` 更新为“已接通”。
@@ -186,11 +187,12 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | Mac OCIO CPU vs Metal | 320×180 / 16-bit，**113.70 dB** |
 | Mac `convert --ocio-display ... --exr-linear` | 与普通线性 EXR **inf** |
 | Mac `video --engine spectral-gpu --ocio-input` | 2 帧 320×180 H.264 正常出片，无 warning |
+| Qt UI | `build-ui.ps1 -NoLaunch` 通过；`--stocks-selftest` → `films=20 papers=8 ... slide=1` |
 | CI run **153** | Windows + macOS **双绿**（macOS 真跑 Metal `gpu_film` / OCIO 步骤） |
 
 ### 三、仍未做 / 待验收
 
-- **UI 提示**：Qt 里“OCIO 输入只能用 CPU 光谱”的旧翻译还留着（不会再触发），可下一轮清掉。
+- ~~**UI 提示**：Qt 里“OCIO 输入只能用 CPU 光谱”的旧翻译还留着。~~ → 已清掉：Qt 的旧翻译分支和渲染/队列里的“会自动回退 CPU”预提示都删了。
 - **性能**：OCIO 的 CPU 批量解码仍在每帧上传前执行；4K 有成本但远低于回退 CPU 光谱。后续可把 OCIO 变换烘成 3D LUT 上 GPU。
 
 ---

@@ -2991,10 +2991,6 @@ private:
         log_->clear();
         appendLog(QStringLiteral("> ") + cliPath_ + QLatin1Char(' ') + args.join(QLatin1Char(' ')) +
                   QLatin1Char('\n'));
-        if (argsUseOcioWithGpu(args)) {
-            appendLog(QStringLiteral(
-                "提示：这个任务用了 OCIO，光谱 GPU 会自动回退 CPU 光谱（较慢）。\n"));
-        }
         pending_.clear();
         canceled_ = false;
         rendering_ = true;
@@ -3449,10 +3445,6 @@ private:
         log_->clear();
         appendLog(QStringLiteral("> ") + cliPath_ + QLatin1Char(' ') +
                   jobs_[index].args.join(QLatin1Char(' ')) + QLatin1Char('\n'));
-        if (argsUseOcioWithGpu(jobs_[index].args)) {
-            appendLog(QStringLiteral(
-                "提示：这个任务用了 OCIO，光谱 GPU 会自动回退 CPU 光谱（较慢）。\n"));
-        }
         pending_.clear();
         queueCanceled_ = false;
         progress_->setRange(0, 0);
@@ -3626,26 +3618,14 @@ private:
         log_->moveCursor(QTextCursor::End);
     }
 
-    // CLI warnings are informational (e.g. an OCIO input falling back to the
-    // CPU spectral engine). Show them as a note, not as a bare "warning: ..."
-    // that reads like a render failure (D066).
+    // CLI warnings are informational (e.g. a GPU fallback). Show them as a note,
+    // not as a bare "warning: ..." that reads like a render failure (D066).
+    // D081 removed the OCIO + spectral-gpu fallback, so it has no special text.
     static QString statusLine(const QString& line) {
-        if (line.contains(QStringLiteral("OpenColorIO input is CPU-only"))) {
-            return QStringLiteral("提示：OCIO 输入只能用 CPU 光谱，已自动回退（渲染会变慢）");
-        }
         if (line.startsWith(QStringLiteral("warning:"))) {
             return QStringLiteral("提示：") + line.mid(8).trimmed();
         }
         return line;
-    }
-
-    // True when a frozen render-queue command combines OCIO with the GPU
-    // spectral engine; the CLI will run it on the CPU instead (D066).
-    static bool argsUseOcioWithGpu(const QStringList& args) {
-        const int engine = args.indexOf(QStringLiteral("--engine"));
-        const bool gpu = engine >= 0 && engine + 1 < args.size() &&
-                         args[engine + 1] == QStringLiteral("spectral-gpu");
-        return gpu && args.contains(QStringLiteral("--ocio-input"));
     }
 
     // ---- state -----------------------------------------------------------
