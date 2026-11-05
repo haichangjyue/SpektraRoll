@@ -184,6 +184,9 @@ struct AdvancedTab: View {
         .onChange(of: app.proxyCacheLimitGB) { _, _ in
             app.proxyCacheLimitChanged()
         }
+        .onAppear {
+            app.refreshProxyCacheUsage()
+        }
     }
 
     private func panelRow<Trailing: View>(_ label: String,

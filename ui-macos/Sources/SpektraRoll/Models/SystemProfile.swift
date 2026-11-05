@@ -7,7 +7,7 @@ import Metal
 /// D077 #4: the machine running the UI, shown at the bottom of INFO.
 /// The macOS build says "Mac"; the `#else` branch says "PC" for a future
 /// Windows shell.
-struct SystemProfile {
+struct SystemProfile: Sendable {
     let platformName: String
     let osVersion: String
     let screen: String
@@ -18,7 +18,9 @@ struct SystemProfile {
     let hdr: String
     let colorSpace: String
 
-    static func current() -> SystemProfile {
+    static let current = makeCurrent()
+
+    private static func makeCurrent() -> SystemProfile {
         let screen = NSScreen.main
         let scale = screen?.backingScaleFactor ?? 1
         let pixelWidth = Int((screen?.frame.width ?? 0) * scale)

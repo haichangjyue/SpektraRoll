@@ -23,7 +23,7 @@ struct InfoRow: View {
 
 struct InfoTab: View {
     @EnvironmentObject private var app: AppState
-    private let system = SystemProfile.current()
+    private let system = SystemProfile.current
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
