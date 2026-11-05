@@ -2,13 +2,48 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D077：代理缓存上限/自定义目录、生成胶片代理时暂停播放、进度胶囊移位、INFO 系统信息；Mac 已验收）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 P0+P1+D077 反馈已完成（D075–D077），待最终回归 + Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D078：电影画幅 CINE 标识 + APP 内部测试版本，Mac 已验收）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D078），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
+
+## 最新：D078 · 电影画幅 CINE 标识 + APP 版本（2026-11-05 晚；Mac 已验收）
+
+> 产品负责人问 FILM 画幅的实现路径，并要求电影画幅加 CINE 标识、INFO 引擎区加 APP 版本。
+
+### 一、画幅功能怎么实现
+
+- **SpektraRoll**：`FrameGauge`（SwiftUI）只保存一个 **`widthMM`（长边）**；`CLIArguments` 把它写成 `--frame-width-mm`；CLI 的 `parseTexture` 存进 `sr::TextureParams.spread.frameWidthMm`；质感核按 `像素 sigma = µm × 画面宽度 / frameWidthMm` 换算。它**只决定颗粒/光晕/眩光/扩散的物理尺度**，不裁切画面、不改变宽高比。
+- **SpektraLab**：`FilmFrame` 有 `short/long` 两个边长、`isCine`、`sideLengthMM` 和 Custom；选择画幅后 `derivedFilmFormatMM` 取长边，再算 `pixel_size_um = long_mm × 1000 / long_edge`。思路相同（物理宽度 → 像素尺度），但它还支持短边/长边、静态/电影、Custom。
+- **结论**：路径同一原则，但不是逐行同构。本轮把电影长边对齐 SpektraLab 的相机负片数据，并补了 Super 8：
+  - Super 8 **5.79 mm**
+  - 16mm **10.26 mm**（原 12.5）
+  - Super 16 **12.52 mm**
+  - 35mm **36.00 mm**（保留 135 全画幅宽度）
+  - Super 35 **24.89 mm**（原 24.9）
+  - 65mm **52.63 mm**（原 52.5）
+  - IMAX **70.00 mm**
+  - 全部标 **CINE**；下拉菜单和当前画幅行都显示 CINE，旁边显示物理宽度。
+- **仍未做**：短边/画幅比例、Custom 自定义宽度、按画幅裁切。SpektraLab 的 cine 列表没有 35mm 和 IMAX（36mm 在它那里是静态 135）；如果你想严格区分，可以再拆成「35mm 电影（Academy 21.95）」+「135 全画幅」两个选项。
+
+### 二、APP 版本
+
+- 新增 `AppVersion`：市场版本读 `CFBundleShortVersionString`（0.1.0），内部测试号 `testTag = "D078"`，`isReleased = false`。
+- INFO → 引擎面板第一行 **APP**：`内部测试（D078） · 0.1.0`。发布后把 `isReleased = true`，测试号自动消失。
+- 每轮内测更新 `testTag`。
+
+### 三、验收
+
+- FILM 截图：画幅行显示 `CINE` + `36.00 mm`，下拉当前项 `35mm · CINE`。
+- INFO 截图：APP 行 `内部测试（D078） · 0.1.0`。
+- Mac 本机 Swift build 通过；`data/ui-schema.json` 的 frameWidth 下限从 8.0 降到 5.0，允许 Super 8。
+- CI 待本轮提交后跑。
+
+---
+
 
 ## 最新：D077 · macOS UI v1.1 反馈（2026-11-05 晚；Mac 已验收）
 

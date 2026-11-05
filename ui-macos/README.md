@@ -56,8 +56,9 @@ build-ui-macos/SpektraRoll.app
 - 画面缩放/平移：滚轮/双指缩放、拖拽、适合 / 100%、双击切换。
 - 播放器“导出”按钮直接跳到 OUTPUT。
 - INFO 底部显示 **Mac** 配置：系统、屏幕、CPU、GPU、内存、存储、HDR、屏幕色彩空间（Windows 版标题为 **PC**）。
+- INFO 引擎区首行 **APP**：未发布版本显示 `内部测试（D078） · 0.1.0`。
 - 片库按彩色负片 / 电影负片 / 反转片分类；相纸 / 电影印片分类。
-- 画幅（35mm / Super 35 / 16mm / Super 16 / 65mm / IMAX）→ `--frame-width-mm`。
+- 画幅（Super 8 / 16mm / Super 16 / 35mm / Super 35 / 65mm / IMAX，全部 CINE）→ `--frame-width-mm`；画幅行显示物理宽度。
 - LUT / 光谱 / 光谱 GPU 引擎；LUT 自动烘焙并缓存。
 - 渲染 H.264 / HEVC / ProRes，SDR/PQ/HLG，进度 JSON、日志、取消。
 - 设置和素材库持久化到 `~/Library/Application Support/SpektraRoll/state.json`。

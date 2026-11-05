@@ -142,10 +142,11 @@ enum LutInterpolation: String, CaseIterable, Codable, Identifiable {
 }
 
 enum FrameGauge: String, CaseIterable, Codable, Identifiable {
-    case mm35
-    case super35
+    case super8
     case mm16
     case super16
+    case mm35
+    case super35
     case mm65
     case imax
 
@@ -153,24 +154,44 @@ enum FrameGauge: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .mm35: return "35mm"
-        case .super35: return "Super 35"
+        case .super8: return "Super 8"
         case .mm16: return "16mm"
         case .super16: return "Super 16"
+        case .mm35: return "35mm"
+        case .super35: return "Super 35"
         case .mm65: return "65mm"
         case .imax: return "IMAX"
         }
     }
 
+    /// Camera-negative long side, matching SpektraLab's `FilmFrame` data
+    /// (Super 8 5.79, 16mm 10.26, Super 16 12.52, Super 35 24.89, 65mm 52.63).
+    /// 35mm keeps the 36 mm full-frame/135 width and IMAX the 70 mm width.
     var widthMM: Double {
         switch self {
-        case .mm35: return 36.0
-        case .super35: return 24.9
-        case .mm16: return 12.5
+        case .super8: return 5.79
+        case .mm16: return 10.26
         case .super16: return 12.52
-        case .mm65: return 52.5
+        case .mm35: return 36.0
+        case .super35: return 24.89
+        case .mm65: return 52.63
         case .imax: return 70.0
         }
+    }
+
+    var isCine: Bool {
+        switch self {
+        case .super8, .mm16, .super16, .mm35, .super35, .mm65, .imax:
+            return true
+        }
+    }
+
+    var widthText: String {
+        String(format: "%.2f mm", widthMM)
+    }
+
+    var menuTitle: String {
+        isCine ? "\(title)  ·  CINE" : title
     }
 }
 

@@ -8,19 +8,26 @@ struct FilmTab: View {
         VStack(alignment: .leading, spacing: 18) {
             SectionTitle("FILM", trailing: app.filmStock?.name)
 
-            HStack {
+            HStack(spacing: 7) {
                 Text("画幅")
                     .font(Theme.caption)
                     .foregroundStyle(Theme.textMuted)
+                if app.settings.frameGauge.isCine {
+                    TagBadge(text: "CINE")
+                }
+                Text(app.settings.frameGauge.widthText)
+                    .font(Theme.micro)
+                    .foregroundStyle(Theme.textDim)
+                    .monospacedDigit()
                 Spacer()
                 Picker("画幅", selection: $app.settings.frameGauge) {
                     ForEach(FrameGauge.allCases) { gauge in
-                        Text(gauge.title).tag(gauge)
+                        Text(gauge.menuTitle).tag(gauge)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 150)
+                .frame(width: 160)
             }
 
             if let catalog = app.catalog {

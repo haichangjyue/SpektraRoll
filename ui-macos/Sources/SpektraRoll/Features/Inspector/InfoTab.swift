@@ -53,6 +53,7 @@ struct InfoTab: View {
             SectionTitle("引擎")
             Panel {
                 VStack(alignment: .leading, spacing: 8) {
+                    InfoRow(label: "APP", value: AppVersion.display)
                     InfoRow(label: "CLI", value: app.capabilities?.version ?? "未连接")
                     InfoRow(label: "OCIO", value: ocioText)
                     InfoRow(label: "GPU", value: gpuText)

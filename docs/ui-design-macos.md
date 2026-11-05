@@ -56,11 +56,12 @@
 
 ### INFO
 - 文件名、路径、分辨率、帧率、时长、总帧数、codec、色彩标签、timecode。
-- 引擎状态：CLI 版本、OCIO 版本、GPU 后端、RED 可用性。
+- 引擎状态：**APP 版本**（未发布时显示“内部测试（D078） · 0.1.0”）、CLI 版本、OCIO 版本、GPU 后端、RED 可用性。
 - `色彩管理` 当前选择（画面类型或 OCIO 空间）。
+- 系统配置：**Mac**（Windows 版标题 **PC**），含系统版本、屏幕、CPU、GPU、内存、存储、HDR、屏幕色彩空间。
 
 ### FILM
-- **画幅**：35mm / Super 35 / 16mm / Super 16 / 65mm / IMAX（映射 `--frame-width-mm`）。
+- **画幅**：Super 8 / 16mm / Super 16 / 35mm / Super 35 / 65mm / IMAX，全部标 **CINE**；显示物理宽度并映射 `--frame-width-mm`。长边数据对齐 SpektraLab 的相机负片：Super 8 5.79、16mm 10.26、Super 16 12.52、Super 35 24.89、65mm 52.63；35mm 保留 36.0 全画幅，IMAX 70.0。
 - **胶片**，按分类：
   - 彩色负片（still negative）
   - 电影负片（Vision3 / Verita）
@@ -159,3 +160,9 @@
 3. **生成胶片代理时暂停**：生成期间播放器保持暂停，显示当前胶片静帧/进度；完成后自动切到胶片代理并继续播放。按空格可取消/恢复待播放。
 4. **进度胶囊位置**：视频文件标题信息行下方、左对齐。
 5. **INFO 系统面板**：标题为 **Mac**（Windows 版为 **PC**），列出系统版本、屏幕、CPU、GPU、内存、存储、HDR、屏幕色彩空间。
+
+## 11. D078 反馈（已实现）
+
+1. **电影画幅 CINE 标识**：Super 8 / 16mm / Super 16 / 35mm / Super 35 / 65mm / IMAX 全部标 CINE；画幅行显示 CINE 徽标 + 物理宽度（mm）。
+2. **Super 8**：新增 5.79 mm；16mm 10.26、Super 16 12.52、Super 35 24.89、65mm 52.63 对齐 SpektraLab 相机负片长边；35mm 36.0、IMAX 70.0 保留。
+3. **APP 版本**：INFO 引擎面板首行 `APP`；未发布版本显示 `内部测试（D078） · 0.1.0`，发布后隐藏测试号。

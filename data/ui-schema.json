@@ -239,7 +239,7 @@
       "label": { "zh": "画幅宽度", "en": "Frame width" },
       "type": "number",
       "default": 36.0,
-      "range": [8.0, 70.0, 0.1],
+      "range": [5.0, 70.0, 0.1],
       "unit": "mm",
       "appliesTo": ["bake", "preview", "render"],
       "cli": { "flag": "--frame-width-mm", "style": "value" },
