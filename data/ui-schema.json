@@ -238,12 +238,16 @@
       "group": "texture",
       "label": { "zh": "画幅宽度", "en": "Frame width" },
       "type": "number",
-      "default": 36.0,
+      "default": 21.95,
       "range": [5.0, 70.0, 0.1],
       "unit": "mm",
       "appliesTo": ["bake", "preview", "render"],
       "cli": { "flag": "--frame-width-mm", "style": "value" },
-      "visibleWhen": "spreadModel == physical"
+      "visibleWhen": "spreadModel == physical",
+      "notes": {
+        "zh": "Super 8 5.79 / 16mm 10.26 / Super 16 12.52 / 35mm 电影 21.95 / 135 全画幅 36.0 / Super 35 24.89 / 65mm 52.63 / IMAX 70.0",
+        "en": "Super 8 5.79 / 16mm 10.26 / Super 16 12.52 / 35mm Academy 21.95 / 135 full frame 36.0 / Super 35 24.89 / 65mm 52.63 / IMAX 70.0"
+      }
     },
     {
       "id": "halationSpread",

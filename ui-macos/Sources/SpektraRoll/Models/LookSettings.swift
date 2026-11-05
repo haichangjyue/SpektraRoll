@@ -146,6 +146,7 @@ enum FrameGauge: String, CaseIterable, Codable, Identifiable {
     case mm16
     case super16
     case mm35
+    case fullFrame135
     case super35
     case mm65
     case imax
@@ -157,7 +158,8 @@ enum FrameGauge: String, CaseIterable, Codable, Identifiable {
         case .super8: return "Super 8"
         case .mm16: return "16mm"
         case .super16: return "Super 16"
-        case .mm35: return "35mm"
+        case .mm35: return "35mm 电影（Academy）"
+        case .fullFrame135: return "135 全画幅"
         case .super35: return "Super 35"
         case .mm65: return "65mm"
         case .imax: return "IMAX"
@@ -166,13 +168,15 @@ enum FrameGauge: String, CaseIterable, Codable, Identifiable {
 
     /// Camera-negative long side, matching SpektraLab's `FilmFrame` data
     /// (Super 8 5.79, 16mm 10.26, Super 16 12.52, Super 35 24.89, 65mm 52.63).
-    /// 35mm keeps the 36 mm full-frame/135 width and IMAX the 70 mm width.
+    /// D082: strict 35mm movie Academy is 21.95 mm; 135 still full frame is a
+    /// separate 36 mm entry. IMAX keeps the 70 mm width.
     var widthMM: Double {
         switch self {
         case .super8: return 5.79
         case .mm16: return 10.26
         case .super16: return 12.52
-        case .mm35: return 36.0
+        case .mm35: return 21.95
+        case .fullFrame135: return 36.0
         case .super35: return 24.89
         case .mm65: return 52.63
         case .imax: return 70.0
@@ -183,6 +187,8 @@ enum FrameGauge: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .super8, .mm16, .super16, .mm35, .super35, .mm65, .imax:
             return true
+        case .fullFrame135:
+            return false
         }
     }
 
@@ -204,6 +210,11 @@ struct LookSettings: Codable, Equatable {
     var paperID: String = "kodak_portra_endura"
     var scan: ScanMode = .negative
     var frameGauge: FrameGauge = .mm35
+    // D082: trims on top of the database's neutral enlarger pack. The render
+    // path sends them as --filter-offset C,M,Y.
+    var filterCOffset: Double = 0
+    var filterMOffset: Double = 0
+    var filterYOffset: Double = 0
     var exposure: Double = 0.7
     var contrast: Double = 1.15
     var couplers: Bool = false
@@ -228,6 +239,51 @@ struct LookSettings: Codable, Equatable {
     var segment: Double = 0
     var jobs: Int = 0
     var resume: Bool = false
+
+    init() {}
+
+    /// D082: decode every field with a fallback so a state.json written by an
+    /// older build (before the filter trims or the 135 frame gauge) still
+    /// loads instead of silently dropping the whole library and settings.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        engine = try c.decodeIfPresent(RenderEngine.self, forKey: .engine) ?? .lut
+        input = try c.decodeIfPresent(InputTransform.self, forKey: .input) ?? .sLog3
+        ocioEnabled = try c.decodeIfPresent(Bool.self, forKey: .ocioEnabled) ?? false
+        ocioInput = try c.decodeIfPresent(String.self, forKey: .ocioInput)
+            ?? "S-Log3 S-Gamut3.Cine"
+        filmID = try c.decodeIfPresent(String.self, forKey: .filmID) ?? "kodak_portra_400"
+        paperID = try c.decodeIfPresent(String.self, forKey: .paperID) ?? "kodak_portra_endura"
+        scan = try c.decodeIfPresent(ScanMode.self, forKey: .scan) ?? .negative
+        frameGauge = try c.decodeIfPresent(FrameGauge.self, forKey: .frameGauge) ?? .mm35
+        filterCOffset = try c.decodeIfPresent(Double.self, forKey: .filterCOffset) ?? 0
+        filterMOffset = try c.decodeIfPresent(Double.self, forKey: .filterMOffset) ?? 0
+        filterYOffset = try c.decodeIfPresent(Double.self, forKey: .filterYOffset) ?? 0
+        exposure = try c.decodeIfPresent(Double.self, forKey: .exposure) ?? 0.7
+        contrast = try c.decodeIfPresent(Double.self, forKey: .contrast) ?? 1.15
+        couplers = try c.decodeIfPresent(Bool.self, forKey: .couplers) ?? false
+        gamut = try c.decodeIfPresent(Bool.self, forKey: .gamut) ?? true
+        grain = try c.decodeIfPresent(Double.self, forKey: .grain) ?? 0.4
+        grainRate = try c.decodeIfPresent(Int.self, forKey: .grainRate) ?? 3
+        halation = try c.decodeIfPresent(Double.self, forKey: .halation) ?? 0.45
+        antiHalation = try c.decodeIfPresent(Bool.self, forKey: .antiHalation) ?? false
+        glare = try c.decodeIfPresent(Double.self, forKey: .glare) ?? 0.2
+        diffusion = try c.decodeIfPresent(Double.self, forKey: .diffusion) ?? 0.1
+        spreadModel = try c.decodeIfPresent(SpreadModel.self, forKey: .spreadModel) ?? .physical
+        textureEngine = try c.decodeIfPresent(TextureEngine.self, forKey: .textureEngine) ?? .auto
+        trc = try c.decodeIfPresent(TransferFunction.self, forKey: .trc) ?? .srgb
+        codec = try c.decodeIfPresent(VideoCodec.self, forKey: .codec) ?? .h264
+        crf = try c.decodeIfPresent(Int.self, forKey: .crf) ?? 16
+        preset = try c.decodeIfPresent(String.self, forKey: .preset) ?? "medium"
+        interp = try c.decodeIfPresent(LutInterpolation.self, forKey: .interp) ?? .tetra
+        strength = try c.decodeIfPresent(Double.self, forKey: .strength) ?? 1.0
+        threads = try c.decodeIfPresent(Int.self, forKey: .threads) ?? 0
+        start = try c.decodeIfPresent(Double.self, forKey: .start) ?? 0
+        frames = try c.decodeIfPresent(Int.self, forKey: .frames)
+        segment = try c.decodeIfPresent(Double.self, forKey: .segment) ?? 0
+        jobs = try c.decodeIfPresent(Int.self, forKey: .jobs) ?? 0
+        resume = try c.decodeIfPresent(Bool.self, forKey: .resume) ?? false
+    }
 
     /// v1: the engine has no separate anti-halation parameter. Turning the
     /// layer on scales halation down; this is a UI-level approximation until a

@@ -166,6 +166,27 @@ final class EngineClient: @unchecked Sendable {
         }
     }
 
+    /// D082: the neutral C/M/Y pack the render path starts from.
+    func solveFilterPack(filmPath: URL, paperPath: URL?) async throws -> FilterSolve {
+        var args = ["solve", "--filter-pack", "--json", "--film", filmPath.path]
+        if let paperPath {
+            args += ["--paper", paperPath.path]
+        }
+        if let filtersURL {
+            args += ["--filters", filtersURL.path]
+        }
+        let result = try await run(args)
+        guard result.status == 0 else { throw EngineError.commandFailed(result.stderr) }
+        guard let data = result.stdout.data(using: .utf8) else {
+            throw EngineError.decoding("empty solve output")
+        }
+        do {
+            return try JSONDecoder().decode(FilterSolve.self, from: data)
+        } catch {
+            throw EngineError.decoding("solve: \(error.localizedDescription)")
+        }
+    }
+
     func ocioInfo(config: URL) async throws -> OcioInfo {
         let result = try await run(["ocio-info", "--json", "--ocio-config", config.path])
         guard result.status == 0 else { throw EngineError.commandFailed(result.stderr) }

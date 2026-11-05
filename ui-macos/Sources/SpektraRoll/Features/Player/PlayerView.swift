@@ -31,6 +31,10 @@ struct PlayerView: View {
     @State private var fitScale: CGFloat = 1
     @State private var fittedSize = CGSize(width: 1, height: 1)
     @State private var availableSize = CGSize(width: 1, height: 1)
+    // D082: timeline scrubbing. The player is paused during the drag so the
+    // still preview does not chase every intermediate frame.
+    @State private var isScrubbing = false
+    @State private var resumeAfterScrub = false
 
     var body: some View {
         ZStack {
@@ -60,6 +64,7 @@ struct PlayerView: View {
         .onAppear {
             loadCurrentAsset()
             scheduleDebugAutoPlay()
+            scheduleDebugSeek()
         }
         .onChange(of: app.selectedAssetID) { _, _ in
             resetZoom()
@@ -75,7 +80,7 @@ struct PlayerView: View {
                 }
                 return
             }
-            guard !player.isSwitchingSource else { return }
+            guard !player.isSwitchingSource, !isScrubbing else { return }
             if app.showFilmPreview {
                 app.refreshFilmPreview(at: player.currentTime)
             } else {
@@ -162,6 +167,19 @@ struct PlayerView: View {
             if !player.isPlaying {
                 player.toggle()
             }
+        }
+    }
+
+    /// Debug-only: `SPEKTRA_SEEK=<seconds>` pauses and renders that frame, so a
+    /// remote acceptance run can verify timeline scrubbing without input.
+    private func scheduleDebugSeek() {
+        guard let raw = ProcessInfo.processInfo.environment["SPEKTRA_SEEK"],
+              let seconds = Double(raw) else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            player.pause()
+            player.seek(to: seconds)
+            refreshStill(at: seconds)
         }
     }
 
@@ -363,9 +381,103 @@ struct PlayerView: View {
                     .padding(.bottom, 10)
             }
 
+            timeline(for: asset)
+                .padding(.horizontal, 26)
+                .padding(.bottom, 8)
+
             playerControls
                 .padding(.horizontal, 26)
                 .padding(.bottom, 18)
+        }
+    }
+
+    // MARK: - Timeline (D082)
+
+    private func timeline(for asset: MediaAsset) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                stepFrame(-1, asset: asset)
+            } label: {
+                Image(systemName: "backward.frame.fill")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(CompactPillButtonStyle())
+            .help("上一帧")
+
+            Slider(
+                value: Binding(
+                    get: { player.currentTime },
+                    set: { player.seek(to: $0) }
+                ),
+                in: 0...max(player.duration, 0.001),
+                onEditingChanged: { editing in
+                    if editing {
+                        isScrubbing = true
+                        resumeAfterScrub = player.isPlaying
+                        if player.isPlaying {
+                            player.pause()
+                        }
+                    } else {
+                        isScrubbing = false
+                        if resumeAfterScrub {
+                            resumeAfterScrub = false
+                            player.toggle()
+                        } else {
+                            refreshStill(at: player.currentTime)
+                        }
+                    }
+                }
+            )
+            .tint(Theme.primary)
+            .controlSize(.small)
+
+            Button {
+                stepFrame(1, asset: asset)
+            } label: {
+                Image(systemName: "forward.frame.fill")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(CompactPillButtonStyle())
+            .help("下一帧")
+
+            Text(frameText(for: asset))
+                .font(Theme.micro)
+                .monospacedDigit()
+                .foregroundStyle(Theme.textDim)
+                .frame(width: 86, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Theme.backgroundElevated.opacity(0.94))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func frameText(for asset: MediaAsset) -> String {
+        let frame = player.frameNumber(fps: asset.fps)
+        if asset.frames > 0 {
+            return "帧 \(frame) / \(asset.frames)"
+        }
+        return "帧 \(frame)"
+    }
+
+    private func stepFrame(_ delta: Int, asset: MediaAsset) {
+        guard asset.fps > 0 else { return }
+        player.pause()
+        player.stepFrame(delta, fps: asset.fps)
+        refreshStill(at: player.currentTime)
+    }
+
+    private func refreshStill(at seconds: Double) {
+        if app.showFilmPreview {
+            app.refreshFilmPreview(at: seconds)
+        } else {
+            app.refreshSourcePreview(at: seconds)
         }
     }
 

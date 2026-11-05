@@ -44,6 +44,50 @@ struct PrintTab: View {
                 .pickerStyle(.segmented)
             }
 
+            if app.settings.scan != .slide {
+                SectionTitle("放大机滤色片")
+                Panel {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 6) {
+                            Text("中性值（数据库）")
+                                .font(Theme.caption)
+                                .foregroundStyle(Theme.textMuted)
+                            Spacer(minLength: 4)
+                            if let neutral = app.neutralFilters?.filters {
+                                Text(String(format: "C %.1f  M %.1f  Y %.1f",
+                                            neutral.c, neutral.m, neutral.y))
+                                    .font(Theme.micro)
+                                    .monospacedDigit()
+                                    .foregroundStyle(Theme.text)
+                            } else {
+                                Text("—")
+                                    .font(Theme.micro)
+                                    .foregroundStyle(Theme.textDim)
+                            }
+                        }
+
+                        SliderRow(label: "C 偏移", value: $app.settings.filterCOffset,
+                                  range: -20...20, step: 0.1, format: "%+.1f")
+                        SliderRow(label: "M 偏移", value: $app.settings.filterMOffset,
+                                  range: -20...20, step: 0.1, format: "%+.1f")
+                        SliderRow(label: "Y 偏移", value: $app.settings.filterYOffset,
+                                  range: -20...20, step: 0.1, format: "%+.1f")
+
+                        HStack(spacing: 8) {
+                            Text("偏移叠加在数据库中性值上；0 = 中性。")
+                                .font(Theme.micro)
+                                .foregroundStyle(Theme.textDim)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 4)
+                            Button("重置") {
+                                app.resetFilterOffsets()
+                            }
+                            .buttonStyle(CompactPillButtonStyle())
+                        }
+                    }
+                }
+            }
+
             Panel {
                 VStack(alignment: .leading, spacing: 13) {
                     SliderRow(label: "反差", value: $app.settings.contrast,

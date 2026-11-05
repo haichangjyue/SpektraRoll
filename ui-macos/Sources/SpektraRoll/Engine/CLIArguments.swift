@@ -22,6 +22,10 @@ extension LookSettings {
         return ["--input", input.rawValue]
     }
 
+    var hasFilterOffset: Bool {
+        abs(filterCOffset) > 0.0001 || abs(filterMOffset) > 0.0001 || abs(filterYOffset) > 0.0001
+    }
+
     func filmArguments(filmPath: URL, paperPath: URL?, filterPath: URL?) -> [String] {
         var args = ["--film", filmPath.path]
         if scan != .slide, let paperPath {
@@ -29,6 +33,12 @@ extension LookSettings {
         }
         if let filterPath {
             args += ["--filters", filterPath.path]
+        }
+        if hasFilterOffset {
+            args += [
+                "--filter-offset",
+                "\(Self.number(filterCOffset)),\(Self.number(filterMOffset)),\(Self.number(filterYOffset))"
+            ]
         }
         args += ["--scan", scan.rawValue]
         return args
@@ -68,7 +78,8 @@ extension LookSettings {
             Self.number(exposure), Self.number(contrast),
             couplers ? "couplers" : "nocouplers",
             gamut ? "oklch" : "gamutoff",
-            trc.rawValue
+            trc.rawValue,
+            Self.number(filterCOffset), Self.number(filterMOffset), Self.number(filterYOffset)
         ].joined(separator: "|").fnv1aHex
     }
 
@@ -83,13 +94,13 @@ extension LookSettings {
         }
     }
 
-    /// Stable key for the playback film proxy. Everything that changes the
-    /// look or the spatial chain is included; output codec/range is not.
+    /// Stable key for the playback film proxy. D082 proxies always use the LUT
+    /// engine at reduced resolution, so the selected spectral engine and the
+    /// texture backend are deliberately not part of the key: switching between
+    /// spectral CPU/GPU reuses the same proxy instead of re-rendering it.
     var proxyLookKey: String {
         [
             bakeCacheKey,
-            engine.rawValue,
-            textureEngine.rawValue,
             interp.rawValue,
             Self.number(grain),
             "\(grainRate)",

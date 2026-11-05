@@ -103,6 +103,19 @@ struct OcioInfo: Codable {
     let displays: [Display]
 }
 
+struct FilterPack: Codable, Equatable {
+    let c: Double
+    let m: Double
+    let y: Double
+}
+
+struct FilterSolve: Codable {
+    let film: String
+    let paper: String
+    let stock: String
+    let filters: FilterPack
+}
+
 struct RenderEvent: Decodable {
     let event: String
     let frame: Int?

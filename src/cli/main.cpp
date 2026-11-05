@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 SpektraRoll contributors
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -85,7 +86,8 @@ void printUsage() {
         "\n"
         "  spektra-roll-cli video --lut <file.cube> --in <clip> --out <clip>\n"
         "                         [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|<camera log>]\n"
-        "                         [--film <json>] [--paper <json>]\n"
+        "                         [--film <json>] [--paper <json>] [--filters <json>]\n"
+        "                         [--cc C,M,Y | --filter-offset C,M,Y]\n"
         "                         [--trc srgb|pq|hlg] [--in-matrix auto|bt2020|bt709]\n"
         "                         [--start 0] [--frames N | --duration T]\n"
         "                         [--codec hevc|h264|prores]\n"
@@ -148,7 +150,8 @@ void printUsage() {
         "      Write a synthetic LUT (demo and smoke test, not a film model).\n"
         "\n"
         "  spektra-roll-cli lut bake --out <file.cube> [--film <json>] [--paper <json>]\n"
-        "                            [--filters <json>] [--cc C,M,Y] [--size 33]\n"
+        "                            [--filters <json>] [--cc C,M,Y |\n"
+        "                             --filter-offset C,M,Y] [--size 33]\n"
         "                            [--input srgb|apple-log|<camera log>] [--exposure EV]\n"
         "                            [--scan print|negative|slide] [--contrast 1.15]\n"
         "                            [--gamut oklch|off] [--couplers on|off]\n"
@@ -197,12 +200,16 @@ void printUsage() {
         "      2383/2393 print is viewed under K75P automatically (D065):\n"
         "        lut bake --film data/profiles/kodak_vision3_500t.json \\\n"
         "                 --paper data/profiles/kodak_2383.json --scan print\n"
+        "      --filter-offset C,M,Y trims the database's neutral enlarger pack\n"
+        "      (for example --filter-offset 0,2,-3); --cc C,M,Y replaces the\n"
+        "      whole pack instead (D082).\n"
         "      --hdr pq writes ST 2084 code values with the image's white at\n"
         "      --peak nits; --hdr hlg writes BT.2100 HLG instead.\n"
         "\n"
         "  spektra-roll-cli lut apply --lut <file.cube> --in <image> --out <image>\n"
         "                             [--engine lut|spectral|spectral-gpu] [--input srgb|apple-log|<camera log>]\n"
-        "                             [--film <json>] [--paper <json>]\n"
+        "                             [--film <json>] [--paper <json>] [--filters <json>]\n"
+        "                             [--cc C,M,Y | --filter-offset C,M,Y]\n"
         "                             [--interp tetra|tri] [--strength 0..1] [--bits 8|16]\n"
         "                             [--grain 0..1] [--halation 0..1]\n"
         "                             [--grain-rate 3] [--glare 0..1] [--diffusion 0..1]\n"
@@ -258,6 +265,12 @@ void printUsage() {
         "      Report the GPU backend, every device it can see, and whether the\n"
         "      spectral and texture GPU chains are available. Use this when a\n"
         "      render unexpectedly falls back to the CPU.\n"
+        "\n"
+        "  spektra-roll-cli solve --filter-pack [--film <json>] [--paper <json>]\n"
+        "                          [--filters <json>] [--json]\n"
+        "      Solve the neutral enlarger filter pack for a film/paper pair (D082).\n"
+        "      The UI shows these database C/M/Y values next to its trim sliders;\n"
+        "      render paths add the trims with --filter-offset C,M,Y.\n"
         "\n"
         "  spektra-roll-cli ocio-info [--ocio-config <file.ocio>] [--ocio-linear <name>]\n"
         "                           [--json]\n"
@@ -598,6 +611,17 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
     if (!sr::loadProfile(filmPath, recipe.film, error)) return false;
     if (!sr::loadProfile(paperPath, recipe.paper, error)) return false;
 
+    std::array<double, 3> filterOffset{};
+    const bool hasFilterOffset = args.has("filter-offset");
+    if (hasFilterOffset && args.has("cc")) {
+        error = "--cc and --filter-offset are mutually exclusive";
+        return false;
+    }
+    if (hasFilterOffset &&
+        !parseTriple(args.get("filter-offset"), filterOffset)) {
+        error = "--filter-offset expects three numbers, e.g. --filter-offset 0,2,-3";
+        return false;
+    }
     if (args.has("cc")) {
         if (!parseTriple(args.get("cc"), recipe.filters)) {
             error = "--cc expects three numbers, e.g. --cc 0,51.57,52.53";
@@ -608,6 +632,10 @@ bool configureFilmRecipe(const Args& args, FilmRecipe& recipe, std::string& erro
                                        error)) {
         error += " (pass --cc C,M,Y to override)";
         return false;
+    } else if (hasFilterOffset) {
+        // D082: trims are relative to the database's neutral pack, matching
+        // SpektraLab's Y/M enlarger offsets.
+        for (int c = 0; c < 3; ++c) recipe.filters[c] += filterOffset[c];
     }
 
     if (args.has("input")) {
@@ -803,9 +831,10 @@ int cmdCapabilities(const Args& args) {
                             "c-log3",   "v-log",     "logc3",  "logc4",
                             "bmd-film", "davinci"};
     const char* commands[] = {"version",   "capabilities", "catalog",   "gen",
-                              "convert",   "video",        "preview",   "ocio-info",
-                              "red-info",  "red-decode",   "gpu-info",  "lut info",
-                              "lut gen",   "lut bake",     "lut apply", "lut compare"};
+                              "convert",   "solve",        "video",     "preview",
+                              "ocio-info", "red-info",     "red-decode", "gpu-info",
+                              "lut info",  "lut gen",      "lut bake",  "lut apply",
+                              "lut compare"};
     const char* previewCommands[] = {"hello", "look", "open", "backend",
                                      "texture", "frame", "raw", "quit"};
 
@@ -1041,6 +1070,38 @@ int cmdCatalog(const Args& args) {
     std::printf("papers:\n");
     for (const auto& paper : papers) {
         std::printf("  [%s] %s\n", paper.printFilm ? "print" : "paper", paper.name.c_str());
+    }
+    return 0;
+}
+
+// D082: expose the neutral enlarger filter pack as a standalone solve step.
+// The UI uses it to show the database values next to the Y/M trim sliders.
+int cmdSolve(const Args& args) {
+    if (!args.has("filter-pack")) {
+        return fail("solve currently supports --filter-pack (neutral C/M/Y from the database)");
+    }
+    const std::string filmPath = args.get("film", kDefaultFilm);
+    const std::string paperPath = args.get("paper", kDefaultPaper);
+    const std::string filtersPath = args.get("filters", kDefaultFilters);
+    sr::Profile film;
+    sr::Profile paper;
+    std::string error;
+    if (!sr::loadProfile(filmPath, film, error)) return fail(error);
+    if (!sr::loadProfile(paperPath, paper, error)) return fail(error);
+    std::array<double, 3> filters{};
+    if (!sr::loadNeutralFilters(filtersPath, paper.info.stock, film.info.stock, "TH-KG3", filters,
+                                error)) {
+        return fail(error);
+    }
+    if (args.has("json")) {
+        std::printf("{\"film\": %s, \"paper\": %s, \"stock\": %s, "
+                    "\"filters\": {\"c\": %.6f, \"m\": %.6f, \"y\": %.6f}}\n",
+                    jsonQuote(film.info.name).c_str(), jsonQuote(paper.info.name).c_str(),
+                    jsonQuote(film.info.stock).c_str(), filters[0], filters[1], filters[2]);
+    } else {
+        std::printf("film:    %s (%s)\n", film.info.name.c_str(), film.info.stock.c_str());
+        std::printf("paper:   %s (%s)\n", paper.info.name.c_str(), paper.info.stock.c_str());
+        std::printf("filters: C=%.3f M=%.3f Y=%.3f\n", filters[0], filters[1], filters[2]);
     }
     return 0;
 }
@@ -3952,6 +4013,7 @@ int main(int argc, char** argv) {
     }
     if (command == "capabilities") return cmdCapabilities(args);
     if (command == "catalog") return cmdCatalog(args);
+    if (command == "solve") return cmdSolve(args);
     if (command == "gen") return cmdGen(args);
     if (command == "convert") return cmdConvert(args);
     if (command == "video") return cmdVideo(args);

@@ -201,6 +201,18 @@ final class PlayerController: ObservableObject {
         currentTime = clamped
     }
 
+    /// D082: one-frame step for the timeline. The caller supplies the clip fps
+    /// because the player itself has no frame-rate metadata.
+    func stepFrame(_ delta: Int, fps: Double) {
+        guard fps > 0 else { return }
+        seek(to: currentTime + Double(delta) / fps)
+    }
+
+    func frameNumber(fps: Double) -> Int {
+        guard fps > 0 else { return 0 }
+        return max(0, Int((currentTime * fps).rounded()))
+    }
+
     var timeText: String {
         Self.format(currentTime) + " / " + Self.format(duration)
     }

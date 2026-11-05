@@ -74,12 +74,19 @@ final class AppState: ObservableObject {
     @Published var outputDirectory: URL
     @Published var outputName = "grade"
 
+    // D082: neutral filter pack and render queue.
+    @Published var neutralFilters: FilterSolve?
+    @Published var renderJobs: [RenderJob] = []
+    @Published var isQueueRunning = false
+
     private let proxyEngine = EngineClient()
     private var proxyTask: Task<Void, Never>?
     private var proxyTaskKey: String?
     private var pendingProxy: ProxyRequest?
     private var proxyDebounceTask: Task<Void, Never>?
     private var proxyGeneration = 0
+    private var queueTask: Task<Void, Never>?
+    private var activeJobID: UUID?
 
     private var didBootstrap = false
     private var previewTask: Task<Void, Never>?
@@ -157,6 +164,7 @@ final class AppState: ObservableObject {
                 settings.ocioEnabled = false
             }
             normalizeSelection()
+            refreshNeutralFilters()
             if ProcessInfo.processInfo.environment["SPEKTRA_OCIO"] == "1",
                ocioInfo != nil {
                 settings.ocioEnabled = true
@@ -315,6 +323,7 @@ final class AppState: ObservableObject {
             settings.contrast = settings.scan == .negative ? 1.15 : 1.0
         }
         settings.gamut = settings.scan == .negative
+        refreshNeutralFilters()
         save()
     }
 
@@ -325,6 +334,7 @@ final class AppState: ObservableObject {
             settings.contrast = 1.0
             settings.gamut = false
         }
+        refreshNeutralFilters()
         save()
     }
 
@@ -335,6 +345,37 @@ final class AppState: ObservableObject {
         settings.scan = mode
         settings.contrast = mode == .negative ? 1.15 : 1.0
         settings.gamut = mode == .negative
+        refreshNeutralFilters()
+        save()
+    }
+
+    /// D082: ask the CLI for the database neutral C/M/Y values so the PRINT tab
+    /// can show them next to the trim offsets.
+    func refreshNeutralFilters() {
+        guard settings.scan != .slide,
+              let film = filmStock,
+              let paper = paperStock else {
+            neutralFilters = nil
+            return
+        }
+        let filmURL = URL(fileURLWithPath: film.path)
+        let paperURL = URL(fileURLWithPath: paper.path)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let solve = try await self.engine.solveFilterPack(filmPath: filmURL,
+                                                                  paperPath: paperURL)
+                self.neutralFilters = solve
+            } catch {
+                self.neutralFilters = nil
+            }
+        }
+    }
+
+    func resetFilterOffsets() {
+        settings.filterCOffset = 0
+        settings.filterMOffset = 0
+        settings.filterYOffset = 0
         save()
     }
 
@@ -358,6 +399,10 @@ final class AppState: ObservableObject {
     }
 
     func render() {
+        guard !isQueueRunning else {
+            errorMessage = "渲染队列正在运行；先停止队列或把这条加入队列。"
+            return
+        }
         guard let asset = selectedAsset else {
             errorMessage = "先在左侧选择一个素材。"
             return
@@ -369,9 +414,8 @@ final class AppState: ObservableObject {
         }
         cancelProxyGeneration()
         let paper = catalog.papers.first { $0.id == settings.paperID }
-        let filmURL = URL(fileURLWithPath: film.path)
-        let paperURL = paper.map { URL(fileURLWithPath: $0.path) }
         let output = makeOutputURL(for: asset)
+        let snapshot = settings
 
         isRendering = true
         renderProgress = 0
@@ -384,29 +428,16 @@ final class AppState: ObservableObject {
                     at: output.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
-                var lut: URL?
-                if settings.engine == .lut {
-                    renderStatus = "烘焙 LUT…"
-                    lut = try await engine.ensureLUT(
-                        settings: settings,
-                        filmPath: filmURL,
-                        paperPath: paperURL,
-                        ocioConfig: engine.ocioConfigURL
-                    )
-                }
-                renderStatus = "渲染中…"
-                let result = try await engine.render(
-                    settings: settings,
+                let result = try await renderOutput(
+                    settings: snapshot,
                     asset: asset,
-                    filmPath: filmURL,
-                    paperPath: paperURL,
-                    ocioConfig: engine.ocioConfigURL,
-                    lutPath: lut,
+                    filmURL: URL(fileURLWithPath: film.path),
+                    paperURL: paper.map { URL(fileURLWithPath: $0.path) },
                     output: output
-                ) { line in
-                    Task { @MainActor in
-                        self.consume(line)
-                    }
+                ) { phase in
+                    self.renderStatus = phase
+                } onLine: { line in
+                    self.consume(line)
                 }
                 isRendering = false
                 if result.status == 0 {
@@ -426,9 +457,235 @@ final class AppState: ObservableObject {
     }
 
     func cancelRender() {
+        if isQueueRunning {
+            stopRenderQueue()
+            return
+        }
         engine.cancel()
         isRendering = false
         renderStatus = "已取消"
+    }
+
+    /// Shared by the immediate render and the queue. The settings snapshot
+    /// decides the materials, so a queued job is immune to later edits.
+    private func renderOutput(settings: LookSettings, asset: MediaAsset, filmURL: URL,
+                              paperURL: URL?, output: URL,
+                              onPhase: @escaping (String) -> Void,
+                              onLine: @escaping (String) -> Void) async throws -> ProcessResult {
+        var lut: URL?
+        if settings.engine == .lut {
+            onPhase("烘焙 LUT…")
+            lut = try await engine.ensureLUT(
+                settings: settings,
+                filmPath: filmURL,
+                paperPath: paperURL,
+                ocioConfig: engine.ocioConfigURL
+            )
+        }
+        onPhase("渲染中…")
+        return try await engine.render(
+            settings: settings,
+            asset: asset,
+            filmPath: filmURL,
+            paperPath: paperURL,
+            ocioConfig: engine.ocioConfigURL,
+            lutPath: lut,
+            output: output,
+            onLine: onLine
+        )
+    }
+
+    // MARK: - Render queue (D082)
+
+    func enqueueRender() {
+        guard let asset = selectedAsset else {
+            errorMessage = "先在左侧选择一个素材。"
+            return
+        }
+        guard catalogueReady else {
+            errorMessage = "片库还没加载完成。"
+            return
+        }
+        let reserved = Set(renderJobs.map(\.outputPath))
+        let output = makeOutputURL(for: asset, reserved: reserved)
+        renderJobs.append(RenderJob(asset: asset, settings: settings, output: output))
+        save()
+        statusMessage = "已加入队列：\(asset.displayName)"
+    }
+
+    func removeRenderJob(_ id: UUID) {
+        guard id != activeJobID else { return }
+        renderJobs.removeAll { $0.id == id }
+        save()
+    }
+
+    func clearFinishedRenderJobs() {
+        renderJobs.removeAll { $0.status == .done || $0.status == .failed || $0.status == .canceled }
+        save()
+    }
+
+    func startRenderQueue() {
+        guard !isQueueRunning else { return }
+        guard !isRendering else {
+            errorMessage = "正在渲染；先等当前任务完成。"
+            return
+        }
+        guard renderJobs.contains(where: { $0.status == .waiting }) else {
+            statusMessage = "队列里没有等待中的任务"
+            return
+        }
+        isQueueRunning = true
+        queueTask = Task { [weak self] in
+            await self?.runRenderQueue()
+        }
+    }
+
+    func stopRenderQueue() {
+        queueTask?.cancel()
+        queueTask = nil
+        engine.cancel()
+        if let id = activeJobID, let index = renderJobs.firstIndex(where: { $0.id == id }) {
+            renderJobs[index].status = .canceled
+            renderJobs[index].message = "已取消"
+        }
+        activeJobID = nil
+        isQueueRunning = false
+        isRendering = false
+        renderStatus = "队列已停止"
+        save()
+    }
+
+    private func runRenderQueue() async {
+        while !Task.isCancelled {
+            guard let index = renderJobs.firstIndex(where: { $0.status == .waiting }) else {
+                break
+            }
+            let job = renderJobs[index]
+            guard let asset = assets.first(where: { $0.id == job.assetID })
+                    ?? assets.first(where: { $0.path == job.assetPath }) else {
+                renderJobs[index].status = .failed
+                renderJobs[index].message = "素材已从片库移除"
+                save()
+                continue
+            }
+            activeJobID = job.id
+            renderJobs[index].status = .running
+            renderJobs[index].progress = 0
+            renderJobs[index].message = "准备…"
+            isRendering = true
+            renderProgress = 0
+            renderLog = []
+            renderStatus = "队列：\(job.assetName)"
+            save()
+
+            do {
+                guard let film = filmPath(for: job.settings) else {
+                    throw EngineError.commandFailed("片库里找不到这条任务的胶片。")
+                }
+                try FileManager.default.createDirectory(
+                    at: job.outputURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                let result = try await renderOutput(
+                    settings: job.settings,
+                    asset: asset,
+                    filmURL: URL(fileURLWithPath: film),
+                    paperURL: paperPath(for: job.settings).map { URL(fileURLWithPath: $0) },
+                    output: job.outputURL
+                ) { phase in
+                    self.updateJob(job.id) { current in
+                        current.message = phase
+                    }
+                    self.renderStatus = "队列：\(phase)"
+                } onLine: { line in
+                    self.consumeQueueLine(line, jobID: job.id)
+                }
+                if result.status == 0 {
+                    self.updateJob(job.id) { current in
+                        current.status = .done
+                        current.progress = 1
+                        current.message = "完成"
+                    }
+                    self.statusMessage = "队列完成：\(job.assetName)"
+                } else {
+                    self.updateJob(job.id) { current in
+                        current.status = .failed
+                        current.message = result.stderr.isEmpty ? "渲染失败" : result.stderr
+                    }
+                }
+            } catch {
+                if Task.isCancelled {
+                    self.updateJob(job.id) { current in
+                        current.status = .canceled
+                        current.message = "已取消"
+                    }
+                } else {
+                    self.updateJob(job.id) { current in
+                        current.status = .failed
+                        current.message = error.localizedDescription
+                    }
+                }
+            }
+            activeJobID = nil
+            isRendering = false
+            save()
+        }
+        isQueueRunning = false
+        queueTask = nil
+        if !renderJobs.contains(where: { $0.status == .waiting || $0.status == .running }) {
+            renderStatus = "队列完成"
+        }
+    }
+
+    private func updateJob(_ id: UUID, _ body: (inout RenderJob) -> Void) {
+        guard let index = renderJobs.firstIndex(where: { $0.id == id }) else { return }
+        body(&renderJobs[index])
+    }
+
+    private func consumeQueueLine(_ line: String, jobID: UUID) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        renderLog.append(trimmed)
+        if renderLog.count > 240 {
+            renderLog.removeFirst(renderLog.count - 240)
+        }
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let event = try? JSONDecoder().decode(RenderEvent.self, from: data) else {
+            return
+        }
+        switch event.event {
+        case "start":
+            updateJob(jobID) { job in
+                job.status = .running
+                job.message = "渲染中…"
+            }
+        case "progress":
+            let percent = event.percent ?? 0
+            let frame = event.frame ?? 0
+            let total = event.total ?? 0
+            updateJob(jobID) { job in
+                job.progress = max(0, min(1, percent / 100.0))
+                job.message = total > 0 ? "\(frame) / \(total) 帧" : "\(frame) 帧"
+            }
+            renderProgress = max(0, min(1, percent / 100.0))
+            renderStatus = total > 0 ? "队列：\(frame) / \(total) 帧" : "队列：\(frame) 帧"
+        case "done":
+            updateJob(jobID) { job in
+                job.progress = 1
+            }
+        default:
+            break
+        }
+    }
+
+    private func filmPath(for settings: LookSettings) -> String? {
+        catalog?.films.first { $0.id == settings.filmID }?.path
+    }
+
+    private func paperPath(for settings: LookSettings) -> String? {
+        guard settings.scan != .slide else { return nil }
+        return catalog?.papers.first { $0.id == settings.paperID }?.path
     }
 
     // MARK: - Film / display preview
@@ -661,7 +918,20 @@ final class AppState: ObservableObject {
 
     // MARK: - Playback proxies (D074 #3)
 
-    private var proxyMaxSide: Int { 960 }
+    /// D082: playback proxies always use the LUT engine, so the expensive
+    /// spectral chain is not re-run for a low-resolution preview. Long clips
+    /// also step down in resolution to keep the first-play wait bounded.
+    private func displayProxyMaxSide(for asset: MediaAsset) -> Int {
+        if asset.duration > 180 { return 540 }
+        if asset.duration > 60 { return 720 }
+        return 960
+    }
+
+    private func filmProxyMaxSide(for asset: MediaAsset) -> Int {
+        if asset.duration > 60 { return 360 }
+        if asset.duration > 20 { return 540 }
+        return 720
+    }
 
     var proxyCacheUsageText: String {
         let formatter = ByteCountFormatter()
@@ -691,7 +961,7 @@ final class AppState: ObservableObject {
             settings.input.rawValue,
             settings.ocioEnabled ? "ocio" : "builtin",
             settings.ocioInput,
-            "\(proxyMaxSide)"
+            "\(displayProxyMaxSide(for: asset))"
         ].joined(separator: "|").fnv1aHex
     }
 
@@ -701,12 +971,17 @@ final class AppState: ObservableObject {
             asset.path,
             fileStamp(asset.url),
             settings.proxyLookKey,
-            "\(proxyMaxSide)"
+            "\(filmProxyMaxSide(for: asset))"
         ].joined(separator: "|").fnv1aHex
     }
 
     private func proxySettings(from source: LookSettings) -> LookSettings {
         var proxy = source
+        // D082: a preview does not need the spectral chain. Baking the current
+        // look to a LUT once and rendering the proxy through the LUT engine is
+        // several times faster at the same visual result for 360–720 px.
+        proxy.engine = .lut
+        proxy.textureEngine = .auto
         proxy.codec = .h264
         proxy.trc = .srgb
         proxy.crf = 20
@@ -750,7 +1025,7 @@ final class AppState: ObservableObject {
             filmURL: nil,
             paperURL: nil,
             ocioConfig: engine.ocioConfigURL,
-            maxSide: proxyMaxSide
+            maxSide: displayProxyMaxSide(for: asset)
         ))
     }
 
@@ -778,7 +1053,7 @@ final class AppState: ObservableObject {
             filmURL: URL(fileURLWithPath: film.path),
             paperURL: paper.map { URL(fileURLWithPath: $0.path) },
             ocioConfig: engine.ocioConfigURL,
-            maxSide: proxyMaxSide
+            maxSide: filmProxyMaxSide(for: asset)
         ))
     }
 
@@ -826,7 +1101,9 @@ final class AppState: ObservableObject {
         isGeneratingProxy = true
         isGeneratingFilmProxy = !request.displayOnly
         proxyProgress = 0
-        proxyStatus = request.displayOnly ? "生成原片代理…" : "生成胶片代理…"
+        proxyStatus = request.displayOnly
+            ? "生成原片代理…"
+            : "生成胶片代理（LUT \(request.maxSide)px）…"
         try? FileManager.default.createDirectory(at: proxyCacheDirectory,
                                                  withIntermediateDirectories: true)
         proxyTask = Task { [weak self] in
@@ -1034,12 +1311,50 @@ final class AppState: ObservableObject {
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in
                 guard let self else { return }
+                self.cancelProxyGeneration()
+                let old = self.proxyCacheDirectory
+                let moved = self.migrateProxyCache(from: old, to: url)
                 self.proxyCacheDirectory = url
                 self.clearProxyState()
                 self.refreshProxyCacheUsage()
+                self.statusMessage = moved > 0 ? "已迁移 \(moved) 个代理" : "代理缓存目录已切换"
                 self.save()
             }
         }
+    }
+
+    /// D082: moving the cache folder now carries the existing proxies with it.
+    /// Only `.mov` / `.part.mov` files are touched; a cross-volume move falls
+    /// back to copy + delete.
+    private func migrateProxyCache(from old: URL, to new: URL) -> Int {
+        guard old.standardizedFileURL != new.standardizedFileURL else { return 0 }
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: new, withIntermediateDirectories: true)
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: old,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+        var moved = 0
+        for file in files where file.pathExtension.lowercased() == "mov" {
+            let destination = new.appendingPathComponent(file.lastPathComponent)
+            if fileManager.fileExists(atPath: destination.path) {
+                try? fileManager.removeItem(at: file)
+                continue
+            }
+            do {
+                try fileManager.moveItem(at: file, to: destination)
+                moved += 1
+            } catch {
+                if (try? fileManager.copyItem(at: file, to: destination)) != nil {
+                    try? fileManager.removeItem(at: file)
+                    moved += 1
+                }
+            }
+        }
+        return moved
     }
 
     func clearProxyCache() {
@@ -1073,6 +1388,7 @@ final class AppState: ObservableObject {
         var outputName: String
         var proxyCacheLimitGB: Double?
         var proxyCacheDirectory: String?
+        var renderJobs: [RenderJob]?
     }
 
     private var stateURL: URL {
@@ -1090,7 +1406,8 @@ final class AppState: ObservableObject {
             outputDirectory: outputDirectory.path,
             outputName: outputName,
             proxyCacheLimitGB: proxyCacheLimitGB,
-            proxyCacheDirectory: proxyCacheDirectory.path
+            proxyCacheDirectory: proxyCacheDirectory.path,
+            renderJobs: renderJobs
         )
         do {
             let directory = stateURL.deletingLastPathComponent()
@@ -1125,7 +1442,17 @@ final class AppState: ObservableObject {
         if let directory = state.proxyCacheDirectory, !directory.isEmpty {
             proxyCacheDirectory = URL(fileURLWithPath: directory, isDirectory: true)
         }
+        renderJobs = (state.renderJobs ?? []).map { job in
+            var restored = job
+            if restored.status == .running {
+                restored.status = .waiting
+                restored.progress = 0
+                restored.message = "上次退出时未完成"
+            }
+            return restored
+        }
         selectedAssetID = assets.first?.id
+        refreshNeutralFilters()
     }
 
     private func debugAutoImport(_ url: URL) async {
@@ -1223,14 +1550,15 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func makeOutputURL(for asset: MediaAsset) -> URL {
+    private func makeOutputURL(for asset: MediaAsset, reserved: Set<String> = []) -> URL {
         let typed = outputName.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = asset.url.deletingPathExtension().lastPathComponent + "-spektra"
         let raw = typed.isEmpty ? fallback : typed
         let stem = URL(fileURLWithPath: raw).deletingPathExtension().lastPathComponent
         var candidate = outputDirectory.appendingPathComponent(stem).appendingPathExtension("mov")
         var index = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
+        while FileManager.default.fileExists(atPath: candidate.path)
+                || reserved.contains(candidate.path) {
             candidate = outputDirectory
                 .appendingPathComponent("\(stem)-\(index)")
                 .appendingPathExtension("mov")
