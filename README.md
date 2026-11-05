@@ -127,7 +127,8 @@ drives the same `spektra-roll-cli` through the contracts in
 `docs/engine-api.md`; parameters come from `data/ui-schema.json`, design tokens
 from `design/tokens.json`, the spec is `docs/ui-design-macos.md`, and the feature
 matrix is `docs/ui-parity.md`. Playback uses cached 960 px display/film proxies
-(`video --display --max-side`, D076) so the film look can play back in real time.
+(`video --display --max-side`, D076) so the film look can play back in real time;
+ADVANCED can cap the proxy cache (5 GB by default) and choose its folder (D077).
 Build it with `scripts/build-macos-ui.sh` (see `ui-macos/README.md`).
 
 The **Windows Qt 6 shell** (D009) is frozen: bug fixes only until the macOS

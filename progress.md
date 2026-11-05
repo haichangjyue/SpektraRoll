@@ -2,17 +2,64 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D076：macOS UI v1.1 P1 播放代理已实现，CI 绿，待 Mac 播放验收）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 P0+P1 已实现（D075/D076），待 Mac 播放验收 + Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D077：代理缓存上限/自定义目录、生成胶片代理时暂停播放、进度胶囊移位、INFO 系统信息；Mac 已验收）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 P0+P1+D077 反馈已完成（D075–D077），待最终回归 + Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
 
-## 最新：D076 · macOS UI v1.1 P1（播放代理，2026-11-05 晚；代码完成、CI 绿，待 Mac 播放验收）
+## 最新：D077 · macOS UI v1.1 反馈（2026-11-05 晚；Mac 已验收）
 
-> D074 #3：播放时不再只显示 AVPlayer 的原始 Log 画面，也不再只有暂停时的单帧胶片效果。UI 会生成低分辨率 **显示代理** 和 **胶片代理**，按需切换 AVPlayer，并缓存到本地。CI run **142** Windows + macOS 双绿（含 `swift build`）；Mac 本机构建通过，显示代理已实际生成，但远程 SSH 在最后一次播放测试时不可达，播放切换还没做最终观感验收。
+> 产品负责人在 D076 播放代理上提出 4 点，已全部实现并在 Mac 上截图/日志验收。
+
+### 一、4 点反馈与实现
+
+| # | 反馈 | 实现 |
+|---|---|---|
+| 1 | 代理缓存体积上限 5 GB、ADVANCED 可填、可自定义目录、超限主动清理 | ADVANCED 新增「预览代理」：磁盘上限（默认 **5 GB**，0 = 不限制）、缓存位置（`NSOpenPanel` 选择，持久化）、当前占用、手动清理；每次生成后/启动时/改上限时清理最旧代理，保留正在播放的显示/胶片代理。 |
+| 2 | 生成胶片代理时不要播放视频 | 开始生成胶片代理时立即暂停播放，记住“用户想播放”；生成完成后自动切到胶片代理并继续播放。按空格可取消/恢复待播放。 |
+| 3 | 进度胶囊放到视频标题栏左下 | 从底部移到标题信息行下方、左对齐。 |
+| 4 | INFO 追加电脑配置（Mac/PC、系统、屏幕、CPU、GPU、RAM、存储、HDR、屏幕色彩空间） | INFO 底部新增 **Mac** 面板（`#if os(macOS)` 标题 Mac，否则 PC）；读取 `NSScreen` / Metal / `sysctl` / `FileManager`。 |
+
+顺手修掉：调试自动导入/重复导入同一路径会在片库里出现两个同名素材；现在按路径去重。
+
+### 二、关键文件
+
+- `AppState.swift`：代理上限/目录、按大小清理、`isGeneratingFilmProxy`、系统信息无关。
+- `PlayerController.swift`：`blockPlaybackForFilmProxy` / `unblockAfterFilmProxy`，暂停期间记住播放请求。
+- `PlayerView.swift`：生成胶片代理时拦截播放、进度胶囊位置、代理切换。
+- `AdvancedTab.swift`：预览代理设置。
+- `InfoTab.swift` + `Models/SystemProfile.swift`：Mac/PC 配置信息。
+- `Package.swift`：链接 Metal 框架。
+
+### 三、Mac 验收结果
+
+- INFO 截图：Mac 面板显示 macOS 14.7.5、Built-in Retina Display 2880×1800 2x、Apple M1 / Apple M1、8 GB、30.67 GB 可用 / 245.11 GB、HDR 开启（EDR 2.00x）、Display P3。
+- 播放日志：`block film proxy playing=true resume=true` → `switch film ... play=false` → `unblock film proxy play=true`；期间没有 `switch display`，确认生成时没有播放未上胶片的画面。
+- 进度胶囊：截图确认在标题行左下。
+- 缓存上限：临时放入 3 个 2 MB 假代理 + 2.3 MB 真实代理，限制设为 5 MB；启动后 3 个假代理全部被删，保留 2 个真实代理（4.6 MB）。
+- 片库去重：重启后只显示 1 个 `C0113.MP4`。
+
+### 四、调试开关（新增）
+
+- `SPEKTRA_PROXY_LIMIT_GB=<GB>`：本次启动临时覆盖缓存上限（测试用）。
+- `SPEKTRA_TAB=info|film|print|advanced|output`：启动时直接打开指定检查器 tab。
+- `SPEKTRA_AUTOPLAY=1` / `SPEKTRA_PLAYER_DEBUG=1`：见 D076。
+
+### 五、待做
+
+- 最终 CI 回归（代码提交后）。
+- 代理生成速度：4K50 6 秒素材、spectral-gpu 960 px 在 M1 上约 20–30 秒；可考虑 720 px 或 LUT 代理。
+- 缓存目录切换后旧目录文件不会自动迁移（只影响新代理）。
+
+---
+
+
+## 最新：D076 · macOS UI v1.1 P1（播放代理，2026-11-05 晚；已在 D077 验收）
+
+> D074 #3：播放时不再只显示 AVPlayer 的原始 Log 画面，也不再只有暂停时的单帧胶片效果。UI 会生成低分辨率 **显示代理** 和 **胶片代理**，按需切换 AVPlayer，并缓存到本地。CI run **142** Windows + macOS 双绿（含 `swift build`）；Mac 本机构建通过，显示代理/胶片代理生成与 `switch film` 已在 D077 播放日志中确认。
 
 ### 一、这次做了什么
 

@@ -49,6 +49,8 @@ open -F \
 | `SPEKTRA_AUTOPREVIEW=1` | 自动打开「胶片效果」渲染当前帧 |
 | `SPEKTRA_AUTOPLAY=1` | 启动 3.5 秒后自动播放（配合 `AUTOLOAD`/`AUTOPREVIEW` 测播放代理） |
 | `SPEKTRA_PLAYER_DEBUG=1` | 播放源切换写入 `/tmp/spektra-player.log`（original/display/film） |
+| `SPEKTRA_TAB=info|film|print|advanced|output` | 启动时直接打开指定检查器 tab |
+| `SPEKTRA_PROXY_LIMIT_GB=5` | 本次启动临时覆盖代理缓存上限（测试用） |
 | `SPEKTRA_AUTORENDER=1` | 自动渲染到 `~/Movies/SpektraRoll/spektra-debug-render*.mov` |
 
 调试日志：`/tmp/spektra-debug.log`。
@@ -89,6 +91,31 @@ launchctl unsetenv SPEKTRA_AUTOPREVIEW
 launchctl unsetenv SPEKTRA_AUTOPLAY
 launchctl unsetenv SPEKTRA_PLAYER_DEBUG
 ```
+
+## D077 验收（缓存上限 / 暂停播放 / 系统信息）
+
+**缓存上限**：在 `~/Library/Caches/SpektraRoll/preview-cache/` 放几个 2 MB 假 `.mov`，用
+
+```bash
+open -F --env SPEKTRA_PROXY_LIMIT_GB=0.005 --env SPEKTRA_TAB=advanced -n build-ui-macos/SpektraRoll.app
+```
+
+启动后旧假代理应被删除，ADVANCED 显示「当前占用 / 5 GB」。
+
+**生成代理不播放**：
+
+```bash
+open -F --env SPEKTRA_AUTOLOAD=/Users/wenyutao/Movies/C0113.MP4 \
+  --env SPEKTRA_AUTOPREVIEW=1 --env SPEKTRA_AUTOPLAY=1 \
+  --env SPEKTRA_PLAYER_DEBUG=1 -n build-ui-macos/SpektraRoll.app
+cat /tmp/spektra-player.log
+```
+
+应依次看到 `block film proxy` → `switch film ... play=false` → `unblock film proxy play=true`，生成期间不出现 `switch display`。
+
+**系统信息**：INFO 底部应出现「Mac」面板；用 `SPEKTRA_TAB=info` 截图检查。
+
+**缓存目录**：ADVANCED「预览代理」→「选择」改目录；新代理写入新目录，旧文件不迁移。
 
 ## 已验证
 
