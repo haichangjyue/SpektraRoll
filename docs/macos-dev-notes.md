@@ -53,6 +53,9 @@ open -F \
 | `SPEKTRA_TAB=info|film|print|advanced|output` | 启动时直接打开指定检查器 tab |
 | `SPEKTRA_PROXY_LIMIT_GB=5` | 本次启动临时覆盖代理缓存上限（测试用） |
 | `SPEKTRA_AUTORENDER=1` | 自动渲染到 `~/Movies/SpektraRoll/spektra-debug-render*.mov` |
+| `SPEKTRA_SEEK=<秒>` | 启动 4 秒后暂停并跳到该时间，刷新静帧（D082 时间线验收） |
+| `SPEKTRA_QUEUE_SELFTEST=1` | 自动入队 2 条小任务并运行队列，结果写 `/tmp/spektra-queue.log`（D082） |
+| `SPEKTRA_PROXY_DIR=<path>` | 启动时把代理缓存迁移到该目录并持久化（D082 缓存迁移测试） |
 
 调试日志：`/tmp/spektra-debug.log`。
 
@@ -163,6 +166,7 @@ otool -L build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli | grep
 - **OCIO 已可用（D080）**：静态 OCIO 2.6.0 前缀（`~/Documents/ocio-2.6.0-static`），`scripts/build-ocio-macos.sh` 可重建；bundle 的 CLI `ocio.available=true`，`ocio-info` / `lut bake --ocio-input` / UI OCIO 下拉已验证。
   - D081 起：`spectral-gpu` 的 OCIO 已接通，`--exr-linear` 的 OCIO 显示变换已改为写显示前线性。
   - Homebrew 的 `opencolorio` 在 macOS 14 仍会尝试构建 `python@3.15`，所以用静态脚本，不走 Homebrew 包。
-- 没有时间线拖动/逐帧预览、渲染队列、区间输入。
+- D082 起已有时间线拖动/逐帧预览、渲染队列、区间输入和 Y/M 滤色片偏移；队列与最终渲染共用一个 CLI 进程。
+- 播放代理是 LUT 近似（360–720 px），不是逐像素光谱；暂停后的静帧仍是全质量。
 - `.app` 未公证；ffmpeg 仍是 Homebrew 动态依赖，OCIO 已静态链接；分发前要处理 ffmpeg 捆绑。
 - R3D macOS 不支持（无插件）。

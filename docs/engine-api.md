@@ -253,7 +253,15 @@ UI 通过 stdin 写命令、stdout 读响应；`frame` / `raw` 把 RGBA 写到 U
 
 返回 `version / config / configFile / linearSpace / colorSpaces[] / displays[]`。UI 用 `colorSpaces` 填下拉。没有 OCIO 的构建返回非 0，并在 stderr 说明。
 
-### 6.2 `red-info --json`
+### 6.2 `solve --filter-pack --json`
+
+```powershell
+.\build\spektra-roll-cli.exe solve --filter-pack --json --film data\profiles\kodak_portra_400.json --paper data\profiles\kodak_portra_endura.json
+```
+
+返回 `film / paper / stock / filters{c,m,y}`，即 `neutral_print_filters.json` 里该胶片/相纸的中性放大机滤色片。UI 用它显示中性值；渲染时用 `--filter-offset C,M,Y` 在中性值上加减。
+
+### 6.3 `red-info --json`
 
 ```powershell
 .\build\spektra-roll-cli.exe red-info --in clip.R3D --json
@@ -261,7 +269,7 @@ UI 通过 stdin 写命令、stdout 读响应；`frame` / `raw` 把 RGBA 写到 U
 
 返回 `built / available / sdkVersion / libraryPath / message`，有 `--in` 时还有 `clip`（尺寸、帧数、fps、音频通道、timecode）。UI 用 `built/available` 决定是否允许 `.r3d`。
 
-### 6.3 `gpu-info`
+### 6.4 `gpu-info`
 
 人类可读的 GPU 诊断；`capabilities --json` 已包含同等信息，UI 不需要单独调用。
 
@@ -283,6 +291,8 @@ UI 传参时以 `data/ui-schema.json` 为准。几个容易错的点：
 | `--red-scale` | `full` / `half` / `quarter`；仅 R3D |
 | `--ocio-*` | 对 `--engine spectral` 和 `--engine spectral-gpu` 都有效（D081：GPU 后端在 CPU 上批量解码）；LUT 路径要先 `lut bake --ocio-input` |
 | `--exr-linear` + `--ocio-display/--ocio-view` | 跳过显示变换，直接写显示前线性 Rec.709（D081）；`--exr-trc` 不参与 |
+| `--filter-offset` | `C,M,Y` 三个数，叠加在数据库中性值上；与 `--cc` 互斥（D082） |
+| `--start` / `--frames` | 区间起点（秒）和帧数；UI 用显式 `rangeEnabled` 决定是否发送 `--frames`（D082） |
 
 ---
 

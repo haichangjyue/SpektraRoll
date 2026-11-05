@@ -88,16 +88,16 @@ open -F --env SPEKTRA_ALL_SPACES=1 --env SPEKTRA_CAPTURE=1 \
   build-ui-macos/SpektraRoll.app
 ```
 
-`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTOPLAY` / `SPEKTRA_AUTOGRADE` / `SPEKTRA_PLAYER_DEBUG` / `SPEKTRA_TAB` / `SPEKTRA_PROXY_LIMIT_GB` / `SPEKTRA_AUTORENDER` 见 `docs/macos-dev-notes.md`。
+`SPEKTRA_AUTOLOAD` / `SPEKTRA_AUTOPREVIEW` / `SPEKTRA_AUTOPLAY` / `SPEKTRA_AUTOGRADE` / `SPEKTRA_PLAYER_DEBUG` / `SPEKTRA_TAB` / `SPEKTRA_PROXY_LIMIT_GB` / `SPEKTRA_AUTORENDER` / `SPEKTRA_SEEK` / `SPEKTRA_QUEUE_SELFTEST` / `SPEKTRA_PROXY_DIR` 见 `docs/macos-dev-notes.md`。
 
 ## 已知限制（v1）
 
-- 没有时间线拖动/逐帧预览；`胶片效果` 的实时播放依赖 960 px 代理，代理生成期间会暂停播放并显示进度。
-- 代理是整段预渲染；6 秒 4K50 素材在 M1 上用 spectral-gpu 约 20–30 秒，首次播放需要等进度胶囊完成。
-- 切换缓存目录不会迁移旧目录里的代理文件。
+- D082 起有时间线拖动/逐帧预览、渲染队列和区间输入；`胶片效果` 的实时播放用 360–720 px LUT 代理，生成期间暂停并显示进度。
+- 代理仍是整段预渲染，但 6 秒 4K50 在 M1 上从启动到就绪约 **13 秒**（原 20–30 秒）；长片会自动降到 540/360 px。
+- 切换缓存目录会迁移旧目录里的代理文件。
 - R3D 在 macOS 明确不支持（没有 RED 插件）；导入时提示。
 - 防光晕层是 UI 级近似（开启后光晕 ×0.6），等引擎加独立参数。
-- 没有裁切、印片机 Y/M/预闪、扫描仪 unsharp、空间物理模型。
+- 有 Y/M 滤色片偏移（D082）；仍没有裁切、预闪、扫描仪 unsharp、空间物理模型。
 - 未公证；首次打开需要右键 → 打开，或 `xattr -d com.apple.quarantine`。
 - **OCIO 已可用**（D080）：静态 OCIO 2.6.0 前缀，`build-macos-ui.sh` 自动检测；`ocio-info` / `lut bake --ocio-input` / 显示变换已验证。D081 起 `--engine spectral-gpu` + OCIO 已接通（CPU 批量解码后进 Metal 光谱着色器），`--exr-linear` 遇到 OCIO 显示变换时写显示前线性 Rec.709。
 

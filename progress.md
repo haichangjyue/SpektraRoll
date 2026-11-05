@@ -2,17 +2,17 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D081：光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows + Mac 已验，CI run 153 双绿）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D080），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO（D041–D081）
+> **最后更新**：2026-11-06（D082：P1 一次完成——时间线/逐帧、渲染队列、区间、滤色片偏移、代理加速；Windows + Mac 已验）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D082），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO + 时间线/队列/区间/滤色片偏移（D041–D082）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
 
-## 本次对话交接摘要（D075–D081，2026-11-05 晚）
+## 本次对话交接摘要（D075–D082，2026-11-05 至 11-06）
 
-> **新开对话先读这一节**；下面是逐轮细节（D081 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO、D081 光谱 GPU 的 OCIO + 线性 EXR。
+> **新开对话先读这一节**；下面是逐轮细节（D082 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO、D081 光谱 GPU 的 OCIO + 线性 EXR、D082 的 P1（时间线/队列/区间/滤色片偏移/代理加速）。
 
 ### 一、已完成的事项
 
@@ -26,8 +26,9 @@
 | **D079** | 配光按钮 | 放在 `导出` 右侧；暂停、抽取当前帧、解到 sRGB、按亮度中位数把 18% 线性中灰落位；`C0113.MP4` 实测 **+0.66 EV**；中性 C/M/Y 由胶片/相纸数据库自动查表 |
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
 | **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB**；CI run **153** 双绿 |
+| **D082** | P1 一次完成 | 时间线拖动 + 逐帧预览；渲染队列（持久化、顺序执行、停止/删除/清空）；区间输入；`solve --filter-pack` + `--filter-offset` + PRINT 页 Y/M 偏移；35mm Academy 21.95 / 135 全画幅 36.0 拆分；代理固定 LUT + 360–720 px + GPU 质感 + 缓存目录迁移；修复 `ffprobe` 旋转探测扫描整段导致代理慢 20 s |
 
-**顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D081**。
+**顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D082**。
 
 ### 二、关键决策
 
@@ -43,6 +44,11 @@
 | D080 | macOS OCIO | 不走 Homebrew 包（macOS 14 会拉 `python@3.15` 失败）；自建静态 OCIO 2.6.0，不编 Python 绑定；纯静态依赖 |
 | D081 | GPU OCIO | 不把 OCIO 塞进着色器：CPU 批量解码后进现有光谱 GPU；额外保留原始编码帧做 `--strength` 混合 |
 | D081 | 线性 EXR | OCIO 显示变换的逆没有定义；`--exr-linear` 直接写显示前线性 Rec.709，`--exr-trc` 不再参与 |
+| D082 | 代理 | 播放代理固定 LUT + GPU 质感 + 360–720 px；长片按时长自动降分辨率 |
+| D082 | 队列 | 参数值快照入队、顺序执行、持久化；重启后未完成任务回到等待中 |
+| D082 | 区间 | 显式 `rangeEnabled` + 可选帧数，避免开关和帧数不一致 |
+| D082 | 滤色片 | `solve --filter-pack` 输出中性值；`--filter-offset` 在中性值上加减，`--cc` 仍是整体替换 |
+| D082 | 画幅 | 35mm 电影 = Academy 21.95 mm（CINE）；135 全画幅 = 36.0 mm（非 CINE） |
 
 ### 三、当前状态（截至最后一次操作）
 
@@ -103,23 +109,26 @@ ctest --test-dir build-macos-tests --output-on-failure
 | `SPEKTRA_OCIO=1` | 自动启用 OCIO 并选 `S-Log3 S-Gamut3.Cine` |
 | `SPEKTRA_CAPTURE=1` | app 自截图到 `/tmp/spektra-self-0.png`（触发：`touch /tmp/spektra-capture-now`） |
 | `SPEKTRA_ALL_SPACES=1` | 窗口所有 Space 可见、定时前置（远程验收用） |
+| `SPEKTRA_SEEK=<秒>` | 启动 4 s 后暂停并跳到该时间，刷新静帧（D082） |
+| `SPEKTRA_QUEUE_SELFTEST=1` | 自动入队 2 条小任务并运行队列，结果写 `/tmp/spektra-queue.log`（D082） |
+| `SPEKTRA_PROXY_DIR=<path>` | 启动时把代理缓存迁移到该目录并持久化（D082 测试） |
 
 ### 四、未完成的待办（建议顺序）
 
 **P0 · OCIO 深度**
-- [x] `--engine spectral-gpu` + OCIO：D081 已接通（CPU 批量解码 → 线性 Rec.709 → 光谱 GPU）；Windows 已验证，Mac/CI 待跑。
+- [x] `--engine spectral-gpu` + OCIO：D081 已接通（CPU 批量解码 → 线性 Rec.709 → 光谱 GPU）；Windows + Mac + CI 153 已验证。
 - [x] `--exr-linear` 的 OCIO 显示变换：D081 改为直接写显示前线性 Rec.709。
 
 **P1 · 实时预览/性能**
-- [ ] 4K50 6 秒素材的胶片代理生成在 M1 + spectral-gpu 约 **20–30 秒**；可考虑降到 720 px、代理固定走 LUT 引擎，或只预生成前几秒。
-- [ ] 代理是整段预渲染；超长片段的首次播放等待需要优化。
-- [ ] 切换缓存目录不迁移旧目录文件（当前只影响新代理）。
+- [x] 4K50 6 秒素材的胶片代理：D082 改为 LUT + GPU 质感 + 720 px，启动到 `switch film` 约 **13 s**。
+- [x] 超长片段的首次播放等待：D082 按时长自动降到 540/360 px。
+- [x] 切换缓存目录迁移旧代理：D082 已实现并验证（5 个文件来回迁移）。
 
 **P1 · 功能补齐**
-- [ ] 4K50 `C0113.MP4` 整段 312 帧渲染验收（音频/timecode/ProRes）。
-- [ ] 时间线拖动/逐帧预览、渲染队列、区间输入（macOS v1 仍没有）。
-- [ ] SpektraLab 式 Y/M 滤色片偏移控件 + 独立 `solve --filter-pack`；当前配光只做自动曝光。
-- [ ] 严格 35mm 电影画幅（Academy 21.95 mm）与 135 全画幅拆分；现在 35mm = 36 mm 全画幅并标 CINE。
+- [x] 4K50 `C0113.MP4` 整段 312 帧渲染验收：D082 已验（音频/timecode/ProRes）。
+- [x] 时间线拖动/逐帧预览、渲染队列、区间输入：D082 已完成。
+- [x] SpektraLab 式 Y/M 滤色片偏移控件 + 独立 `solve --filter-pack`：D082 已完成。
+- [x] 严格 35mm 电影画幅（Academy 21.95 mm）与 135 全画幅拆分：D082 已完成。
 
 **P2 · 交付/平台**
 - [ ] macOS 公证/DMG；`.app` 仍未签名分发。
@@ -151,6 +160,61 @@ open build-ui-macos/SpektraRoll.app
 build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --json
 # 应看到 "ocio": {"available": true, "version": "2.6.0"}
 ```
+
+---
+
+## 最新：D082 · P1 一次完成（2026-11-06；Windows + Mac 已验）
+
+> 产品负责人要求“一次做完 P1，一会儿直接验收”。本轮把 P1 的性能、时间线、队列、区间、滤色片偏移和画幅拆分全部落地。
+
+### 一、这次做了什么
+
+- **播放代理加速**：
+  - 代理固定走 LUT：先用当前胶片/相纸/曝光/质感参数烘 33³ LUT，再用 LUT 引擎 + GPU 质感出 360–720 px 代理。
+  - 长片自动降分辨率：胶片代理 >60 s → 360 px，>20 s → 540 px，否则 720 px；显示代理 960/720/540。
+  - **修掉 ffprobe 隐藏成本**：`video` 的旋转探测改用 `stream_side_data=rotation`，不再扫描整段 4K50（本机 21 s → 0.3 s）。
+  - 切换缓存目录时迁移现有代理（跨卷复制后删除）。
+- **时间线 / 逐帧**：
+  - 播放器下方新增滑杆、前后逐帧按钮、当前帧号。
+  - 拖动时暂停；松手后恢复播放，或暂停状态刷新当前帧静帧。
+  - `SPEKTRA_SEEK=<秒>` 调试钩子用于远程验收。
+- **渲染队列**：
+  - OUTPUT 新增队列：`加入队列` 冻结当前参数，顺序执行，逐行显示状态/进度/消息。
+  - 支持停止、删除、清空已完成；队列写入 `state.json`，重启后把“渲染中”恢复成“等待中”。
+  - `SPEKTRA_QUEUE_SELFTEST=1` 自动入队 2 条（2 帧 / 3 帧）并写 `/tmp/spektra-queue.log`。
+- **区间输入**：
+  - 起点（秒，可点“当前帧”）、只渲染区间开关、帧数、“到片尾”“整段”。
+  - 显式 `rangeEnabled`，避免开关与帧数不一致；`--start`/`--frames` 仍由 CLI 执行。
+- **滤色片偏移**：
+  - CLI 新增 `solve --filter-pack [--json]`，输出数据库中性 C/M/Y。
+  - CLI 新增 `--filter-offset C,M,Y`：在数据库中性值上加减；`--cc` 仍是整体替换，两者互斥。
+  - PRINT 页显示中性值，并提供 C/M/Y 三个偏移滑块和“重置”；偏移进入 LUT 缓存键。
+- **画幅拆分**：
+  - `35mm 电影（Academy）` = **21.95 mm**，保留 CINE。
+  - 新增 `135 全画幅` = **36.0 mm**，不标 CINE。
+  - Super 8 / 16mm / Super 16 / Super 35 / 65mm / IMAX 数值保留。
+
+### 二、验证
+
+| 项 | 结果 |
+|---|---|
+| Windows `ctest` | **11/11** |
+| Mac `ctest`（Metal） | **11/11** |
+| `solve --filter-pack` | `C=0.000 M=51.568 Y=52.534` |
+| `--filter-offset 0,2,-3` | 中性值变为 `C=0.000 M=53.568 Y=49.534`，LUT 明显不同 |
+| 4K50 整段 `C0113.MP4` | 312 帧 / 3840×2160 / 50p / ProRes 422 HQ / PCM 48 kHz 立体声 / TC 00:13:37:46；44.57 s |
+| 区间 `--start 2 --frames 50` | 50 帧 / 1.008 s / TC 00:13:39:46 |
+| 渲染队列自测 | 2 条任务依次完成（2 帧、3 帧，曝光不同），输出文件存在 |
+| 播放代理 | 720 px LUT + GPU 质感，从启动到 `switch film` 约 **13 s**（原先 20–30 s） |
+| 缓存迁移 | 5 个代理移动到新目录、旧目录清空，再迁移回原目录 |
+| 时间线 seek | `SPEKTRA_SEEK=3.2` 日志确认 `seek 3.200`；截图显示帧号/滑杆/逐帧按钮 |
+
+### 三、仍未做 / 注意
+
+- 代理是 LUT 近似，不是逐像素光谱；最终渲染仍用用户选择的引擎。
+- 队列与最终渲染共用一个 CLI 进程；停止队列会取消当前任务，已完成的 `.parts` 仍可用 `--resume` 续渲。
+- 时间线拖动在播放代理上是低分辨率预览；暂停后的静帧才是全质量预览。
+- 旧 `state.json` 通过自定义解码补默认值，新增字段不会丢素材/设置。
 
 ---
 

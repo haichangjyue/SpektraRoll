@@ -94,6 +94,11 @@ jobs:
           "$py" -c "import json; d=json.load(open('capabilities.json')); assert d['version']; assert d['preview']['protocol']==2; assert 'catalog' in d['commands']; print('capabilities ok:', d['platform'], d['gpu']['backend'])"
           "$exe" catalog --json > catalog.json
           "$py" -c "import json; d=json.load(open('catalog.json')); assert d['counts']['films']==20, d['counts']; assert d['counts']['papers']==8, d['counts']; print('catalog ok:', d['counts'])"
+          # D082: neutral filter solve + trim offset.
+          "$exe" solve --filter-pack --json > solve.json
+          "$py" -c "import json; d=json.load(open('solve.json')); f=d['filters']; assert f['m']>0 and f['y']>0, f; print('solve ok:', round(f['c'],2), round(f['m'],2), round(f['y'],2))"
+          "$exe" lut bake --size 5 --filter-offset 0,1,-1 --out solve-trim.cube
+          test -f solve-trim.cube
           printf 'hello\nquit\n' | "$exe" preview > hello.txt
           grep -q '"protocol":2' hello.txt
           cat hello.txt
