@@ -170,6 +170,28 @@ UI 不要自己扫描 `data/profiles/*.json`，也不要在 Swift 里复制 `sup
 
 失败时：进程以非 0 退出，错误在 stderr（`error: ...`），stdout 可能没有 `done`。UI 应把退出码和 stderr 一起展示。
 
+### 4.1 播放代理：`video --display --max-side N`
+
+D074 #3 的播放时代理也用同一个 `video` 命令，不引入第二套颜色逻辑：
+
+```powershell
+# 原片代理：输入色彩空间 -> 显示 sRGB，不上胶片
+spektra-roll-cli video --display --input s-log3 --in clip.mp4 --out display.mov `
+  --in-matrix bt709 --max-side 960 --codec h264 --trc srgb --crf 20 --preset veryfast `
+  --progress json
+
+# 胶片代理：当前 LUT / 光谱参数，低分辨率
+spektra-roll-cli video --lut current.cube --in clip.mp4 --out film.mov `
+  --in-matrix bt709 --max-side 960 --codec h264 --trc srgb --crf 20 --preset veryfast `
+  --progress json
+```
+
+- `--max-side N` 在解码后、调色前按长边等比缩小（偶数尺寸），只缩小不放大。
+- `--display` 只做输入 decode → linear Rec.709 → sRGB，不接受 `--lut/--engine/--film/--paper/--scan`；OCIO 输入用 `--ocio-config/--ocio-input`。
+- `--display` 的 `start` 事件 `engine` 字段是 `"display"`，其余事件与 4 相同。
+- 两个代理都整段渲染，保留源音频和 timecode；UI 按参数 hash 缓存，参数变化时使胶片代理失效。
+- R3D 暂不支持 `--max-side`（macOS 也不用 R3D）。
+
 ---
 
 ## 5. 常驻预览：`preview` protocol 2

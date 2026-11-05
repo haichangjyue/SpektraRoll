@@ -56,8 +56,23 @@ final class AppState: ObservableObject {
     // D074 #1: histogram and exposure references for the frame on screen.
     @Published var frameStats: FrameStats?
 
+    // D074 #3: low-resolution playback proxies. The display proxy is the
+    // source decoded to sRGB; the film proxy carries the current look.
+    @Published var displayProxyURL: URL?
+    @Published var filmProxyURL: URL?
+    @Published var isGeneratingProxy = false
+    @Published var proxyProgress: Double = 0
+    @Published var proxyStatus = ""
+
     @Published var outputDirectory: URL
     @Published var outputName = "grade"
+
+    private let proxyEngine = EngineClient()
+    private var proxyTask: Task<Void, Never>?
+    private var proxyTaskKey: String?
+    private var pendingProxy: ProxyRequest?
+    private var proxyDebounceTask: Task<Void, Never>?
+    private var proxyGeneration = 0
 
     private var didBootstrap = false
     private var previewTask: Task<Void, Never>?
@@ -104,6 +119,18 @@ final class AppState: ObservableObject {
         catalog != nil
     }
 
+    private struct ProxyRequest {
+        let key: String
+        let output: URL
+        let displayOnly: Bool
+        let asset: MediaAsset
+        let settings: LookSettings
+        let filmURL: URL?
+        let paperURL: URL?
+        let ocioConfig: URL?
+        let maxSide: Int
+    }
+
     func bootstrap() async {
         guard !didBootstrap else { return }
         didBootstrap = true
@@ -119,6 +146,7 @@ final class AppState: ObservableObject {
                 settings.ocioEnabled = false
             }
             normalizeSelection()
+            cleanupProxyCache()
             if let path = ProcessInfo.processInfo.environment["SPEKTRA_AUTOLOAD"], !path.isEmpty {
                 await debugAutoImport(URL(fileURLWithPath: path))
             }
@@ -310,6 +338,7 @@ final class AppState: ObservableObject {
             errorMessage = "片库还没加载完成。"
             return
         }
+        cancelProxyGeneration()
         let paper = catalog.papers.first { $0.id == settings.paperID }
         let filmURL = URL(fileURLWithPath: film.path)
         let paperURL = paper.map { URL(fileURLWithPath: $0.path) }
@@ -375,15 +404,19 @@ final class AppState: ObservableObject {
 
     // MARK: - Film / display preview
 
-    func setFilmPreview(_ enabled: Bool, at seconds: Double) {
+    func setFilmPreview(_ enabled: Bool, at seconds: Double, renderStill: Bool = true) {
         showFilmPreview = enabled
         if enabled {
             filmPreview = nil
-            previewFrame(at: seconds, immediate: true)
+            if renderStill {
+                previewFrame(at: seconds, immediate: true)
+            }
         } else {
             filmPreview = nil
             frameStats = nil
-            refreshSourcePreview(at: seconds)
+            if renderStill {
+                refreshSourcePreview(at: seconds)
+            }
         }
     }
 
@@ -543,6 +576,308 @@ final class AppState: ObservableObject {
         filmPreview = nil
         sourcePreview = nil
         frameStats = nil
+        clearProxyState()
+    }
+
+    // MARK: - Playback proxies (D074 #3)
+
+    private var proxyMaxSide: Int { 960 }
+
+    private var proxyCacheDirectory: URL {
+        engine.cacheDirectory.appendingPathComponent("preview-cache", isDirectory: true)
+    }
+
+    private func proxyCacheURL(key: String) -> URL {
+        proxyCacheDirectory.appendingPathComponent("\(key).mov")
+    }
+
+    private func fileStamp(_ url: URL) -> String {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+        let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(size)-\(Int(modified))"
+    }
+
+    private func displayProxyKey(_ asset: MediaAsset) -> String {
+        [
+            "display",
+            asset.path,
+            fileStamp(asset.url),
+            settings.input.rawValue,
+            settings.ocioEnabled ? "ocio" : "builtin",
+            settings.ocioInput,
+            "\(proxyMaxSide)"
+        ].joined(separator: "|").fnv1aHex
+    }
+
+    private func filmProxyKey(_ asset: MediaAsset) -> String {
+        [
+            "film",
+            asset.path,
+            fileStamp(asset.url),
+            settings.proxyLookKey,
+            "\(proxyMaxSide)"
+        ].joined(separator: "|").fnv1aHex
+    }
+
+    private func proxySettings(from source: LookSettings) -> LookSettings {
+        var proxy = source
+        proxy.codec = .h264
+        proxy.trc = .srgb
+        proxy.crf = 20
+        proxy.preset = "veryfast"
+        proxy.start = 0
+        proxy.frames = nil
+        proxy.segment = 0
+        proxy.jobs = 0
+        proxy.resume = false
+        return proxy
+    }
+
+    /// Called when the player starts or the film-effect toggle changes while
+    /// playing: make sure the matching proxy is cached or being generated.
+    func preparePlaybackProxy() {
+        guard let asset = selectedAsset, asset.isPlayable else { return }
+        if showFilmPreview {
+            prepareFilmProxy(for: asset)
+        } else {
+            prepareDisplayProxy(for: asset)
+        }
+    }
+
+    func prepareDisplayProxy(for asset: MediaAsset) {
+        guard asset.isPlayable else { return }
+        let key = displayProxyKey(asset)
+        let output = proxyCacheURL(key: key)
+        if let cached = cachedProxy(at: output) {
+            displayProxyURL = cached
+            return
+        }
+        if displayProxyURL != output {
+            displayProxyURL = nil
+        }
+        requestProxy(ProxyRequest(
+            key: key,
+            output: output,
+            displayOnly: true,
+            asset: asset,
+            settings: proxySettings(from: settings),
+            filmURL: nil,
+            paperURL: nil,
+            ocioConfig: engine.ocioConfigURL,
+            maxSide: proxyMaxSide
+        ))
+    }
+
+    private func prepareFilmProxy(for asset: MediaAsset) {
+        guard let catalog,
+              let film = catalog.films.first(where: { $0.id == settings.filmID }) else {
+            return
+        }
+        let paper = catalog.papers.first { $0.id == settings.paperID }
+        let key = filmProxyKey(asset)
+        let output = proxyCacheURL(key: key)
+        if let cached = cachedProxy(at: output) {
+            filmProxyURL = cached
+            return
+        }
+        if filmProxyURL != output {
+            filmProxyURL = nil
+        }
+        requestProxy(ProxyRequest(
+            key: key,
+            output: output,
+            displayOnly: false,
+            asset: asset,
+            settings: proxySettings(from: settings),
+            filmURL: URL(fileURLWithPath: film.path),
+            paperURL: paper.map { URL(fileURLWithPath: $0.path) },
+            ocioConfig: engine.ocioConfigURL,
+            maxSide: proxyMaxSide
+        ))
+    }
+
+    /// D074 #5/#3: a slider drag while playing should not regenerate for every
+    /// tick. Keep showing the old proxy until the settled look is ready.
+    func scheduleFilmProxyRefresh() {
+        guard showFilmPreview, let asset = selectedAsset, asset.isPlayable else { return }
+        proxyDebounceTask?.cancel()
+        proxyDebounceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.prepareFilmProxy(for: asset)
+        }
+    }
+
+    private func cachedProxy(at url: URL) -> URL? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+        return size > 4096 ? url : nil
+    }
+
+    private func requestProxy(_ request: ProxyRequest) {
+        if proxyTaskKey == request.key {
+            return
+        }
+        if proxyTask != nil {
+            pendingProxy = request
+            proxyEngine.cancel()
+            proxyTask?.cancel()
+            return
+        }
+        startProxy(request)
+    }
+
+    private func startProxy(_ request: ProxyRequest) {
+        proxyTaskKey = request.key
+        proxyGeneration += 1
+        let generation = proxyGeneration
+        let temp = request.output.deletingPathExtension().appendingPathExtension("part.mov")
+        isGeneratingProxy = true
+        proxyProgress = 0
+        proxyStatus = request.displayOnly ? "生成原片代理…" : "生成胶片代理…"
+        try? FileManager.default.createDirectory(at: proxyCacheDirectory,
+                                                 withIntermediateDirectories: true)
+        proxyTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishProxyTask(generation: generation) }
+            do {
+                var lut: URL?
+                if !request.displayOnly, request.settings.engine == .lut,
+                   let filmURL = request.filmURL {
+                    lut = try await self.proxyEngine.ensureLUT(
+                        settings: request.settings,
+                        filmPath: filmURL,
+                        paperPath: request.paperURL,
+                        ocioConfig: request.ocioConfig
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                try? FileManager.default.removeItem(at: temp)
+                let result = try await self.proxyEngine.renderProxy(
+                    settings: request.settings,
+                    asset: request.asset,
+                    filmPath: request.filmURL,
+                    paperPath: request.paperURL,
+                    ocioConfig: request.ocioConfig,
+                    lutPath: lut,
+                    displayOnly: request.displayOnly,
+                    maxSide: request.maxSide,
+                    output: temp
+                ) { line in
+                    Task { @MainActor in
+                        self.consumeProxyLine(line, generation: generation)
+                    }
+                }
+                guard !Task.isCancelled, self.proxyGeneration == generation else { return }
+                guard result.status == 0 else {
+                    try? FileManager.default.removeItem(at: temp)
+                    self.proxyStatus = "实时预览生成失败"
+                    if !result.stderr.isEmpty {
+                        self.statusMessage = "实时预览生成失败：\(result.stderr)"
+                    }
+                    return
+                }
+                try? FileManager.default.removeItem(at: request.output)
+                try FileManager.default.moveItem(at: temp, to: request.output)
+                if request.displayOnly {
+                    self.displayProxyURL = request.output
+                } else {
+                    self.filmProxyURL = request.output
+                }
+                self.proxyProgress = 1
+                self.proxyStatus = "实时预览就绪"
+                self.cleanupProxyCache()
+            } catch {
+                if !Task.isCancelled {
+                    self.proxyStatus = "实时预览生成失败"
+                    self.statusMessage = "实时预览生成失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func finishProxyTask(generation: Int) {
+        proxyTask = nil
+        proxyTaskKey = nil
+        if proxyGeneration == generation {
+            isGeneratingProxy = false
+        }
+        if let pending = pendingProxy {
+            pendingProxy = nil
+            startProxy(pending)
+        }
+    }
+
+    private func consumeProxyLine(_ line: String, generation: Int) {
+        guard generation == proxyGeneration else { return }
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let event = try? JSONDecoder().decode(RenderEvent.self, from: data) else {
+            return
+        }
+        switch event.event {
+        case "progress":
+            if let percent = event.percent, percent >= 0 {
+                proxyProgress = percent / 100.0
+            }
+        case "done":
+            proxyProgress = 1
+        default:
+            break
+        }
+    }
+
+    private func clearProxyState() {
+        proxyDebounceTask?.cancel()
+        proxyEngine.cancel()
+        proxyTask?.cancel()
+        proxyTask = nil
+        proxyTaskKey = nil
+        pendingProxy = nil
+        proxyGeneration += 1
+        isGeneratingProxy = false
+        proxyProgress = 0
+        proxyStatus = ""
+        displayProxyURL = nil
+        filmProxyURL = nil
+    }
+
+    private func cancelProxyGeneration() {
+        proxyDebounceTask?.cancel()
+        proxyEngine.cancel()
+        proxyTask?.cancel()
+        proxyTask = nil
+        proxyTaskKey = nil
+        pendingProxy = nil
+        proxyGeneration += 1
+        isGeneratingProxy = false
+    }
+
+    private func cleanupProxyCache() {
+        let directory = proxyCacheDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        let partCutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        for file in files {
+            let isPart = file.lastPathComponent.hasSuffix(".part.mov")
+            guard isPart || file.pathExtension.lowercased() == "mov" else { continue }
+            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
+            let modified = values?.contentModificationDate ?? .distantPast
+            if modified < (isPart ? partCutoff : cutoff) {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     // MARK: - Persistence

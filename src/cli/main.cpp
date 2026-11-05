@@ -99,6 +99,7 @@ void printUsage() {
         "                         [--timecode HH:MM:SS:FF] [--no-timecode]\n"
         "                         [--texture-engine auto|cpu|gpu] [--ffmpeg <path>]\n"
         "                         [--red-scale full|half|quarter] [--progress text|json]\n"
+        "                         [--max-side N] [--display]\n"
         "      Decode a clip with ffmpeg, apply the LUT frame by frame and re-encode\n"
         "      with the original audio. --start/--frames pick a range (seconds or\n"
         "      HH:MM:SS). HDR output is HEVC Main10 (or ProRes 422 HQ) with PQ/HLG\n"
@@ -112,6 +113,10 @@ void printUsage() {
         "      --red-scale full|half|quarter. R3D audio is muxed when the clip has\n"
         "      it; --segment/--resume/--jobs work as usual. --progress json emits\n"
         "      machine-readable start/progress/done lines on stdout (D072).\n"
+        "      --max-side N downsizes the decoded frames before grading (preview\n"
+        "      proxies; the macOS UI uses 960). --display writes the source decoded\n"
+        "      to display sRGB only, without the film/LUT chain, for the playback\n"
+        "      \"original\" proxy (D074).\n"
         "      The source timecode is copied\n"
         "      to the output unless --no-timecode is given. With\n"
         "      --engine spectral the LUT is bypassed and every pixel runs the\n"
@@ -1915,6 +1920,11 @@ struct VideoRender {
     const sr::FilmModel* model = nullptr;
     sr::BakeOptions bake;
     bool spectral = false;
+    // D074 #3: proxy rendering for the macOS playback cache. `display` decodes
+    // the source to sRGB only; `maxSide` downsizes the decoded frames before
+    // the look is applied.
+    bool display = false;
+    int maxSide = 0;
     sr::GpuFilm* gpu = nullptr;
     sr::Interp interp = sr::Interp::Tetrahedral;
     float strength = 1.0f;
@@ -1966,6 +1976,7 @@ std::string renderSignature(const VideoRender& job, const std::string& lutPath, 
               << " " << job.inMatrix << "\n"
               << "red " << (job.red ? 1 : 0) << " scale " << job.redScale << " format "
               << job.redFormat << "\n"
+              << "display " << (job.display ? 1 : 0) << " maxside " << job.maxSide << "\n"
               << "lut " << fileHash(lutPath) << "\n"
               << "start " << startFrame << " total " << totalFrames << " segment "
               << segmentFrames << "\n"
@@ -2164,7 +2175,12 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
     const std::string seek = start > 0.0 ? " -ss " + formatSeconds(start) : "";
     const std::string limit = frameCount > 0 ? " -frames:v " + std::to_string(frameCount) : "";
     const std::string filter =
-        "scale=in_color_matrix=" + job.inMatrix + ":in_range=auto:out_range=full";
+        "scale=" +
+        (job.maxSide > 0
+             ? "w=" + std::to_string(job.width) + ":h=" + std::to_string(job.height) +
+                   ":flags=lanczos:"
+             : std::string()) +
+        "in_color_matrix=" + job.inMatrix + ":in_range=auto:out_range=full";
     // Hardware decode was measured on this footage and is not a win: QSV plus
     // hwdownload costs ~21.8 ms/frame against 19.5 ms for the software decoder
     // (D050), so the software path stays.
@@ -2257,35 +2273,62 @@ bool renderRange(VideoRender& job, long startFrame, long frameCount, long rangeF
             }
         }
         const int frameIndex = static_cast<int>(rangeFrameBase + static_cast<long>(frames));
-        bool fused = false;
-        if (job.gpu != nullptr && job.textureGpu != nullptr && textureActive(job.texture)) {
-            fused = processFused(*job.gpu, *job.textureGpu, frame.data(), job.width, job.height,
-                                 job.strength, job.texture, frameIndex, &job.fuseTexture, error);
-        }
-        if (!fused && job.gpu != nullptr &&
-            !job.gpu->process(frame.data(), pixels, frame.data(), job.strength, error)) {
-            std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
-                         error.c_str());
-            job.gpu = nullptr;
-        }
-        if (!fused && job.gpu == nullptr) {
+        if (job.display) {
+            // D074 #3: display proxy = source decode only. The source code
+            // values go straight to linear Rec.709 and then display sRGB.
+            const bool ocio = job.bake.ocio != nullptr;
+            if (ocio) {
+                job.bake.ocio->apply(frame.data(), static_cast<long>(pixels));
+            }
             sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
                     float* px = &frame[i * 3];
-                    const sr::Rgb source{px[0], px[1], px[2]};
-                    const sr::Rgb mapped = job.spectral
-                                               ? job.model->transformFrom(job.bake, source)
-                                               : job.lut->apply(source, job.interp);
-                    const sr::Rgb result = sr::mix(source, mapped, job.strength);
-                    px[0] = result.r;
-                    px[1] = result.g;
-                    px[2] = result.b;
+                    double linear[3];
+                    if (ocio) {
+                        linear[0] = px[0];
+                        linear[1] = px[1];
+                        linear[2] = px[2];
+                    } else {
+                        const double code[3] = {px[0], px[1], px[2]};
+                        sr::decodeInputToLinearSrgb(job.bake.input, code, linear);
+                    }
+                    for (int c = 0; c < 3; ++c) {
+                        px[c] = static_cast<float>(sr::srgbEncode(
+                            std::min(1.0, std::max(0.0, linear[c]))));
+                    }
                 }
             });
-        }
-        if (!fused) {
-            applyTextureFrame(frame.data(), job.width, job.height, job.texture, frameIndex,
-                              grainCache, &job.textureGpu);
+        } else {
+            bool fused = false;
+            if (job.gpu != nullptr && job.textureGpu != nullptr && textureActive(job.texture)) {
+                fused = processFused(*job.gpu, *job.textureGpu, frame.data(), job.width, job.height,
+                                     job.strength, job.texture, frameIndex, &job.fuseTexture, error);
+            }
+            if (!fused && job.gpu != nullptr &&
+                !job.gpu->process(frame.data(), pixels, frame.data(), job.strength, error)) {
+                std::fprintf(stderr, "warning: %s; falling back to the CPU spectral engine\n",
+                             error.c_str());
+                job.gpu = nullptr;
+            }
+            if (!fused && job.gpu == nullptr) {
+                sr::parallelChunks(pixels, job.threads, [&](size_t begin, size_t end) {
+                    for (size_t i = begin; i < end; ++i) {
+                        float* px = &frame[i * 3];
+                        const sr::Rgb source{px[0], px[1], px[2]};
+                        const sr::Rgb mapped = job.spectral
+                                                   ? job.model->transformFrom(job.bake, source)
+                                                   : job.lut->apply(source, job.interp);
+                        const sr::Rgb result = sr::mix(source, mapped, job.strength);
+                        px[0] = result.r;
+                        px[1] = result.g;
+                        px[2] = result.b;
+                    }
+                });
+            }
+            if (!fused) {
+                applyTextureFrame(frame.data(), job.width, job.height, job.texture, frameIndex,
+                                  grainCache, &job.textureGpu);
+            }
         }
         if (debugTiming) {
             tProcess += std::chrono::duration<double, std::milli>(now() - mark).count();
@@ -2412,13 +2455,23 @@ int cmdVideo(const Args& args) {
     const std::string inPath = args.get("in");
     const std::string outPath = args.get("out");
     const std::string lutPath = args.get("lut");
-    const std::string engine = args.get("engine", "lut");
-    if (engine != "lut" && engine != "spectral" && engine != "spectral-gpu") {
+    // D074 #3: `--display` writes the source decoded to sRGB only, for the
+    // playback "original" proxy; `--max-side` keeps preview proxies small.
+    const bool displayOnly = args.has("display");
+    if (displayOnly &&
+        (args.has("lut") || args.has("engine") || args.has("film") || args.has("paper") ||
+         args.has("scan"))) {
+        return fail("--display cannot be combined with --lut/--engine/--film/--paper/--scan");
+    }
+    const std::string engine = displayOnly ? "lut" : args.get("engine", "lut");
+    if (!displayOnly && engine != "lut" && engine != "spectral" && engine != "spectral-gpu") {
         return fail("--engine expects 'lut', 'spectral' or 'spectral-gpu'");
     }
-    bool gpu = engine == "spectral-gpu";
-    const bool spectral = engine == "spectral" || gpu;
-    if (!spectral && lutPath.empty()) return fail("video requires --lut <file.cube>");
+    bool gpu = !displayOnly && engine == "spectral-gpu";
+    const bool spectral = !displayOnly && (engine == "spectral" || gpu);
+    if (!displayOnly && !spectral && lutPath.empty()) {
+        return fail("video requires --lut <file.cube>");
+    }
     if (inPath.empty()) return fail("video requires --in <clip>");
     if (outPath.empty()) return fail("video requires --out <clip>");
     const std::string progressMode = args.get("progress", "text");
@@ -2435,7 +2488,32 @@ int cmdVideo(const Args& args) {
     sr::Lut3D lut;
     FilmRecipe recipe;
     sr::GpuFilm gpuFilm;
-    if (spectral) {
+    sr::BakeOptions displayOptions;
+    std::shared_ptr<sr::OcioConfig> displayOcioConfig;
+    std::shared_ptr<sr::OcioProcessor> displayOcioProcessor;
+    std::string displayOcioSource;
+    std::string displayOcioLinear;
+    if (displayOnly) {
+        if (args.has("input")) {
+            if (!sr::parseInputTransfer(args.get("input"), displayOptions.input)) {
+                return fail(std::string("--input expects one of: ") + sr::inputTransferList());
+            }
+        }
+        if (args.has("ocio-input")) {
+            if (args.has("input")) {
+                return fail("--input and --ocio-input are mutually exclusive");
+            }
+            if (!configureOcioInput(args, displayOcioConfig, displayOcioProcessor,
+                                    displayOcioSource, displayOcioLinear, error)) {
+                return fail(error);
+            }
+            displayOptions.ocio = displayOcioProcessor.get();
+            displayOptions.ocioInput = displayOcioSource;
+        } else if (hasOcioFlags(args)) {
+            return fail("--ocio-config / --ocio-linear only apply together with --ocio-input");
+        }
+        displayOptions.threads = args.getInt("threads", 0);
+    } else if (spectral) {
         if (!configureFilmRecipe(args, recipe, error)) return fail(error);
         bool gpuFellBackForOcio = false;
         if (recipe.options.ocio != nullptr && gpu) {
@@ -2462,7 +2540,7 @@ int cmdVideo(const Args& args) {
     } else if (!lut.loadCube(lutPath, error)) {
         return fail(error);
     }
-    if (!spectral && hasOcioFlags(args)) {
+    if (!displayOnly && !spectral && hasOcioFlags(args)) {
         return fail("--ocio-* only applies to --engine spectral; bake the LUT with "
                     "`lut bake --ocio-input <space>` instead");
     }
@@ -2542,9 +2620,24 @@ int cmdVideo(const Args& args) {
             std::swap(width, height);
         }
     }
+    const int requestedMaxSide = args.getInt("max-side", 0);
+    if (requestedMaxSide < 0) return fail("--max-side expects a positive integer");
+    if (requestedMaxSide > 0) {
+        if (red) return fail("--max-side is not supported for R3D yet");
+        const int longest = std::max(width, height);
+        if (longest > requestedMaxSide) {
+            const double scale = static_cast<double>(requestedMaxSide) / longest;
+            const auto even = [](int value) {
+                value = std::max(2, value);
+                return value - value % 2;
+            };
+            width = even(static_cast<int>(std::lround(width * scale)));
+            height = even(static_cast<int>(std::lround(height * scale)));
+        }
+    }
     if (width <= 0 || height <= 0 || fps <= 0.0) return fail("bad video geometry");
 
-    const std::string trc = args.get("trc", "srgb");
+    const std::string trc = displayOnly ? "srgb" : args.get("trc", "srgb");
     const bool hdr = trc == "pq" || trc == "hlg";
     if (spectral) {
         // The LUT path bakes PQ/HLG into the table; spectral output encodes it
@@ -2660,16 +2753,19 @@ int cmdVideo(const Args& args) {
     job.redScale = static_cast<int>(redScale);
     job.redFormat = static_cast<int>(redFormat);
     job.spectral = spectral;
-    job.lut = spectral ? nullptr : &lut;
+    job.display = displayOnly;
+    job.maxSide = requestedMaxSide;
+    job.lut = (spectral || displayOnly) ? nullptr : &lut;
     job.model = spectral ? &recipe.model : nullptr;
     job.gpu = gpu ? &gpuFilm : nullptr;
-    job.bake = recipe.options;
+    job.bake = displayOnly ? displayOptions : recipe.options;
     job.interp = mode;
-    job.strength = strength;
+    job.strength = displayOnly ? 1.0f : strength;
     job.threads = threads;
     job.texture = texture;
-    job.textureGpu = prepareTextureGpu(args, engine, textureGpuStorage,
-                                       gpu ? gpuFilm.deviceHandle() : nullptr);
+    job.textureGpu = displayOnly ? nullptr
+                                : prepareTextureGpu(args, engine, textureGpuStorage,
+                                                    gpu ? gpuFilm.deviceHandle() : nullptr);
 
     job.codecArgs = codecArgs;
     job.outFormat = outFormat;
@@ -2706,11 +2802,16 @@ int cmdVideo(const Args& args) {
                                    : (codec == "hevc" ? "HEVC Main10" : "H.264");
     std::printf("output: %s (%s, %s)\n", outPath.c_str(), codecName,
                 hdr ? (trc == "pq" ? "PQ" : "HLG") : "SDR");
-    if (spectral) {
+    if (displayOnly) {
+        std::printf("engine: display (source -> sRGB)\n");
+    } else if (spectral) {
         std::printf("engine: %s %s + %s\n", gpu ? "spectral-gpu" : "spectral",
                     recipe.film.info.name.c_str(), recipe.paper.info.name.c_str());
     } else {
         std::printf("engine: lut %s\n", lutPath.c_str());
+    }
+    if (requestedMaxSide > 0) {
+        std::printf("proxy:  max side %d px\n", requestedMaxSide);
     }
     if (job.textureGpu != nullptr) std::printf("texture: gpu\n");
     if (progressJson) {
@@ -2722,8 +2823,9 @@ int cmdVideo(const Args& args) {
                       "\"codec\":\"%s\",\"output\":%s}",
                       kVersion, width, height, fps, totalFrames,
                       segmented ? "true" : "false",
-                      spectral ? (gpu ? "spectral-gpu" : "spectral") : "lut", codec.c_str(),
-                      outputJson.c_str());
+                      displayOnly ? "display"
+                                  : (spectral ? (gpu ? "spectral-gpu" : "spectral") : "lut"),
+                      codec.c_str(), outputJson.c_str());
         emitJsonEvent(event);
     }
     std::string redAudioPath;

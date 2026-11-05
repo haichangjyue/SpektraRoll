@@ -267,6 +267,31 @@ final class EngineClient: @unchecked Sendable {
         return try await stream(args, onLine: onLine)
     }
 
+    /// D074 #3: low-resolution playback proxy (display or film). The UI holds
+    /// a second EngineClient for this so cancelling a stale proxy never kills
+    /// a final render.
+    func renderProxy(settings: LookSettings, asset: MediaAsset, filmPath: URL?,
+                     paperPath: URL?, ocioConfig: URL?, lutPath: URL?,
+                     displayOnly: Bool, maxSide: Int, output: URL,
+                     onLine: @escaping (String) -> Void) async throws -> ProcessResult {
+        let args: [String]
+        if displayOnly {
+            args = settings.displayProxyArguments(asset: asset, ocioConfig: ocioConfig,
+                                                  ffmpeg: ffmpegURL, output: output,
+                                                  maxSide: maxSide)
+        } else {
+            guard let filmPath else {
+                throw EngineError.commandFailed("胶片参数还没准备好。")
+            }
+            args = settings.videoArguments(asset: asset, filmPath: filmPath,
+                                           paperPath: paperPath, filterPath: filtersURL,
+                                           ocioConfig: ocioConfig, lutPath: lutPath,
+                                           ffmpeg: ffmpegURL, output: output,
+                                           maxSide: maxSide)
+        }
+        return try await stream(args, onLine: onLine)
+    }
+
     func renderStill(settings: LookSettings, asset: MediaAsset, filmPath: URL, paperPath: URL?,
                      ocioConfig: URL?, lutPath: URL?, inputImage: URL,
                      output: URL) async throws -> ProcessResult {

@@ -83,6 +83,25 @@ extension LookSettings {
         }
     }
 
+    /// Stable key for the playback film proxy. Everything that changes the
+    /// look or the spatial chain is included; output codec/range is not.
+    var proxyLookKey: String {
+        [
+            bakeCacheKey,
+            engine.rawValue,
+            textureEngine.rawValue,
+            interp.rawValue,
+            Self.number(grain),
+            "\(grainRate)",
+            Self.number(effectiveHalation),
+            Self.number(glare),
+            Self.number(diffusion),
+            spreadModel.rawValue,
+            Self.number(frameGauge.widthMM),
+            Self.number(strength)
+        ].joined(separator: "|").fnv1aHex
+    }
+
     func bakeArguments(filmPath: URL, paperPath: URL?, filterPath: URL?, ocioConfig: URL?,
                        output: URL) -> [String] {
         var args = ["lut", "bake", "--out", output.path]
@@ -97,7 +116,7 @@ extension LookSettings {
 
     func videoArguments(asset: MediaAsset, filmPath: URL, paperPath: URL?, filterPath: URL?,
                         ocioConfig: URL?, lutPath: URL?, ffmpeg: URL?,
-                        output: URL) -> [String] {
+                        output: URL, maxSide: Int = 0) -> [String] {
         var args = ["video", "--in", asset.path, "--out", output.path]
         if let ffmpeg {
             args += ["--ffmpeg", ffmpeg.path]
@@ -121,11 +140,29 @@ extension LookSettings {
         }
         args += ["--in-matrix", matrix(for: asset)]
         args += ["--progress", "json"]
+        if maxSide > 0 { args += ["--max-side", "\(maxSide)"] }
         if start > 0 { args += ["--start", Self.number(start)] }
         if let frames, frames > 0 { args += ["--frames", "\(frames)"] }
         if segment > 0 { args += ["--segment", Self.number(segment)] }
         if resume { args += ["--resume"] }
         if jobs > 0 { args += ["--jobs", "\(jobs)"] }
+        if threads > 0 { args += ["--threads", "\(threads)"] }
+        return args
+    }
+
+    /// D074 #3: the "original" side of a playback proxy. The film chain is
+    /// skipped entirely; `video --display` decodes the source to sRGB.
+    func displayProxyArguments(asset: MediaAsset, ocioConfig: URL?, ffmpeg: URL?,
+                               output: URL, maxSide: Int) -> [String] {
+        var args = ["video", "--in", asset.path, "--out", output.path, "--display"]
+        if let ffmpeg {
+            args += ["--ffmpeg", ffmpeg.path]
+        }
+        args += inputArguments(ocioConfig: ocioConfig)
+        args += ["--in-matrix", matrix(for: asset)]
+        args += ["--trc", "srgb", "--codec", "h264", "--crf", "20", "--preset", "veryfast"]
+        args += ["--progress", "json"]
+        if maxSide > 0 { args += ["--max-side", "\(maxSide)"] }
         if threads > 0 { args += ["--threads", "\(threads)"] }
         return args
     }

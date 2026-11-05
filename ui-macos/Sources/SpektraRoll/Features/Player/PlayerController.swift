@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AVFoundation
 import Combine
+import Dispatch
 import Foundation
+
+enum PlaybackSource {
+    case original
+    case display
+    case film
+}
 
 @MainActor
 final class PlayerController: ObservableObject {
@@ -10,7 +17,12 @@ final class PlayerController: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
+    @Published private(set) var source: PlaybackSource = .original
+    /// True while `replaceCurrentItem` is settling; the pause event it emits
+    /// must not trigger a still-preview refresh.
+    @Published private(set) var isSwitchingSource = false
 
+    private(set) var currentURL: URL?
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var durationObservation: NSKeyValueObservation?
@@ -52,19 +64,65 @@ final class PlayerController: ObservableObject {
     }
 
     func load(url: URL) {
+        currentURL = url
+        source = .original
+        install(url: url, seek: 0, autoPlay: false, resetTime: true)
+    }
+
+    /// D074 #3: switch between the source clip and the low-resolution display
+    /// or film proxy without losing the playhead. The item replacement is
+    /// asynchronous, so `isSwitchingSource` suppresses the resulting pause
+    /// event while the seek/play settles.
+    func switchSource(to url: URL, source: PlaybackSource, autoPlay: Bool) {
+        if currentURL?.standardizedFileURL == url.standardizedFileURL {
+            self.source = source
+            if autoPlay, !isPlaying {
+                player.play()
+            }
+            return
+        }
+        let seconds = player.currentTime().seconds
+        let target = seconds.isFinite ? max(0, seconds) : 0
+        let shouldPlay = autoPlay || isPlaying
+        isSwitchingSource = true
+        self.source = source
+        install(url: url, seek: target, autoPlay: shouldPlay, resetTime: false)
+    }
+
+    private func install(url: URL, seek seconds: Double, autoPlay: Bool, resetTime: Bool) {
         durationObservation?.invalidate()
         player.pause()
-        currentTime = 0
-        duration = 0
-        isPlaying = false
+        if resetTime {
+            currentTime = 0
+            duration = 0
+            isPlaying = false
+        }
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
+        currentURL = url
         durationObservation = item.observe(\.duration, options: [.initial, .new]) { [weak self] item, _ in
             let length = item.duration.seconds
             guard length.isFinite, length > 0 else { return }
             Task { @MainActor in
                 self?.duration = length
             }
+        }
+        let time = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if autoPlay {
+                    self.player.play()
+                }
+                // The pause notification from replaceCurrentItem can arrive
+                // slightly after the seek callback; keep the guard up briefly.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    self.isSwitchingSource = false
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.isSwitchingSource = false
         }
     }
 

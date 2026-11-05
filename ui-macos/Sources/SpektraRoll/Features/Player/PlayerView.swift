@@ -65,22 +65,45 @@ struct PlayerView: View {
             loadCurrentAsset()
         }
         .onChange(of: player.isPlaying) { _, playing in
-            guard !playing else { return }
+            if playing {
+                app.preparePlaybackProxy()
+                syncPlayerSource()
+                return
+            }
+            guard !player.isSwitchingSource else { return }
             if app.showFilmPreview {
                 app.refreshFilmPreview(at: player.currentTime)
             } else {
                 app.refreshSourcePreview(at: player.currentTime)
             }
         }
+        .onChange(of: app.showFilmPreview) { _, _ in
+            guard player.isPlaying else { return }
+            app.preparePlaybackProxy()
+            syncPlayerSource()
+        }
+        .onChange(of: app.displayProxyURL) { _, _ in
+            guard player.isPlaying else { return }
+            syncPlayerSource()
+        }
+        .onChange(of: app.filmProxyURL) { _, _ in
+            guard player.isPlaying else { return }
+            syncPlayerSource()
+        }
         .onChange(of: app.settings) { old, new in
             if app.showFilmPreview {
-                if !player.isPlaying {
+                if player.isPlaying {
+                    app.scheduleFilmProxyRefresh()
+                } else {
                     app.refreshFilmPreview(at: player.currentTime)
                 }
             } else if old.input != new.input
                         || old.ocioEnabled != new.ocioEnabled
                         || old.ocioInput != new.ocioInput {
                 app.refreshSourcePreview(at: player.currentTime)
+                if player.isPlaying, let asset = app.selectedAsset {
+                    app.prepareDisplayProxy(for: asset)
+                }
             }
         }
     }
@@ -88,9 +111,23 @@ struct PlayerView: View {
     private func loadCurrentAsset() {
         guard let asset = app.selectedAsset, asset.isPlayable else { return }
         player.load(url: asset.url)
+        app.prepareDisplayProxy(for: asset)
         app.refreshSourcePreview(at: 0)
         if app.showFilmPreview {
             app.refreshFilmPreview(at: 0)
+        }
+    }
+
+    /// D074 #3: pick the source clip, the display proxy or the film proxy for
+    /// the current playback mode, preserving the playhead.
+    private func syncPlayerSource() {
+        guard let asset = app.selectedAsset, asset.isPlayable else { return }
+        if app.showFilmPreview, let film = app.filmProxyURL {
+            player.switchSource(to: film, source: .film, autoPlay: true)
+        } else if let display = app.displayProxyURL {
+            player.switchSource(to: display, source: .display, autoPlay: true)
+        } else {
+            player.switchSource(to: asset.url, source: .original, autoPlay: true)
         }
     }
 
@@ -268,6 +305,24 @@ struct PlayerView: View {
 
             Spacer()
 
+            if app.isGeneratingProxy {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("\(app.proxyStatus) \(Int((app.proxyProgress * 100).rounded()))%")
+                        .font(Theme.micro)
+                        .foregroundStyle(Theme.textMuted)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Theme.backgroundElevated.opacity(0.94)))
+                .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, 26)
+                .padding(.bottom, 6)
+            }
+
             if !player.isPlaying, let stats = app.frameStats {
                 HistogramView(stats: stats)
                     .padding(.horizontal, 26)
@@ -329,7 +384,8 @@ struct PlayerView: View {
             .buttonStyle(PillButtonStyle(filled: false))
 
             Button {
-                app.setFilmPreview(!app.showFilmPreview, at: player.currentTime)
+                app.setFilmPreview(!app.showFilmPreview, at: player.currentTime,
+                                   renderStill: !player.isPlaying)
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: app.showFilmPreview ? "film.fill" : "film")
