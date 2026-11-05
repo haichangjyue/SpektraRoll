@@ -1,6 +1,6 @@
 # STATUS
 
-**最后更新**：2026-11-05（D081 光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows 已验，Mac/CI 待跑） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D080；Windows Qt 冻结）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-05（D081 光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows + Mac 已验，CI 待跑） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D080；Windows Qt 冻结）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
@@ -86,7 +86,7 @@
 - [x] **电影画幅 CINE + APP 版本**（D078）：画幅新增 Super 8（5.79 mm），16mm 10.26 / Super 16 12.52 / Super 35 24.89 / 65mm 52.63 对齐 SpektraLab 相机负片长边；35mm 保留 36.0 全画幅、IMAX 70.0；全部标 CINE，菜单和当前画幅行显示 CINE + 物理宽度。INFO 引擎区新增 APP 行，未发布版本显示 `内部测试（D079） · 0.1.0`。`data/ui-schema.json` frameWidth 下限 8→5，允许 Super 8。
 - [x] **配光按钮**（D079）：放在 `导出` 右侧；暂停、抽取当前帧、解码到 sRGB、取亮度中位数，算出让 18% 线性中灰落位的 EV，写入曝光并刷新胶片效果；中性 C/M/Y 由胶片/相纸数据库自动查表。`C0113.MP4` 实测 **+0.66 EV**，ADVANCED 曝光同步。未做 Y/M 偏移控件和独立 filter-pack solve。
 - [x] **macOS 静态 OCIO 2.6.0**（D080）：新增 `scripts/build-ocio-macos.sh` / `.command`，关 Python/APPS/TESTS/DOCS，静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测（`OCIO_PREFIX` 可覆盖）。bundle `capabilities` 报 `ocio.available=true, 2.6.0`；`ocio-info` / `lut bake --ocio-input "S-Log3 S-Gamut3.Cine"` 成功；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib。INFO 显示“可用 2.6.0”，ADVANCED OCIO 输入可用；APP 升到 D080。仍未做：spectral-gpu 的 OCIO、`--exr-linear` 的 OCIO 显示变换。
-- [x] **光谱 GPU 接 OCIO + 线性 EXR**（D081）：GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退。Windows `ctest` 11/11，CPU vs GPU **109.43 dB**，strength 0.5 与线性 EXR 读回 **inf**；Mac/CI 待跑。
+- [x] **光谱 GPU 接 OCIO + 线性 EXR**（D081）：GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退。Windows + Mac `ctest` 均 **11/11**；Windows CPU vs D3D11 **109.43 dB**，Mac CPU vs Metal **113.70 dB**；strength 0.5 与线性 EXR 读回 **inf**。CI 待跑。
 - [x] `scripts\demo-log-inputs.cmd`：九种输入各烘一张 LUT + GPU/CPU 对照表
 - [x] `scripts\demo-ocio.cmd`：配置信息 / Apple Log 双实现 / ACES 显示器变换 / LUT 对比
 - [x] `scripts\demo-ocio-ui.cmd`：界面自检（52 个空间）/ UI LUT vs CLI / 用 UI 的 LUT 渲一帧

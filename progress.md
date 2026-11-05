@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D081：光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows 已验，Mac/CI 待跑）
+> **最后更新**：2026-11-05（D081：光谱 GPU 接 OCIO + OCIO 线性 EXR；Windows + Mac 已验，CI 待跑）
 > **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D080），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO（D041–D081）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
@@ -10,9 +10,9 @@
 
 ---
 
-## 本次对话交接摘要（D075–D080，2026-11-05 晚）
+## 本次对话交接摘要（D075–D081，2026-11-05 晚）
 
-> **新开对话先读这一节**；下面是逐轮细节（D080 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO。
+> **新开对话先读这一节**；下面是逐轮细节（D081 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO、D081 光谱 GPU 的 OCIO + 线性 EXR。
 
 ### 一、已完成的事项
 
@@ -25,7 +25,7 @@
 | **D078** | 电影画幅 + APP 版本 | 新增 Super 8；16mm 10.26 / Super 16 12.52 / Super 35 24.89 / 65mm 52.63 对齐 SpektraLab 相机负片长边；35mm 36.0、IMAX 70.0；全部标 CINE；INFO 引擎区加 APP 行 |
 | **D079** | 配光按钮 | 放在 `导出` 右侧；暂停、抽取当前帧、解到 sRGB、按亮度中位数把 18% 线性中灰落位；`C0113.MP4` 实测 **+0.66 EV**；中性 C/M/Y 由胶片/相纸数据库自动查表 |
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
-| **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退 |
+| **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB** |
 
 **顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D081**。
 
@@ -147,7 +147,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 
 ---
 
-## 最新：D081 · 光谱 GPU 接 OCIO + 线性 EXR（2026-11-05 晚；Windows 已验，Mac/CI 待跑）
+## 最新：D081 · 光谱 GPU 接 OCIO + 线性 EXR（2026-11-05 晚；Windows + Mac 已验，CI 待跑）
 
 > 解决 D080 剩下的两个 P0 欠账：`--engine spectral-gpu` + `--ocio-input` 不再回退 CPU 光谱；`convert --ocio-display ... --exr-linear` 不再用 sRGB/PQ/HLG 猜显示变换的逆。
 
@@ -173,10 +173,15 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 同上 `--strength 0.5` | **inf**（16-bit 读回逐位一致） |
 | `convert --ocio-display ... --exr-linear` vs 普通线性 EXR | **inf** |
 | `video --engine spectral-gpu --ocio-input "S-Log3 S-Gamut3.Cine"` | 2 帧 320×180 H.264 正常出片，无回退 warning |
+| Mac `scripts/build-macos-ui.sh --no-open` | 通过（CLI + SwiftUI + `.app`） |
+| Mac `ctest`（`build-macos-tests`） | **11/11**；`gpu_film` 真跑 Metal |
+| Mac `test_gpu_film` OCIO 用例 | worst **0.000000** |
+| Mac OCIO CPU vs Metal | 320×180 / 16-bit，**113.70 dB** |
+| Mac `convert --ocio-display ... --exr-linear` | 与普通线性 EXR **inf** |
+| Mac `video --engine spectral-gpu --ocio-input` | 2 帧 320×180 H.264 正常出片，无 warning |
 
 ### 三、仍未做 / 待验收
 
-- **Mac 真机**：Metal 后端代码路径已改，但本机无法编译 Metal；需要在 Mac 上 `scripts/build-macos-ui.sh --no-open` + 跑 `ctest`（含 `gpu_film`）并实际播一段 OCIO 代理。
 - **CI**：Windows + macOS 双平台待跑；macOS 的 `gpu_film` 会真正走 Metal 对拍。
 - **性能**：OCIO 的 CPU 批量解码仍在每帧上传前执行；4K 有成本但远低于回退 CPU 光谱。后续可把 OCIO 变换烘成 3D LUT 上 GPU。
 - **UI 提示**：Qt 里“OCIO 输入只能用 CPU 光谱”的旧翻译还留着（不会再触发），可下一轮清掉。

@@ -186,7 +186,7 @@ void printUsage() {
         "      the scan is balanced between clear base and maximum dye. Selecting a\n"
         "      positive stock (Ektachrome / Velvia / Provia / Kodachrome) without\n"
         "      --scan defaults to this mode (D067).\n"
-        "      --contrast pivots at 18% grey (negative scans default to 1.15,\n"
+        "      --contrast pivots at 18%% grey (negative scans default to 1.15,\n"
         "      slide scans to 1.0; pass 1.0 for the flat film curve only).\n"
         "      --gamut oklch maps out-of-gamut colour back into sRGB by reducing\n"
         "      OkLCh chroma; negative scans default to it, print keeps it off.\n"
