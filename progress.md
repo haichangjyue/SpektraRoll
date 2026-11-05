@@ -43,9 +43,9 @@
 
 ### 三、当前状态（截至最后一次操作）
 
-- 最新提交：`b2874b2 macos: static OCIO 2.6.0 build and UI availability (D080)`
-- CI：run **148** Windows + macOS 双绿（含 `swift build`）
-- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已 reset 到 `b2874b2`
+- 最新提交：`03f9793 docs: add D075–D080 handoff summary`（功能代码 `b2874b2`）
+- CI：功能代码 run **148** Windows + macOS 双绿（含 `swift build`）
+- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，功能代码已同步到 `b2874b2`（再 `git pull` 可含本文档提交）
 - Mac app：已正常启动并验收（用 `open build-ui-macos/SpektraRoll.app` 可重新打开）
 - Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
 - Mac 代理缓存：`~/Library/Caches/SpektraRoll/preview-cache/`，上限 5 GB，最后约 9 MB / 4 个代理
