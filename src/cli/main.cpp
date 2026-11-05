@@ -2657,7 +2657,9 @@ int cmdVideo(const Args& args) {
         // the frames arrive with width and height swapped.
         const std::string rotation = firstLine(runCapture(
             shellQuote(ffprobe) +
-            " -v error -select_streams v:0 -show_entries side_data=rotation"
+            // D082: `side_data=rotation` alone scans the whole clip (20+ s on
+            // a 4K50 file); `stream_side_data` keeps it to the header.
+            " -v error -select_streams v:0 -show_entries stream_side_data=rotation"
             " -of default=noprint_wrappers=1:nokey=1 " +
             shellQuote(inPath)));
         const int degrees = std::atoi(rotation.c_str());
