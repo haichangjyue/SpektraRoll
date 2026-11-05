@@ -989,7 +989,9 @@ final class AppState: ObservableObject {
         // look to a LUT once and rendering the proxy through the LUT engine is
         // several times faster at the same visual result for 360–720 px.
         proxy.engine = .lut
-        proxy.textureEngine = .auto
+        // Ask for the GPU texture chain explicitly: with the LUT engine "auto"
+        // would keep grain/halation on the CPU and dominate the proxy cost.
+        proxy.textureEngine = .gpu
         proxy.codec = .h264
         proxy.trc = .srgb
         proxy.crf = 20
