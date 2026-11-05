@@ -51,6 +51,21 @@ open -F \
 
 调试日志：`/tmp/spektra-debug.log`。
 
+## D075 验收（macOS UI v1.1 P0）
+
+```bash
+cd /Users/wenyutao/Documents/SpektraRoll
+export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+scripts/build-macos-ui.sh --no-open
+open build-ui-macos/SpektraRoll.app
+```
+
+1. 双击 `C0113.MP4`，暂停时应看到输入解码后的 sRGB 静帧（不是 Log 灰片），下方有直方图。
+2. 滚轮/双指缩放、拖拽平移、`适合` / `100%`、双击切换。
+3. 开 `胶片效果`，拖动 FILM / PRINT / ADVANCED 任意滑块，画面应自动刷新（180 ms 防抖）。
+4. 点 `导出` 应跳到 OUTPUT。
+5. 已知未做：播放中的实时胶片预览（D074 #3 / P1）；播放中关闭胶片效果仍是 AVPlayer 的 Log 画面。
+
 ## 已验证
 
 - `.app` 启动、三栏、字体、导入缩略图、AVPlayer 播放、空格、INFO、胶片效果、渲染。

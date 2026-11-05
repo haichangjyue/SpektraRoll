@@ -2,17 +2,54 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-05（D074：macOS UI v1 验收反馈，待做）
-> **当前里程碑**：**M5 进行中 · macOS UI v1 已验收，v1.1 反馈待做（D074）+ Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
+> **最后更新**：2026-11-05（D075：macOS UI v1.1 P0 已完成，待 Mac 验收）
+> **当前里程碑**：**M5 进行中 · macOS UI v1 已验收，v1.1 P0 已实现（D075）、P1 实时预览待做 + Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 可选 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment，D041–D071）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
 
 ---
 
-## 最新：D074 · macOS UI v1 验收反馈（2026-11-05 晚，未开工）
+## 最新：D075 · macOS UI v1.1 P0（2026-11-05 晚，代码完成，待 Mac 验收）
 
-> 产品负责人已在 Mac 上实际验收 D073：**效果比预期好**。以下 6 点是下一轮（macOS UI v1.1）要改的，**目前都没有实现**。
+> 按 D074 的 P0 顺序完成 #4 / #6 / #1 / #2，并顺手做了 #5 的参数即时刷新；播放时的实时胶片预览（#3）留到 P1。CI run **140** Windows + macOS 双绿（含 `swift build`），但 Mac 上的实际观感还没验收。
+
+### 已完成
+
+| 反馈 | 实现 |
+|---|---|
+| **#4 关闭胶片效果显示 sRGB** | 暂停时用 `convert --from <input>`（OCIO 则 `--ocio-input`）把当前帧解码到 sRGB，作为“原片”显示，不再直接显示 AVPlayer 的 Log 画面。播放中仍走 AVPlayer；P1 代理后替换。 |
+| **#6 导出按钮** | 播放器控制条 `胶片效果` 左侧新增“导出”，点击切到 `OUTPUT` tab。 |
+| **#1 直方图 + 宽容度** | 视频下方、控制条上方；RGB/亮度直方图 + 宽容度（0.1%–99.9% 线性光档数）、亮度范围、高光/暗部裁切百分比。从当前静帧 720 px 降采样计算。 |
+| **#2 缩放/平移** | 滚轮/双指缩放、拖拽平移、`适合` / `100%` 按钮、双击切换；100% = 1 源像素对 1 显示点。 |
+| **#5 参数即时刷新** | 胶片效果开启且暂停时，参数变化 180 ms 防抖后自动重渲；渲染中再改参数会标记 dirty，完成后自动补最新一帧。 |
+
+### 关键文件
+
+- `ui-macos/Sources/SpektraRoll/Features/Player/PlayerView.swift`：缩放/平移、导出、布局。
+- `.../FrameStats.swift`、`.../HistogramView.swift`：直方图与宽容度/裁切数据。
+- `App/AppState.swift`：display 预览、防抖、dirty 队列。
+- `Engine/EngineClient.swift`：`convertToDisplay`。
+- `Design/Components.swift`：小号胶囊按钮。
+
+### 验收（Mac）
+
+1. `scripts/build-macos-ui.sh --no-open` → `open build-ui-macos/SpektraRoll.app`
+2. 双击 `C0113.MP4` → 暂停时应显示解码后的 sRGB 画面（不是 Log 灰片），下方有直方图。
+3. 滚轮缩放、拖拽平移、`适合` / `100%`、双击切换。
+4. 开 `胶片效果`，拖动 FILM / PRINT / ADVANCED 任意滑块，画面自动刷新。
+5. `导出` 按钮跳到 OUTPUT。
+
+### 仍未做（P1）
+
+- **#3 播放时实时胶片预览**：按参数 hash 生成低分辨率显示代理 + 胶片代理，AVPlayer 切换，缓存失效/清理。
+- 播放中关闭胶片效果时仍是 AVPlayer 的 Log 画面；暂停才显示 sRGB 静帧。
+
+---
+
+## 最新：D074 · macOS UI v1 验收反馈（2026-11-05 晚；P0 已在 D075 实现）
+
+> 产品负责人已在 Mac 上实际验收 D073：**效果比预期好**。以下 6 点是下一轮（macOS UI v1.1）要改的；**P0 的 #4/#6/#1/#2 和 #5 已在 D075 实现，剩余 #3 见 D075 的 P1**。
 
 ### 一、这轮已完成的事
 
