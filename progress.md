@@ -249,7 +249,8 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 首次启动 | 新增弹窗「早期测试版本」：说明功能仍在实验、未来可能大改；小字附 GitHub / spektrafilm 链接和作者、许可；点「我知道了」后不再出现（`sr.hasSeenAlphaNotice`） |
 | DMG | `build-pkg/SpektraRoll-0.0.1-alpha.1-arm64.dmg`，**91 MB** |
 | SHA256 | `7ffe1cedbcc2835478a32cc9aca93538ef61263df31847786a0e9fd92743f353` |
-| 验证 | 弹窗截图正常；设置 `sr.hasSeenAlphaNotice=true` 后重启只出主窗口；INFO「关于」显示版本 / 作者 / 上游；引擎区无 APP 行 |
+| 验证 | 弹窗截图正常；设置 `sr.hasSeenAlphaNotice=true` 后重启只出主窗口；INFO「关于」显示 `0.0.1-alpha.1` / 作者 / 上游；引擎区无 APP 行 |
+| CI run **174** | Windows + macOS **双绿**（含 `swift build`、ctest、OCIO、视频冒烟） |
 
 **仍未做**：干净 Mac 实测；GitHub Release（产品负责人决定先内测）；路线 B 公证。
 
