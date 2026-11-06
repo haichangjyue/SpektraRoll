@@ -70,6 +70,19 @@ struct InfoTab: View {
                                icon: "film")
             }
 
+            SectionTitle("关于")
+            Panel {
+                VStack(alignment: .leading, spacing: 8) {
+                    InfoRow(label: "版本", value: AppVersion.display)
+                    InfoRow(label: "作者", value: AppVersion.author)
+                    InfoRow(label: "基于", value: "spektrafilm（Andrea Volpato）")
+                    InfoLinkRow(label: "上游", title: "github.com/andreavolpato/spektrafilm", url: AppVersion.upstreamURL)
+                    InfoLinkRow(label: "源码", title: "GitHub · SpektraRoll", url: AppVersion.sourceURL)
+                    InfoLinkRow(label: "反馈", title: "GitHub Issues", url: AppVersion.issuesURL)
+                    InfoRow(label: "许可", value: "GPL-3.0-or-later")
+                }
+            }
+
             SectionTitle("引擎")
             Panel {
                 VStack(alignment: .leading, spacing: 8) {
@@ -95,18 +108,6 @@ struct InfoTab: View {
                 }
             }
 
-            SectionTitle("关于")
-            Panel {
-                VStack(alignment: .leading, spacing: 8) {
-                    InfoRow(label: "版本", value: AppVersion.fullDisplay)
-                    InfoRow(label: "作者", value: AppVersion.author)
-                    InfoRow(label: "基于", value: "spektrafilm（Andrea Volpato）")
-                    InfoLinkRow(label: "上游", title: "github.com/andreavolpato/spektrafilm", url: AppVersion.upstreamURL)
-                    InfoLinkRow(label: "源码", title: "GitHub · SpektraRoll", url: AppVersion.sourceURL)
-                    InfoLinkRow(label: "反馈", title: "GitHub Issues", url: AppVersion.issuesURL)
-                    InfoRow(label: "许可", value: "GPL-3.0-or-later")
-                }
-            }
         }
     }
 

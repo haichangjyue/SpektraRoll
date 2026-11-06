@@ -1519,7 +1519,7 @@
   - 图标改用产品负责人提供的 `X:\agent\footage\AppIcon.icns`（app 内 checksum 一致；`.iconset` 由该 `.icns` 反解）。
   - 版本改为 **`0.0.1-alpha.1`**（`CFBundleShortVersionString`），`CFBundleVersion = 1`；去掉“内部测试（D082）”。
   - INFO **引擎区去掉重复的 APP 行**；版本号只在 INFO →「关于」出现。
-  - 「关于」标注：作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接、源码 / Issues、GPL-3.0-or-later。
+  - 「关于」放在 INFO 顶部（文件信息之后，保证版本号可见）：作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接、源码 / Issues、GPL-3.0-or-later。
   - 首次启动新增「早期测试版本」弹窗：功能仍在实验、未来可能大改；小字附 GitHub / spektrafilm 链接和作者、许可；点「我知道了」后写入 `sr.hasSeenAlphaNotice`，不再弹出。
   - Info.plist 补齐 `CFBundleIconFile`、`LSApplicationCategoryType`、`NSHumanReadableCopyright`、最低系统 14.0。
   - 新增 `scripts/package-macos.sh` / `.command`：构建 → 从内到外签名（ad-hoc 或 Developer ID）→ 生成带 `Applications` 快捷方式的 DMG → SHA256；预留 `notarytool` / `staple` / `spctl`。

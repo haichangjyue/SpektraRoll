@@ -245,10 +245,10 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 图标 | 换成产品负责人提供的 `X:\agent\footage\AppIcon.icns`（1296886 B）；`.iconset` 同步由该 `.icns` 反解，app 内图标 checksum 一致 |
 | 版本 | **`0.0.1-alpha.1`**（`CFBundleShortVersionString`）；`CFBundleVersion = 1`；界面显示 `0.0.1-alpha.1` |
 | 引擎区 | 去掉重复的 **APP** 行；版本号只在 INFO →「关于」出现 |
-| 关于 | 新增 作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接；保留源码 / Issues / GPL |
+| 关于 | 放在 INFO 顶部（文件信息之后，确保版本可见）：作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接；保留源码 / Issues / GPL |
 | 首次启动 | 新增弹窗「早期测试版本」：说明功能仍在实验、未来可能大改；小字附 GitHub / spektrafilm 链接和作者、许可；点「我知道了」后不再出现（`sr.hasSeenAlphaNotice`） |
 | DMG | `build-pkg/SpektraRoll-0.0.1-alpha.1-arm64.dmg`，**91 MB** |
-| SHA256 | `c81bd2bc15630e05ae52449d100625b677384a5a523833485391e6ba276652aa` |
+| SHA256 | `7ffe1cedbcc2835478a32cc9aca93538ef61263df31847786a0e9fd92743f353` |
 | 验证 | 弹窗截图正常；设置 `sr.hasSeenAlphaNotice=true` 后重启只出主窗口；INFO「关于」显示版本 / 作者 / 上游；引擎区无 APP 行 |
 
 **仍未做**：干净 Mac 实测；GitHub Release（产品负责人决定先内测）；路线 B 公证。
