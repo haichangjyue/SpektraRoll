@@ -2,8 +2,8 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-06（D083：路线 A 已打包，`0.0.1-alpha.1` DMG 91 MB 已在 Mac 安装验证；路线 B 待 Developer ID）
-> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D082），进入早期预览发布准备（D083 待决策），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO + 时间线/队列/区间/滤色片偏移（D041–D082）
+> **最后更新**：2026-11-06（D083：`0.0.1-alpha.1` **已发布 GitHub Pre-release**，91 MB DMG + SHA256 已上传；路线 B 待 Developer ID）
+> **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D082），`0.0.1-alpha.1` 早期预览已发布（D083），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO + 时间线/队列/区间/滤色片偏移（D041–D082）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
 > **本地目录**：`X:\agent\SpektraRoll`
@@ -151,7 +151,7 @@ ctest --test-dir build-macos-tests --output-on-failure
 - [ ] 公开版签名：从内到外签 `ffmpeg`/`ffprobe`、`spektra-roll-cli`、`SpektraRoll.app`；`--options runtime --timestamp`。
 - [ ] 公证 + staple：`xcrun notarytool submit ... --wait`、`xcrun stapler staple`、`spctl -a -vvv -t install`。
 - [ ] 干净 Mac 测试：无 Xcode/Homebrew，DMG 安装、Gatekeeper、导入 C0113、预览、队列、区间、ProRes/音频/timecode、OCIO。
-- [ ] 发布物：GitHub Release / tag `v0.0.1-alpha.1`（DMG 与 SHA256 已生成；产品负责人决定先内测，暂不发布）。
+- [x] 发布物：GitHub **Pre-release `v0.0.1-alpha.1`**（tag + DMG + SHA256 已上传）。
 
 **P1 · 发布增强（做完 P0 再定）**
 - [ ] Universal（Intel + Apple Silicon）：需要 universal OCIO/ffmpeg；早期预览可先只发 arm64。
@@ -232,11 +232,11 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 ### 三、未完成 / 注意
 
 - **干净 Mac 实测**：本轮只在已有 Xcode/Homebrew 的 Mac 上验证；自包含检查通过，但“无 Xcode/Homebrew 的机器”还需一台实机或新用户账户跑一遍。
-- **公开下载**：产品负责人决定**本轮不发 GitHub Release**，DMG 只做内测分发；等内测通过后再发 Pre-release / tag。
+- **公开下载**：2026-11-06 已发布 **GitHub Pre-release `v0.0.1-alpha.1`**，DMG 与 SHA256 已上传；下载页见 release 链接。
 - **路线 B**：需要 Apple Developer Program（$99/年）、Developer ID Application 证书、`notarytool` keychain profile；脚本已支持 `--identity` + `--notary-profile`。
 - DMG 未加背景图；当前只有 app、Applications 快捷方式、安装说明。
 
-### 四、v0.0.1-alpha.1 修订（同日，待产品负责人验收）
+### 四、v0.0.1-alpha.1 修订（同日，已发布）
 
 按产品负责人第二轮反馈修改：
 
@@ -251,8 +251,9 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | SHA256 | `7ffe1cedbcc2835478a32cc9aca93538ef61263df31847786a0e9fd92743f353` |
 | 验证 | 弹窗截图正常；设置 `sr.hasSeenAlphaNotice=true` 后重启只出主窗口；INFO「关于」显示 `0.0.1-alpha.1` / 作者 / 上游；引擎区无 APP 行 |
 | CI run **174** | Windows + macOS **双绿**（含 `swift build`、ctest、OCIO、视频冒烟） |
+| 发布 | GitHub **Pre-release `v0.0.1-alpha.1`**；tag 指向 `214f1d9`；附件 `SpektraRoll-0.0.1-alpha.1-arm64.dmg` + `SHA256.txt`；下载 HEAD 校验 95,604,075 B |
 
-**仍未做**：干净 Mac 实测；GitHub Release（产品负责人决定先内测）；路线 B 公证。
+**仍未做**：干净 Mac 实测；路线 B 公证。
 
 ---
 

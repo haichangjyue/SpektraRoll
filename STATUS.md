@@ -1,6 +1,6 @@
 # STATUS
 
-**最后更新**：2026-11-06（D083 macOS `0.0.1-alpha.1` 打包完成：新图标 / 首次启动弹窗 / 关于面板 / 91 MB DMG；路线 A 已产出，B 待 Developer ID） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D082；Windows Qt 冻结）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-06（D083 macOS `0.0.1-alpha.1` **已发布 GitHub Pre-release**：新图标 / 首次启动弹窗 / 关于面板 / 91 MB DMG；路线 B 待 Developer ID） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D082；Windows Qt 冻结）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
@@ -21,6 +21,7 @@
 - [x] 安装到 `/Applications` 验证：弹窗与关于面板正常；内置 CLI 渲染 4K50 2 帧 **1150.9 ms/帧**
 - [x] 自包含检查：CLI / ffmpeg / app 均无非系统 dylib；OCIO 2.6.0、Metal 光谱/质感可用
 - [x] DMG **91 MB**，`shasum -c` 通过；未公证 → `spctl` 拒绝（预期，右键打开）
+- [x] 发布 **GitHub Pre-release `v0.0.1-alpha.1`**：tag `214f1d9`，DMG + SHA256 已上传
 - [ ] 干净 Mac（无 Xcode/Homebrew）实测
 - [ ] Apple Developer 账号 + Developer ID → 路线 B（公证 + staple）
 

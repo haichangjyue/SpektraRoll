@@ -1537,7 +1537,7 @@
   - 早期预览只支持 Apple Silicon / macOS 14+；Universal 需要 universal OCIO/ffmpeg，后续再做。
   - 官方包不含 RED SDK / R3D 解码；R3D 继续只限本地 BYO-SDK 构建。
   - 账号下来后同一脚本加 `--identity` + `--notary-profile` 即可切 B，不需要改 UI。
-  - **本轮不发 GitHub Release / tag**：产品负责人选择先内部验收，DMG 与 SHA256 保留在本机；README 只说明“内测中”，不出现空的下载链接。内测通过后再补 Pre-release。
+  - **已发布 GitHub Pre-release `v0.0.1-alpha.1`**（2026-11-06，产品负责人确认）：tag 指向 `214f1d9`，附件为 `SpektraRoll-0.0.1-alpha.1-arm64.dmg`（95,604,075 B）与 `SHA256.txt`；README 下载链接已指向该 Release。
 
 ---
 
