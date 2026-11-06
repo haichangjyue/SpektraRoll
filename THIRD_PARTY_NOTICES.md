@@ -8,9 +8,10 @@ respective authors.
 
 ### FFmpeg 9.0.2 (`ffmpeg`, `ffprobe`)
 
-The macOS app bundle contains a static FFmpeg 9.0.2 build with GPL components
-enabled. FFmpeg is licensed under the **GPL-2.0-or-later** for this build
-(LGPL-2.1-or-later for builds without `--enable-gpl`).
+The macOS app bundle contains a static FFmpeg 9.0.2 build configured with
+`--enable-version3 --enable-gpl` (including x264/x265 and other GPL
+components). That binary is licensed under **GPL-3.0-or-later**, which is
+compatible with SpektraRoll's own GPL-3.0-or-later licence.
 
 - Project: <https://ffmpeg.org/>
 - Source for the exact GPL build: <https://ffmpeg.org/download.html>
@@ -20,6 +21,15 @@ enabled. FFmpeg is licensed under the **GPL-2.0-or-later** for this build
   binary is available on request via
   <https://github.com/haichangjyue/SpektraRoll/issues> and from the upstream
   project above.
+- Build configuration (from `ffmpeg -version`):
+  `--pkg-config-flags=--static --enable-gray --enable-libxml2 --enable-version3
+  --enable-gpl --enable-openssl --enable-libfreetype --enable-fontconfig
+  --enable-libharfbuzz --enable-libbluray --enable-libsnappy --enable-libsrt
+  --enable-libvmaf --enable-libass --enable-libklvanc --enable-libzimg
+  --enable-libzvbi --enable-libaom --enable-libdav1d --enable-libopenh264
+  --enable-libopenjpeg --enable-librav1e --enable-libsvtav1 --enable-libvpx
+  --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265
+  --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libtheora`
 
 FFmpeg is invoked as a separate process for decoding and encoding; it is not
 linked into SpektraRoll.

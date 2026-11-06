@@ -71,7 +71,7 @@ disclaimer of non-affiliation, and never in the product name, logo or domain.
 | colour-science (numeric tables only) | BSD-3-Clause | CMFs, D55/D50, Mallett basis, XYZ→sRGB matrix embedded in `spectral_tables.cpp` |
 | OpenColorIO (optional, D062/D080) | Apache-2.0 | statically linked from a hand-built prefix on Windows (MinGW) and macOS (D080); only used when `SR_WITH_OCIO` finds it |
 | OpenImageIO (planned) | Apache-2.0 | |
-| FFmpeg (subprocess) | LGPL-2.1+ by default | decoded/encoded by a child process; avoid shipping an `--enable-gpl` build |
+| FFmpeg (subprocess) | LGPL-2.1+ by default; **GPL-3.0-or-later** for the bundled macOS build | the macOS preview DMG ships a static `--enable-version3 --enable-gpl` build (x264/x265 included), invoked as a child process; source/build info in `THIRD_PARTY_NOTICES.md` |
 | Qt 6 (Widgets) | LGPL-3.0 / GPL-3.0 (commercial available) | dynamically linked, deployed as DLLs; must ship the LGPL notice and keep the DLLs replaceable |
 | LibRaw (planned) | LGPL-2.1 / CDDL | |
 | Metal-cpp / D3D12 headers | Apache-2.0 / MIT | |

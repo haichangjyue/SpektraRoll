@@ -217,7 +217,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 项 | 结果 |
 |---|---|
 | DMG | `build-pkg/SpektraRoll-0.1.0-preview1-arm64.dmg`，**90 MB**（app 175 MB） |
-| SHA256 | `shasum -a 256 -c SHA256.txt` → **OK** |
+| SHA256 | `3b4f6702e3b4e0ba755f68bdbe0c399c4c1628507215172608fd31cb4d7063f5`；`shasum -c` → **OK** |
 | 安装 | 从 DMG `ditto` 到 `/Applications`，启动正常；INFO 显示 **预览版 1 · 0.1.0** |
 | 签名 | ad-hoc，`codesign --verify --deep --strict` 通过；`spctl` 拒绝（未公证，预期） |
 | 自包含 | app / CLI / ffmpeg 均无非系统 dylib；CLI `capabilities` → `0.1.0`、OCIO 2.6.0、Metal 光谱/质感可用 |

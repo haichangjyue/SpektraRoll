@@ -24,8 +24,9 @@ $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
 $g.Clear([System.Drawing.Color]::Transparent)
 
 # --- Rounded dark background -------------------------------------------------
-$rect = New-Object System.Drawing.RectangleF 32, 32, 960, 960
-$radius = 210.0
+# Standard macOS grid: the rounded square occupies ~824 of 1024 px.
+$rect = New-Object System.Drawing.RectangleF 100, 100, 824, 824
+$radius = 180.0
 $path = New-Object System.Drawing.Drawing2D.GraphicsPath
 $path.AddArc($rect.X, $rect.Y, $radius, $radius, 180, 90)
 $path.AddArc($rect.Right - $radius, $rect.Y, $radius, $radius, 270, 90)
