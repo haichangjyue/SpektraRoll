@@ -1506,6 +1506,35 @@
 
 ---
 
+## D083 · 早期预览发布：先 A（未公证内测）后 B（Developer ID + 公证）
+
+- **日期**：2026-11-06
+- **背景**：功能与界面已较完善，需要发第一个早期预览版；明确不上架 App Store。发布前审计见 `progress.md` D083：app 174 MB、arm64 thin、ad-hoc、无图标、无 DMG；Mac 上 0 个 Developer ID 证书；内置 ffmpeg 9.0.2 为 GPL 静态构建。
+- **选项**：
+  - A. 先出未公证内测 DMG（右键打开）
+  - B. 等 Apple Developer 账号，直接做 Developer ID + 公证公开预览
+- **建议**：先 A 后 B；早期预览只发 Apple Silicon。
+- **你的决定**：**先 A 后 B**。
+- **本轮执行（A）**：
+  - 新增品牌图标 `ui-macos/Resources/AppIcon.icns`（谱色片盘，1024 px；源脚本 `scripts/make-app-icon.ps1`）。
+  - 版本改为 **`0.1.0` · 预览版 1**：去掉“内部测试（D082）”，`CFBundleVersion = 1`；INFO 增加“关于”面板（源码 / Issues / 许可证）。
+  - Info.plist 补齐 `CFBundleIconFile`、`LSApplicationCategoryType`、`NSHumanReadableCopyright`、最低系统 14.0。
+  - 新增 `scripts/package-macos.sh` / `.command`：构建 → 从内到外签名（ad-hoc 或 Developer ID）→ 生成带 `Applications` 快捷方式的 DMG → SHA256；预留 `notarytool` / `staple` / `spctl`。
+  - 新增 `THIRD_PARTY_NOTICES.md` 与 `docs/release-macos-preview1.md`；app 内打包 `LICENSE`、第三方声明、字体 OFL。
+- **验证**：
+  - DMG `SpektraRoll-0.1.0-preview1-arm64.dmg` **90 MB**（app 175 MB），`shasum -c` 通过。
+  - 从 DMG 安装到 `/Applications` 后启动正常，INFO 显示 **预览版 1 · 0.1.0**。
+  - 内置 CLI `capabilities`：`0.1.0`、OCIO 2.6.0、Metal 光谱/质感可用；`otool -L` 无非系统依赖。
+  - 用内置 CLI 渲染 `C0113.MP4` 2 帧 4K：**1150.9 ms/帧**，3840×2160 H.264，内嵌 ffprobe 正常。
+  - `spctl` 按预期拒绝（未公证）；清除 quarantine 后从「应用程序」正常启动。
+- **后果**：
+  - A 版用户首次启动需右键「打开」或 `xattr -dr com.apple.quarantine`；这是未公证的预期行为。
+  - 早期预览只支持 Apple Silicon / macOS 14+；Universal 需要 universal OCIO/ffmpeg，后续再做。
+  - 官方包不含 RED SDK / R3D 解码；R3D 继续只限本地 BYO-SDK 构建。
+  - 账号下来后同一脚本加 `--identity` + `--notary-profile` 即可切 B，不需要改 UI。
+
+---
+
 ## 待决策（还没问你）
 
 - D010：是否做 OFX 插件（建议做，第二期）

@@ -5,10 +5,16 @@
 # Usage:
 #   scripts/build-macos-ui.sh [--debug] [--no-open] [--skip-cli] [--no-sign]
 #
+# Environment:
+#   SPEKTRA_VERSION        CFBundleShortVersionString (default 0.1.0)
+#   SPEKTRA_BUILD_NUMBER   CFBundleVersion (default 1)
+#   SPEKTRA_SIGN_IDENTITY  "-" for ad-hoc (default) or a Developer ID name
+#
 # The app bundle contains:
 #   Contents/MacOS/SpektraRoll
 #   Contents/Helpers/spektra-roll-cli (+ ffmpeg/ffprobe when found)
 #   Contents/Resources/data/{profiles,ocio}
+#   Contents/Resources/AppIcon.icns
 #   Contents/Resources/Fonts (optional; run scripts/fetch-macos-fonts.sh)
 set -euo pipefail
 
@@ -19,6 +25,9 @@ CONFIG="release"
 OPEN=1
 SKIP_CLI=0
 NO_SIGN=0
+VERSION="${SPEKTRA_VERSION:-0.1.0}"
+BUILD_NUMBER="${SPEKTRA_BUILD_NUMBER:-1}"
+SIGN_IDENTITY="${SPEKTRA_SIGN_IDENTITY:--}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -100,12 +109,29 @@ fi
 
 cp -R "$ROOT/data/profiles" "$APP_DIR/Contents/Resources/data/"
 cp -R "$ROOT/data/ocio" "$APP_DIR/Contents/Resources/data/"
+cp "$ROOT/LICENSE" "$APP_DIR/Contents/Resources/LICENSE"
+cp "$ROOT/THIRD_PARTY_NOTICES.md" "$APP_DIR/Contents/Resources/THIRD_PARTY_NOTICES.md"
+
+# App icon: commit the .icns; regenerate from the .iconset when missing.
+ICON_SRC="$ROOT/ui-macos/Resources/AppIcon.icns"
+if [[ ! -f "$ICON_SRC" && -d "$ROOT/ui-macos/Resources/AppIcon.iconset" ]]; then
+    echo "==> Generating AppIcon.icns"
+    iconutil -c icns "$ROOT/ui-macos/Resources/AppIcon.iconset" -o "$ICON_SRC"
+fi
+if [[ -f "$ICON_SRC" ]]; then
+    cp "$ICON_SRC" "$APP_DIR/Contents/Resources/AppIcon.icns"
+else
+    echo "warning: AppIcon.icns missing; run scripts/make-app-icon.ps1 + iconutil." >&2
+fi
 
 if [[ -d "$ROOT/ui-macos/Resources/Fonts" ]]; then
     mkdir -p "$APP_DIR/Contents/Resources/Fonts"
     find "$ROOT/ui-macos/Resources/Fonts" -maxdepth 1 -type f \
         \( -name '*.otf' -o -name '*.ttf' -o -name '*.ttc' \) \
         -exec cp {} "$APP_DIR/Contents/Resources/Fonts/" \;
+    if [[ -f "$ROOT/ui-macos/Resources/Fonts/OFL.txt" ]]; then
+        cp "$ROOT/ui-macos/Resources/Fonts/OFL.txt" "$APP_DIR/Contents/Resources/Fonts/OFL.txt"
+    fi
 fi
 if ! find "$APP_DIR/Contents/Resources/Fonts" -type f \( -name '*.otf' -o -name '*.ttf' -o -name '*.ttc' \) -print -quit 2>/dev/null | grep -q .; then
     echo "warning: no bundled font. Run scripts/fetch-macos-fonts.sh for Source Han Sans (Noto Sans CJK)." >&2
@@ -125,11 +151,13 @@ else
     echo "warning: ffmpeg not found. Install with 'brew install ffmpeg' or set SPEKTRA_FFMPEG." >&2
 fi
 
-cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
     <key>CFBundleName</key>
     <string>SpektraRoll</string>
     <key>CFBundleDisplayName</key>
@@ -137,15 +165,21 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.spektra-roll.app</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$VERSION</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>SpektraRoll</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.video</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 SpektraRoll contributors. GPL-3.0-or-later.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>
@@ -158,11 +192,18 @@ PLIST
 printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 
 if [[ "$NO_SIGN" -eq 0 ]]; then
-    echo "==> Ad-hoc signing (local use only)"
+    if [[ "$SIGN_IDENTITY" == "-" ]]; then
+        echo "==> Ad-hoc signing (local use only)"
+        SIGN_ARGS=(--force --timestamp=none --sign -)
+    else
+        echo "==> Signing with: $SIGN_IDENTITY"
+        SIGN_ARGS=(--force --timestamp --options runtime --sign "$SIGN_IDENTITY")
+    fi
+    # Inside out: helpers first, then the bundle.
     while IFS= read -r -d '' file; do
-        codesign --force --timestamp=none --sign - "$file" >/dev/null 2>&1 || true
+        codesign "${SIGN_ARGS[@]}" "$file" >/dev/null 2>&1 || true
     done < <(find "$APP_DIR/Contents/Helpers" -type f -perm -111 -print0)
-    codesign --force --timestamp=none --sign - "$APP_DIR" >/dev/null 2>&1 || true
+    codesign "${SIGN_ARGS[@]}" "$APP_DIR"
 fi
 
 echo

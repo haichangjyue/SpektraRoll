@@ -21,6 +21,26 @@ struct InfoRow: View {
     }
 }
 
+struct InfoLinkRow: View {
+    let label: String
+    let title: String
+    let url: URL
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(label)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.textDim)
+                .frame(width: 74, alignment: .leading)
+            Link(title, destination: url)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.text)
+                .underline()
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 struct InfoTab: View {
     @EnvironmentObject private var app: AppState
     private let system = SystemProfile.current
@@ -73,6 +93,16 @@ struct InfoTab: View {
                     InfoRow(label: "存储", value: system.storage)
                     InfoRow(label: "HDR", value: system.hdr)
                     InfoRow(label: "色彩空间", value: system.colorSpace)
+                }
+            }
+
+            SectionTitle("关于")
+            Panel {
+                VStack(alignment: .leading, spacing: 8) {
+                    InfoRow(label: "版本", value: AppVersion.fullDisplay)
+                    InfoLinkRow(label: "源码", title: "GitHub · SpektraRoll", url: AppVersion.sourceURL)
+                    InfoLinkRow(label: "反馈", title: "GitHub Issues", url: AppVersion.issuesURL)
+                    InfoRow(label: "许可", value: "GPL-3.0-or-later")
                 }
             }
         }

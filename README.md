@@ -22,6 +22,16 @@ optional plugin (D069–D071); official builds stay loader-only.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
+## Download (macOS preview 1)
+
+The first public preview is an **Apple Silicon (arm64)** build for **macOS 14+**:
+see [Releases](https://github.com/haichangjyue/SpektraRoll/releases).
+
+The DMG is ad-hoc signed and **not notarised** yet. After dragging the app to
+Applications, right-click it and choose **Open** the first time (or run
+`xattr -dr com.apple.quarantine /Applications/SpektraRoll.app`). Read
+`docs/release-macos-preview1.md` for install steps and known issues.
+
 ![SpektraRoll macOS UI](docs/ui-macos.png)
 
 ## What this will become

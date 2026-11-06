@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-06（D083：早期预览版发布准备，路线待决定；D082 功能已验收，CI run 166 双绿）
+> **最后更新**：2026-11-06（D083：路线 A 已打包，预览版 1 DMG 90 MB 已在 Mac 安装验证；路线 B 待 Developer ID）
 > **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D082），进入早期预览发布准备（D083 待决策），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO + 时间线/队列/区间/滤色片偏移（D041–D082）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
@@ -27,7 +27,7 @@
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
 | **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB**；CI run **153** 双绿 |
 | **D082** | P1 一次完成 | 时间线拖动 + 逐帧预览；渲染队列（持久化、顺序执行、停止/删除/清空）；区间输入；`solve --filter-pack` + `--filter-offset` + PRINT 页 Y/M 偏移；35mm Academy 21.95 / 135 全画幅 36.0 拆分；代理固定 LUT + 360–720 px + GPU 质感 + 缓存目录迁移；修复 `ffprobe` 旋转探测扫描整段导致代理慢 20 s |
-| **D083** | 发布前审计（未写代码） | 确认不上 App Store；直接发 DMG。当前 app **174 MB / arm64 only / ad-hoc 签名 / 无图标 / 无 DMG**；Mac 上没有 Developer ID 证书（`0 valid identities`）；OCIO 静态、CLI 只依赖系统框架、内置 ffmpeg 9.0.2 为 **GPL 静态构建**（无 Homebrew dylib，但需 GPL 源码/声明）；发布路线 A（未公证内测）/ B（Developer ID + 公证公开预览）留待下次决定 |
+| **D083** | 路线 A 打包 | 决定**先 A 后 B**。新增 App 图标、`0.1.0` 预览版 1、Info.plist 补齐、INFO“关于”、`scripts/package-macos.sh`、`THIRD_PARTY_NOTICES.md`、安装说明；产出 **90 MB DMG**（app 175 MB，arm64，ad-hoc），已装到 `/Applications` 验证：INFO 显示“预览版 1 · 0.1.0”，内置 CLI 4K 渲染 **1150.9 ms/帧**，`shasum -c` 通过。B 待 Apple Developer 账号 |
 
 **顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D082**。
 
@@ -137,19 +137,20 @@ ctest --test-dir build-macos-tests --output-on-failure
 - [x] SpektraLab 式 Y/M 滤色片偏移控件 + 独立 `solve --filter-pack`：D082 已完成。
 - [x] 严格 35mm 电影画幅（Academy 21.95 mm）与 135 全画幅拆分：D082 已完成。
 
-**P0 · 早期预览发布（D083，待决定 A/B）**
-- [ ] **决定发布路线**：A 未公证内测 DMG / B Developer ID + 公证公开预览；建议先 A 后 B。
+**P0 · 早期预览发布（D083；路线 A 已完成，B 待账号）**
+- [x] **决定发布路线**：**先 A 后 B**（未公证内测 → Developer ID + 公证公开预览）。
+- [x] App 图标：1024×1024 → `.icns`，Info.plist 加 `CFBundleIconFile`。
+- [x] 版本/品牌：`0.1.0` · 预览版 1，去掉“内部测试（D082）”；`CFBundleVersion = 1`；About/INFO 加源码链接。
+- [x] Info.plist 补齐：copyright、category、icon、最低系统（14.0）。
+- [x] `scripts/package-macos.sh`：构建 → 签名（ad-hoc 或 Developer ID）→ DMG → SHA256；预留公证/staple 步骤。
+- [x] DMG：`SpektraRoll.app` + `Applications` 快捷方式 + 安装说明。
+- [x] 许可/第三方声明：`THIRD_PARTY_NOTICES.md`、GPL 源码、ffmpeg GPL 静态构建、OCIO Apache-2.0、字体 OFL、profiles CC BY-SA；明确“官方包不含 RED SDK/R3D”。
+- [x] DMG + SHA256：`SpektraRoll-0.1.0-preview1-arm64.dmg`（90 MB），本机 `/Applications` 安装验证。
 - [ ] 若走 B：加入 Apple Developer Program，创建 **Developer ID Application** 证书，建立 `notarytool` keychain profile。
-- [ ] App 图标：1024×1024 → `.icns`，Info.plist 加 `CFBundleIconFile`。
-- [ ] 版本/品牌：`0.1.0 preview 1`，去掉“内部测试（D082）”；`CFBundleVersion` 递增；About/INFO 加源码链接。
-- [ ] Info.plist 补齐：copyright、category、icon、最低系统（当前 14.0）。
-- [ ] `scripts/package-macos.sh`：构建 → 签名（ad-hoc 或 Developer ID）→ DMG → SHA256；预留公证/staple 步骤。
-- [ ] DMG：`SpektraRoll.app` + `Applications` 快捷方式；可选背景/README。
 - [ ] 公开版签名：从内到外签 `ffmpeg`/`ffprobe`、`spektra-roll-cli`、`SpektraRoll.app`；`--options runtime --timestamp`。
 - [ ] 公证 + staple：`xcrun notarytool submit ... --wait`、`xcrun stapler staple`、`spctl -a -vvv -t install`。
-- [ ] 许可/第三方声明：GPL 源码、ffmpeg GPL 静态构建源码/构建信息、OCIO Apache-2.0、字体 OFL、profiles CC BY-SA；明确“官方包不含 RED SDK/R3D”。
 - [ ] 干净 Mac 测试：无 Xcode/Homebrew，DMG 安装、Gatekeeper、导入 C0113、预览、队列、区间、ProRes/音频/timecode、OCIO。
-- [ ] 发布物：DMG + SHA256 + Release notes/known issues + GitHub tag `v0.1.0-preview.1`。
+- [ ] 发布物：GitHub Release / tag `v0.1.0-preview.1`（DMG 与 SHA256 已生成，发布动作待确认）。
 
 **P1 · 发布增强（做完 P0 再定）**
 - [ ] Universal（Intel + Apple Silicon）：需要 universal OCIO/ffmpeg；早期预览可先只发 arm64。
@@ -192,6 +193,44 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 - B：等 Apple Developer 账号下来，Developer ID 签名 + 公证 + staple（公开下载推荐）
 
 默认建议：**先 A 后 B**；早期预览先只发 Apple Silicon（arm64），Universal 以后再说。
+
+---
+
+## 最新：D083 · 预览版 1 打包（2026-11-06；路线 A 已完成，B 待账号）
+
+> 产品负责人选 **先 A 后 B**：先出未公证内测 DMG，同时准备 Apple Developer；账号下来后用同一脚本切公证版。
+
+### 一、这轮交付（A）
+
+| 项 | 结果 |
+|---|---|
+| App 图标 | 新增 `ui-macos/Resources/AppIcon.icns`（谱色片盘，1024 px）；源脚本 `scripts/make-app-icon.ps1` 可重生成 |
+| 版本/品牌 | `0.1.0` · **预览版 1**；`CFBundleVersion = 1`；去掉“内部测试（D082）” |
+| Info.plist | 补 `CFBundleIconFile`、`LSApplicationCategoryType=public.app-category.video`、`NSHumanReadableCopyright`、最低系统 14.0 |
+| About | INFO 新增“关于”：版本、源码链接、GitHub Issues、GPL-3.0-or-later |
+| 打包脚本 | 新增 `scripts/package-macos.sh` / `.command`：构建 → 从内到外签名（ad-hoc / Developer ID）→ DMG（app + Applications 快捷方式 + 安装说明）→ SHA256；预留 `notarytool` / `staple` / `spctl` |
+| 许可 | 新增根目录 `THIRD_PARTY_NOTICES.md`；app 内打包 `LICENSE`、`THIRD_PARTY_NOTICES.md`、字体 `OFL.txt` |
+| 文档 | 新增 `docs/release-macos-preview1.md`（安装步骤、已知限制、校验） |
+
+### 二、验证（Mac 本机）
+
+| 项 | 结果 |
+|---|---|
+| DMG | `build-pkg/SpektraRoll-0.1.0-preview1-arm64.dmg`，**90 MB**（app 175 MB） |
+| SHA256 | `shasum -a 256 -c SHA256.txt` → **OK** |
+| 安装 | 从 DMG `ditto` 到 `/Applications`，启动正常；INFO 显示 **预览版 1 · 0.1.0** |
+| 签名 | ad-hoc，`codesign --verify --deep --strict` 通过；`spctl` 拒绝（未公证，预期） |
+| 自包含 | app / CLI / ffmpeg 均无非系统 dylib；CLI `capabilities` → `0.1.0`、OCIO 2.6.0、Metal 光谱/质感可用 |
+| 渲染 | 内置 CLI + 内置 ffmpeg/ffprobe：`C0113.MP4` 2 帧 4K H.264，**1150.9 ms/帧**，3840×2160 |
+| 字体 | 思源黑体 Regular/Bold + OFL 已打包 |
+| Gatekeeper | 带 quarantine 时进程拿到 48 KB 后停住（预期拦截）；清除 quarantine 后正常启动 |
+
+### 三、未完成 / 注意
+
+- **干净 Mac 实测**：本轮只在已有 Xcode/Homebrew 的 Mac 上验证；自包含检查通过，但“无 Xcode/Homebrew 的机器”还需一台实机或新用户账户跑一遍。
+- **公开下载**：A 版适合内测分发；GitHub Release 是否现在发布待产品负责人确认（draft release 可先准备）。
+- **路线 B**：需要 Apple Developer Program（$99/年）、Developer ID Application 证书、`notarytool` keychain profile；脚本已支持 `--identity` + `--notary-profile`。
+- DMG 未加背景图；当前只有 app、Applications 快捷方式、安装说明。
 
 ---
 

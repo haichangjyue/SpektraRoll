@@ -1,6 +1,6 @@
 # STATUS
 
-**最后更新**：2026-11-06（D082 P1 一次完成：时间线/队列/区间/滤色片偏移/代理加速；Windows + Mac 已验，CI run 166 双绿） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D082；Windows Qt 冻结）** · 项目名 **SpektraRoll**
+**最后更新**：2026-11-06（D083 macOS 预览版 1 打包完成：图标 / Info.plist / `package-macos.sh` / 90 MB DMG / 许可声明；路线 A 已产出，B 待 Developer ID） · 里程碑 **M5 进行中（macOS UI v1.1 完成 D075–D082；Windows Qt 冻结）** · 项目名 **SpektraRoll**
 
 ## 一句话
 
@@ -8,6 +8,19 @@
 
 仓库：https://github.com/haichangjyue/SpektraRoll
 本地：`X:\agent\SpektraRoll`
+
+## macOS 预览版 1（D083 · 路线 A · 已完成）
+
+- [x] App 图标：谱色片盘，1024 → `.icns`（`scripts/make-app-icon.ps1`）
+- [x] 版本改为 **`0.1.0` · 预览版 1**；`CFBundleVersion = 1`；去掉“内部测试（D082）”
+- [x] Info.plist 补 icon / copyright / category / 最低系统 14.0；INFO 增加“关于”（源码 / Issues / 许可证）
+- [x] `scripts/package-macos.sh`：构建 → ad-hoc 签名 → DMG + Applications 快捷方式 → SHA256；预留 Developer ID / notarytool / staple
+- [x] `THIRD_PARTY_NOTICES.md`、`docs/release-macos-preview1.md`；app 内打包 LICENSE / 第三方声明 / 字体 OFL
+- [x] 安装到 `/Applications` 验证：INFO 显示“预览版 1 · 0.1.0”；内置 CLI 渲染 4K50 2 帧 **1150.9 ms/帧**
+- [x] 自包含检查：CLI / ffmpeg / app 均无非系统 dylib；OCIO 2.6.0、Metal 光谱/质感可用
+- [x] DMG **90 MB**，`shasum -c` 通过；未公证 → `spctl` 拒绝（预期，右键打开）
+- [ ] 干净 Mac（无 Xcode/Homebrew）实测
+- [ ] Apple Developer 账号 + Developer ID → 路线 B（公证 + staple）
 
 ## M3 已完成：视频读写 + 胶片质感
 
