@@ -37,7 +37,19 @@ to Applications, right-click it and choose **Open** the first time (or run
 `xattr -dr com.apple.quarantine /Applications/SpektraRoll.app`). Install steps
 and known issues: `docs/release-macos.md`.
 
-![SpektraRoll macOS UI](docs/ui-macos.png)
+## Screenshots
+
+macOS `0.0.1-alpha.1`，按 INFO → FILM → PRINT → ADVANCED → OUTPUT 顺序：
+
+![INFO：素材信息、版本与关于](docs/screenshots/01-info.png)
+
+![FILM：画幅与底片片库](docs/screenshots/02-film.png)
+
+![PRINT：相纸、电影印片与放大机滤色片](docs/screenshots/03-print.png)
+
+![ADVANCED：引擎、GPU/LUT、预览代理与色彩管理](docs/screenshots/04-advanced.png)
+
+![OUTPUT：编码、文件、区间与渲染队列](docs/screenshots/05-output.png)
 
 ## What this will become
 
