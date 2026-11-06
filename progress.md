@@ -150,7 +150,7 @@ ctest --test-dir build-macos-tests --output-on-failure
 - [ ] 公开版签名：从内到外签 `ffmpeg`/`ffprobe`、`spektra-roll-cli`、`SpektraRoll.app`；`--options runtime --timestamp`。
 - [ ] 公证 + staple：`xcrun notarytool submit ... --wait`、`xcrun stapler staple`、`spctl -a -vvv -t install`。
 - [ ] 干净 Mac 测试：无 Xcode/Homebrew，DMG 安装、Gatekeeper、导入 C0113、预览、队列、区间、ProRes/音频/timecode、OCIO。
-- [ ] 发布物：GitHub Release / tag `v0.1.0-preview.1`（DMG 与 SHA256 已生成，发布动作待确认）。
+- [ ] 发布物：GitHub Release / tag `v0.1.0-preview.1`（DMG 与 SHA256 已生成；产品负责人决定先内测，暂不发布）。
 
 **P1 · 发布增强（做完 P0 再定）**
 - [ ] Universal（Intel + Apple Silicon）：需要 universal OCIO/ffmpeg；早期预览可先只发 arm64。
@@ -229,7 +229,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 ### 三、未完成 / 注意
 
 - **干净 Mac 实测**：本轮只在已有 Xcode/Homebrew 的 Mac 上验证；自包含检查通过，但“无 Xcode/Homebrew 的机器”还需一台实机或新用户账户跑一遍。
-- **公开下载**：A 版适合内测分发；GitHub Release 是否现在发布待产品负责人确认（draft release 可先准备）。
+- **公开下载**：产品负责人决定**本轮不发 GitHub Release**，DMG 只做内测分发；等内测通过后再发 Pre-release / tag。
 - **路线 B**：需要 Apple Developer Program（$99/年）、Developer ID Application 证书、`notarytool` keychain profile；脚本已支持 `--identity` + `--notary-profile`。
 - DMG 未加背景图；当前只有 app、Applications 快捷方式、安装说明。
 
