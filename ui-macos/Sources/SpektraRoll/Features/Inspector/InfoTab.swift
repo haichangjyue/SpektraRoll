@@ -73,7 +73,6 @@ struct InfoTab: View {
             SectionTitle("引擎")
             Panel {
                 VStack(alignment: .leading, spacing: 8) {
-                    InfoRow(label: "APP", value: AppVersion.display)
                     InfoRow(label: "CLI", value: app.capabilities?.version ?? "未连接")
                     InfoRow(label: "OCIO", value: ocioText)
                     InfoRow(label: "GPU", value: gpuText)
@@ -100,6 +99,9 @@ struct InfoTab: View {
             Panel {
                 VStack(alignment: .leading, spacing: 8) {
                     InfoRow(label: "版本", value: AppVersion.fullDisplay)
+                    InfoRow(label: "作者", value: AppVersion.author)
+                    InfoRow(label: "基于", value: "spektrafilm（Andrea Volpato）")
+                    InfoLinkRow(label: "上游", title: "github.com/andreavolpato/spektrafilm", url: AppVersion.upstreamURL)
                     InfoLinkRow(label: "源码", title: "GitHub · SpektraRoll", url: AppVersion.sourceURL)
                     InfoLinkRow(label: "反馈", title: "GitHub Issues", url: AppVersion.issuesURL)
                     InfoRow(label: "许可", value: "GPL-3.0-or-later")

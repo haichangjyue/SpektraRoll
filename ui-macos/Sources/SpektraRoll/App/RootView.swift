@@ -3,6 +3,8 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var app: AppState
+    @AppStorage("sr.hasSeenAlphaNotice") private var hasSeenAlphaNotice = false
+    @State private var showAlphaNotice = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,6 +26,17 @@ struct RootView: View {
         .sheet(item: $app.importDraft) { draft in
             ImportSheet(draft: draft)
                 .environmentObject(app)
+        }
+        .sheet(isPresented: $showAlphaNotice) {
+            AlphaNoticeSheet {
+                hasSeenAlphaNotice = true
+                showAlphaNotice = false
+            }
+        }
+        .onAppear {
+            if !hasSeenAlphaNotice {
+                showAlphaNotice = true
+            }
         }
         .alert("提示", isPresented: Binding(
             get: { app.errorMessage != nil },

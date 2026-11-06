@@ -1,20 +1,22 @@
-# SpektraRoll 0.1.0 · 预览版 1（macOS）
+# SpektraRoll 0.0.1-alpha.1（macOS）
 
-面向动态影像的开源胶片与印片模拟器。这是第一个公开预览版，**未上架 App Store**，从 DMG 直接安装。
+面向动态影像的开源胶片与印片模拟器，基于 [spektrafilm](https://github.com/andreavolpato/spektrafilm)（Andrea Volpato）的物理模型。作者：**haichangjyue**。
+
+这是**早期测试版本**，未上架 App Store，从 DMG 直接安装。首次启动会弹窗提醒：许多功能仍在实验中，未来版本可能有较大改动，请勿用于正式生产。
 
 ## 系统要求
 
 - **Apple Silicon（arm64）** Mac；Intel 版本后续再做
 - **macOS 14.0 或更新**
-- 约 400 MB 可用磁盘（App 本体约 174 MB，另加预览代理缓存）
+- 约 400 MB 可用磁盘（App 本体约 175 MB，另加预览代理缓存）
 
 ## 安装
 
-1. 打开 `SpektraRoll-0.1.0-preview1-arm64.dmg`
+1. 打开 `SpektraRoll-0.0.1-alpha.1-arm64.dmg`
 2. 把 **SpektraRoll** 拖进 **Applications**
 3. 第一次启动：在「应用程序」里**右键 SpektraRoll → 打开 → 打开**
 
-> 这个预览版是 **ad-hoc 签名、未公证**。直接双击会被 Gatekeeper 拦下，右键「打开」即可。
+> 这个版本是 **ad-hoc 签名、未公证**。直接双击会被 Gatekeeper 拦下，右键「打开」即可。
 > 如果仍然被拦，在终端执行一次：
 >
 > ```bash
@@ -23,11 +25,14 @@
 
 ## 第一次使用
 
-1. 双击左侧空白区域，导入视频（`.mp4` / `.mov`，R3D 见下方限制）
-2. 双击缩略图载入播放器
-3. 右侧 **FILM / PRINT** 选胶片与相纸，打开「胶片效果」看当前帧
-4. 首次播放时会在后台生成低分辨率代理，稍等几秒后自动切到胶片预览
-5. **OUTPUT** 页设置输出、区间与渲染队列，点「导出」或「加入队列」
+1. 启动后阅读「早期测试版本」弹窗，点「我知道了」
+2. 双击左侧空白区域，导入视频（`.mp4` / `.mov`，R3D 见下方限制）
+3. 双击缩略图载入播放器
+4. 右侧 **FILM / PRINT** 选胶片与相纸，打开「胶片效果」看当前帧
+5. 首次播放时会在后台生成低分辨率代理，稍等几秒后自动切到胶片预览
+6. **OUTPUT** 页设置输出、区间与渲染队列，点「导出」或「加入队列」
+
+版本号也可以随时在右侧 **INFO → 关于** 里查看。
 
 ## 这个版本包含什么
 
@@ -49,10 +54,12 @@
 - **仅 Apple Silicon**：arm64 thin，不含 Intel 切片
 - **无遥测**：所有状态、缓存都在本机
 
-## 反馈
+## 关于
 
-- 问题与建议：<https://github.com/haichangjyue/SpektraRoll/issues>
+- 项目基于 **spektrafilm**：<https://github.com/andreavolpato/spektrafilm>
+- 作者：**haichangjyue**
 - 源码：<https://github.com/haichangjyue/SpektraRoll>
+- 问题与建议：<https://github.com/haichangjyue/SpektraRoll/issues>
 - 许可证：GPL-3.0-or-later；第三方组件见 `THIRD_PARTY_NOTICES.md`
 
 ## 校验下载

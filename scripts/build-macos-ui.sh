@@ -6,7 +6,7 @@
 #   scripts/build-macos-ui.sh [--debug] [--no-open] [--skip-cli] [--no-sign]
 #
 # Environment:
-#   SPEKTRA_VERSION        CFBundleShortVersionString (default 0.1.0)
+#   SPEKTRA_VERSION        CFBundleShortVersionString (default 0.0.1-alpha.1)
 #   SPEKTRA_BUILD_NUMBER   CFBundleVersion (default 1)
 #   SPEKTRA_SIGN_IDENTITY  "-" for ad-hoc (default) or a Developer ID name
 #
@@ -25,7 +25,7 @@ CONFIG="release"
 OPEN=1
 SKIP_CLI=0
 NO_SIGN=0
-VERSION="${SPEKTRA_VERSION:-0.1.0}"
+VERSION="${SPEKTRA_VERSION:-0.0.1-alpha.1}"
 BUILD_NUMBER="${SPEKTRA_BUILD_NUMBER:-1}"
 SIGN_IDENTITY="${SPEKTRA_SIGN_IDENTITY:--}"
 
@@ -121,7 +121,7 @@ fi
 if [[ -f "$ICON_SRC" ]]; then
     cp "$ICON_SRC" "$APP_DIR/Contents/Resources/AppIcon.icns"
 else
-    echo "warning: AppIcon.icns missing; run scripts/make-app-icon.ps1 + iconutil." >&2
+    echo "warning: AppIcon.icns missing; restore it from the repository." >&2
 fi
 
 if [[ -d "$ROOT/ui-macos/Resources/Fonts" ]]; then

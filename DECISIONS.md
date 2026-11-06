@@ -1516,15 +1516,20 @@
 - **建议**：先 A 后 B；早期预览只发 Apple Silicon。
 - **你的决定**：**先 A 后 B**。
 - **本轮执行（A）**：
-  - 新增品牌图标 `ui-macos/Resources/AppIcon.icns`（谱色片盘，1024 px；源脚本 `scripts/make-app-icon.ps1`）。
-  - 版本改为 **`0.1.0` · 预览版 1**：去掉“内部测试（D082）”，`CFBundleVersion = 1`；INFO 增加“关于”面板（源码 / Issues / 许可证）。
+  - 图标改用产品负责人提供的 `X:\agent\footage\AppIcon.icns`（app 内 checksum 一致；`.iconset` 由该 `.icns` 反解）。
+  - 版本改为 **`0.0.1-alpha.1`**（`CFBundleShortVersionString`），`CFBundleVersion = 1`；去掉“内部测试（D082）”。
+  - INFO **引擎区去掉重复的 APP 行**；版本号只在 INFO →「关于」出现。
+  - 「关于」标注：作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接、源码 / Issues、GPL-3.0-or-later。
+  - 首次启动新增「早期测试版本」弹窗：功能仍在实验、未来可能大改；小字附 GitHub / spektrafilm 链接和作者、许可；点「我知道了」后写入 `sr.hasSeenAlphaNotice`，不再弹出。
   - Info.plist 补齐 `CFBundleIconFile`、`LSApplicationCategoryType`、`NSHumanReadableCopyright`、最低系统 14.0。
   - 新增 `scripts/package-macos.sh` / `.command`：构建 → 从内到外签名（ad-hoc 或 Developer ID）→ 生成带 `Applications` 快捷方式的 DMG → SHA256；预留 `notarytool` / `staple` / `spctl`。
-  - 新增 `THIRD_PARTY_NOTICES.md` 与 `docs/release-macos-preview1.md`；app 内打包 `LICENSE`、第三方声明、字体 OFL。
+  - 新增 `THIRD_PARTY_NOTICES.md` 与 `docs/release-macos.md`；app 内打包 `LICENSE`、第三方声明、字体 OFL。
 - **验证**：
-  - DMG `SpektraRoll-0.1.0-preview1-arm64.dmg` **90 MB**（app 175 MB），`shasum -c` 通过。
-  - 从 DMG 安装到 `/Applications` 后启动正常，INFO 显示 **预览版 1 · 0.1.0**。
-  - 内置 CLI `capabilities`：`0.1.0`、OCIO 2.6.0、Metal 光谱/质感可用；`otool -L` 无非系统依赖。
+  - DMG `SpektraRoll-0.0.1-alpha.1-arm64.dmg` **91 MB**（app 175 MB），`shasum -c` 通过。
+  - 从 DMG 安装到 `/Applications` 后启动正常，弹窗显示「早期测试版本」与版本 `0.0.1-alpha.1`。
+  - 设置 `sr.hasSeenAlphaNotice=true` 后重启只出现主窗口，确认弹窗只显示一次。
+  - INFO「关于」显示 版本 / 作者 / 基于 spektrafilm / 上游链接；引擎区 **没有 APP 行**。
+  - 内置 CLI `capabilities`：`0.1.0`（引擎版本）、OCIO 2.6.0、Metal 光谱/质感可用；`otool -L` 无非系统依赖。
   - 用内置 CLI 渲染 `C0113.MP4` 2 帧 4K：**1150.9 ms/帧**，3840×2160 H.264，内嵌 ffprobe 正常。
   - `spctl` 按预期拒绝（未公证）；清除 quarantine 后从「应用程序」正常启动。
 - **后果**：

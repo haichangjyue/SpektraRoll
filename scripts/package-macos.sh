@@ -6,9 +6,9 @@
 #   scripts/package-macos.sh [options]
 #
 # Options:
-#   --version <x.y.z>       marketing version        (default: 0.1.0)
+#   --version <ver>         marketing version        (default: 0.0.1-alpha.1)
 #   --build <n>             CFBundleVersion          (default: 1)
-#   --preview <tag>         filename tag             (default: preview1)
+#   --preview <tag>         optional filename tag    (default: empty)
 #   --identity <name>       Developer ID identity; "-" = ad-hoc (default: -)
 #   --notary-profile <p>    notarytool keychain profile (implies --identity is real)
 #   --no-build              reuse build-ui-macos/SpektraRoll.app
@@ -16,7 +16,7 @@
 #   -h, --help
 #
 # Outputs (in build-pkg/):
-#   SpektraRoll-<version>-<preview>-<arch>.dmg
+#   SpektraRoll-<version>[-<preview>]-<arch>.dmg
 #   SHA256.txt
 #
 # Route A (today):  scripts/package-macos.sh
@@ -34,9 +34,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$ROOT/build-ui-macos/SpektraRoll.app"
 OUT_DIR="$ROOT/build-pkg"
 
-VERSION="${SPEKTRA_VERSION:-0.1.0}"
+VERSION="${SPEKTRA_VERSION:-0.0.1-alpha.1}"
 BUILD_NUMBER="${SPEKTRA_BUILD_NUMBER:-1}"
-PREVIEW_TAG="${SPEKTRA_PREVIEW_TAG:-preview1}"
+PREVIEW_TAG="${SPEKTRA_PREVIEW_TAG:-}"
 IDENTITY="${SPEKTRA_SIGN_IDENTITY:--}"
 NOTARY_PROFILE="${SPEKTRA_NOTARY_PROFILE:-}"
 DO_BUILD=1
@@ -66,7 +66,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ARCH="$(uname -m)"
-DMG_NAME="SpektraRoll-${VERSION}-${PREVIEW_TAG}-${ARCH}.dmg"
+if [[ -n "$PREVIEW_TAG" ]]; then
+    DMG_NAME="SpektraRoll-${VERSION}-${PREVIEW_TAG}-${ARCH}.dmg"
+else
+    DMG_NAME="SpektraRoll-${VERSION}-${ARCH}.dmg"
+fi
 DMG_PATH="$OUT_DIR/$DMG_NAME"
 
 # --- Build -------------------------------------------------------------------
@@ -98,8 +102,8 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 ditto "$APP_DIR" "$STAGE/SpektraRoll.app"
 ln -s /Applications "$STAGE/Applications"
-if [[ -f "$ROOT/docs/release-macos-preview1.md" ]]; then
-    cp "$ROOT/docs/release-macos-preview1.md" "$STAGE/安装说明.md"
+if [[ -f "$ROOT/docs/release-macos.md" ]]; then
+    cp "$ROOT/docs/release-macos.md" "$STAGE/安装说明.md"
 fi
 
 # --- Create DMG --------------------------------------------------------------

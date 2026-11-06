@@ -2,7 +2,7 @@
 
 > **这份文件的用途**：让你在新开一个对话时，把这一份丢给 AI，它就能接着干，不需要你重新解释背景。
 >
-> **最后更新**：2026-11-06（D083：路线 A 已打包，预览版 1 DMG 90 MB 已在 Mac 安装验证；路线 B 待 Developer ID）
+> **最后更新**：2026-11-06（D083：路线 A 已打包，`0.0.1-alpha.1` DMG 91 MB 已在 Mac 安装验证；路线 B 待 Developer ID）
 > **当前里程碑**：**M5 进行中 · macOS UI v1.1 完成（D075–D082），进入早期预览发布准备（D083 待决策），Windows Qt 冻结**（Qt 6 三栏界面 + 渲染队列 + 光谱/GPU 引擎 + GPU 质感 + 物理点扩散核 + 常驻预览 + 融合提交 + 管道/并行 + 预览代理 + float/half/linear/ZIP EXR + Metal 颜色与质感 + S-Log3/C-Log3/V-Log/LogC3/LogC4/BMD/DaVinci + 静态 OCIO + 界面 OCIO 下拉 + Vision3/2383/2393 + 反转片直扫 + BYO-SDK R3D 插件/解码 + `video --in clip.R3D` + R3D 音频/UI/segment + 光谱 GPU 的 OCIO + 时间线/队列/区间/滤色片偏移（D041–D082）
 > **项目**：SpektraRoll —— 面向**动态影像（视频）**的开源胶片与印片模拟器
 > **仓库**：https://github.com/haichangjyue/SpektraRoll （公开，GPL-3.0-or-later）
@@ -27,7 +27,7 @@
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
 | **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB**；CI run **153** 双绿 |
 | **D082** | P1 一次完成 | 时间线拖动 + 逐帧预览；渲染队列（持久化、顺序执行、停止/删除/清空）；区间输入；`solve --filter-pack` + `--filter-offset` + PRINT 页 Y/M 偏移；35mm Academy 21.95 / 135 全画幅 36.0 拆分；代理固定 LUT + 360–720 px + GPU 质感 + 缓存目录迁移；修复 `ffprobe` 旋转探测扫描整段导致代理慢 20 s |
-| **D083** | 路线 A 打包 | 决定**先 A 后 B**。新增 App 图标、`0.1.0` 预览版 1、Info.plist 补齐、INFO“关于”、`scripts/package-macos.sh`、`THIRD_PARTY_NOTICES.md`、安装说明；产出 **90 MB DMG**（app 175 MB，arm64，ad-hoc），已装到 `/Applications` 验证：INFO 显示“预览版 1 · 0.1.0”，内置 CLI 4K 渲染 **1150.9 ms/帧**，`shasum -c` 通过。B 待 Apple Developer 账号 |
+| **D083** | 路线 A 打包 | 决定**先 A 后 B**。换产品负责人提供的图标、版本 **`0.0.1-alpha.1`**、Info.plist 补齐、引擎区去掉重复 APP 行、INFO「关于」加作者/上游、首次启动早期测试弹窗、`scripts/package-macos.sh`、`THIRD_PARTY_NOTICES.md`、安装说明；产出 **91 MB DMG**（app 175 MB，arm64，ad-hoc），已装 `/Applications` 验证弹窗与关于面板。B 待 Apple Developer 账号 |
 
 **顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D082**。
 
@@ -53,7 +53,7 @@
 | D083（待定） | 发布渠道 | 不上 App Store，直接发 DMG；公开预览建议 Developer ID + 公证，但**尚未决定 A/B** |
 | D083（建议） | 发布顺序 | 先 A 未公证内测 DMG，同时申请 Apple Developer；账号下来后同脚本切 B 公证版 |
 | D083（建议） | 架构 | 早期预览先只发 **Apple Silicon（arm64）**；Universal 后续再做，需 universal OCIO/ffmpeg |
-| D083（建议） | 版本 | 公开预览用 `0.1.0 preview 1`，去掉“内部测试（D082）”标识；`CFBundleVersion` 每次发布递增 |
+| D083 | 版本 | 实际采用 **`0.0.1-alpha.1`**，去掉“内部测试（D082）”标识；`CFBundleVersion` 每次发布递增 |
 | D083（建议） | 官方包范围 | 不包含 RED SDK / R3D 解码；R3D 继续只限本地 BYO-SDK 构建 |
 
 ### 三、当前状态（截至最后一次操作）
@@ -140,17 +140,18 @@ ctest --test-dir build-macos-tests --output-on-failure
 **P0 · 早期预览发布（D083；路线 A 已完成，B 待账号）**
 - [x] **决定发布路线**：**先 A 后 B**（未公证内测 → Developer ID + 公证公开预览）。
 - [x] App 图标：1024×1024 → `.icns`，Info.plist 加 `CFBundleIconFile`。
-- [x] 版本/品牌：`0.1.0` · 预览版 1，去掉“内部测试（D082）”；`CFBundleVersion = 1`；About/INFO 加源码链接。
+- [x] 版本/品牌：**`0.0.1-alpha.1`**，去掉“内部测试（D082）”；`CFBundleVersion = 1`；About/INFO 加作者、上游与源码链接；引擎区去掉重复 APP 行。
 - [x] Info.plist 补齐：copyright、category、icon、最低系统（14.0）。
 - [x] `scripts/package-macos.sh`：构建 → 签名（ad-hoc 或 Developer ID）→ DMG → SHA256；预留公证/staple 步骤。
 - [x] DMG：`SpektraRoll.app` + `Applications` 快捷方式 + 安装说明。
 - [x] 许可/第三方声明：`THIRD_PARTY_NOTICES.md`、GPL 源码、ffmpeg GPL 静态构建、OCIO Apache-2.0、字体 OFL、profiles CC BY-SA；明确“官方包不含 RED SDK/R3D”。
-- [x] DMG + SHA256：`SpektraRoll-0.1.0-preview1-arm64.dmg`（90 MB），本机 `/Applications` 安装验证。
+- [x] DMG + SHA256：`SpektraRoll-0.0.1-alpha.1-arm64.dmg`（91 MB），本机 `/Applications` 安装验证。
+- [x] 首次启动「早期测试版本」弹窗（GitHub / spektrafilm / 作者 / 许可）。
 - [ ] 若走 B：加入 Apple Developer Program，创建 **Developer ID Application** 证书，建立 `notarytool` keychain profile。
 - [ ] 公开版签名：从内到外签 `ffmpeg`/`ffprobe`、`spektra-roll-cli`、`SpektraRoll.app`；`--options runtime --timestamp`。
 - [ ] 公证 + staple：`xcrun notarytool submit ... --wait`、`xcrun stapler staple`、`spctl -a -vvv -t install`。
 - [ ] 干净 Mac 测试：无 Xcode/Homebrew，DMG 安装、Gatekeeper、导入 C0113、预览、队列、区间、ProRes/音频/timecode、OCIO。
-- [ ] 发布物：GitHub Release / tag `v0.1.0-preview.1`（DMG 与 SHA256 已生成；产品负责人决定先内测，暂不发布）。
+- [ ] 发布物：GitHub Release / tag `v0.0.1-alpha.1`（DMG 与 SHA256 已生成；产品负责人决定先内测，暂不发布）。
 
 **P1 · 发布增强（做完 P0 再定）**
 - [ ] Universal（Intel + Apple Silicon）：需要 universal OCIO/ffmpeg；早期预览可先只发 arm64。
@@ -196,21 +197,23 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 
 ---
 
-## 最新：D083 · 预览版 1 打包（2026-11-06；路线 A 已完成，B 待账号）
+## 最新：D083 · 早期预览打包（路线 A；2026-11-06）
 
 > 产品负责人选 **先 A 后 B**：先出未公证内测 DMG，同时准备 Apple Developer；账号下来后用同一脚本切公证版。
+>
+> 下面第一～三节是首版（0.1.0 preview 1）的记录；最终交付以第四节的 **`0.0.1-alpha.1`** 为准。
 
 ### 一、这轮交付（A）
 
 | 项 | 结果 |
 |---|---|
-| App 图标 | 新增 `ui-macos/Resources/AppIcon.icns`（谱色片盘，1024 px）；源脚本 `scripts/make-app-icon.ps1` 可重生成 |
+| App 图标 | `ui-macos/Resources/AppIcon.icns`（首版为谱色片盘；v0.0.1 起换成产品负责人提供的图标，旧生成脚本已移除） |
 | 版本/品牌 | `0.1.0` · **预览版 1**；`CFBundleVersion = 1`；去掉“内部测试（D082）” |
 | Info.plist | 补 `CFBundleIconFile`、`LSApplicationCategoryType=public.app-category.video`、`NSHumanReadableCopyright`、最低系统 14.0 |
 | About | INFO 新增“关于”：版本、源码链接、GitHub Issues、GPL-3.0-or-later |
 | 打包脚本 | 新增 `scripts/package-macos.sh` / `.command`：构建 → 从内到外签名（ad-hoc / Developer ID）→ DMG（app + Applications 快捷方式 + 安装说明）→ SHA256；预留 `notarytool` / `staple` / `spctl` |
 | 许可 | 新增根目录 `THIRD_PARTY_NOTICES.md`；app 内打包 `LICENSE`、`THIRD_PARTY_NOTICES.md`、字体 `OFL.txt` |
-| 文档 | 新增 `docs/release-macos-preview1.md`（安装步骤、已知限制、校验） |
+| 文档 | 新增 `docs/release-macos.md`（安装步骤、已知限制、校验） |
 
 ### 二、验证（Mac 本机）
 
@@ -232,6 +235,23 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 - **公开下载**：产品负责人决定**本轮不发 GitHub Release**，DMG 只做内测分发；等内测通过后再发 Pre-release / tag。
 - **路线 B**：需要 Apple Developer Program（$99/年）、Developer ID Application 证书、`notarytool` keychain profile；脚本已支持 `--identity` + `--notary-profile`。
 - DMG 未加背景图；当前只有 app、Applications 快捷方式、安装说明。
+
+### 四、v0.0.1-alpha.1 修订（同日，待产品负责人验收）
+
+按产品负责人第二轮反馈修改：
+
+| 项 | 结果 |
+|---|---|
+| 图标 | 换成产品负责人提供的 `X:\agent\footage\AppIcon.icns`（1296886 B）；`.iconset` 同步由该 `.icns` 反解，app 内图标 checksum 一致 |
+| 版本 | **`0.0.1-alpha.1`**（`CFBundleShortVersionString`）；`CFBundleVersion = 1`；界面显示 `0.0.1-alpha.1` |
+| 引擎区 | 去掉重复的 **APP** 行；版本号只在 INFO →「关于」出现 |
+| 关于 | 新增 作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接；保留源码 / Issues / GPL |
+| 首次启动 | 新增弹窗「早期测试版本」：说明功能仍在实验、未来可能大改；小字附 GitHub / spektrafilm 链接和作者、许可；点「我知道了」后不再出现（`sr.hasSeenAlphaNotice`） |
+| DMG | `build-pkg/SpektraRoll-0.0.1-alpha.1-arm64.dmg`，**91 MB** |
+| SHA256 | `c81bd2bc15630e05ae52449d100625b677384a5a523833485391e6ba276652aa` |
+| 验证 | 弹窗截图正常；设置 `sr.hasSeenAlphaNotice=true` 后重启只出主窗口；INFO「关于」显示版本 / 作者 / 上游；引擎区无 APP 行 |
+
+**仍未做**：干净 Mac 实测；GitHub Release（产品负责人决定先内测）；路线 B 公证。
 
 ---
 
@@ -265,7 +285,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 内测预览 | 可以先用 **ad-hoc 签名 DMG**，用户右键打开或 `xattr -dr com.apple.quarantine` |
 | 推荐顺序 | **先 A（未公证内测）后 B（公证公开）**；同一套脚本切换证书即可 |
 | 架构 | 早期预览先发 **Apple Silicon（arm64）**；Universal 需要 universal OCIO/ffmpeg，后续再做 |
-| 版本 | 公开预览用 `0.1.0 preview 1`；`CFBundleVersion` 每次发布递增；去掉内部 D082 测试号 |
+| 版本 | 实际采用 `0.0.1-alpha.1`；`CFBundleVersion` 每次发布递增；去掉内部 D082 测试号 |
 | 官方包范围 | 不含 RED SDK / R3D 解码；R3D 继续只限本地 BYO-SDK 构建 |
 | 许可证 | app 是 GPL-3.0-or-later；ffmpeg GPL 静态构建；OCIO Apache-2.0；字体 OFL；profiles CC BY-SA 4.0 |
 
@@ -274,7 +294,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 **A · 未公证内测 DMG（今天可做）**
 
 - [ ] 生成 App 图标（1024 → `.icns`）。
-- [ ] 版本/品牌改成 `0.1.0 preview 1`，Info.plist 补 icon/copyright/category。
+- [x] 版本/品牌改成 `0.0.1-alpha.1`，Info.plist 补 icon/copyright/category。
 - [ ] 新增 `scripts/package-macos.sh`：构建 → ad-hoc 签名 → DMG → SHA256。
 - [ ] DMG 内放 `SpektraRoll.app` + `Applications` 快捷方式。
 - [ ] 写安装说明（右键打开 / xattr 命令）和 known issues。
@@ -292,7 +312,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 **共同待办**
 
 - [ ] 许可/第三方声明：`LICENSE`、`THIRD_PARTY_NOTICES.md`、ffmpeg GPL 源码/构建信息、OCIO NOTICE、字体 OFL、profiles 署名；明确不含 RED。
-- [ ] 发布物：`SpektraRoll-0.1.0-preview1-arm64.dmg`、`SHA256.txt`、Release notes、GitHub tag `v0.1.0-preview.1`。
+- [ ] 发布物：`SpektraRoll-0.0.1-alpha.1-arm64.dmg`、`SHA256.txt`、Release notes、GitHub tag `v0.0.1-alpha.1`。
 - [ ] 干净 Mac 全流程：安装、Gatekeeper、导入 `C0113.MP4`、时间线、队列、区间、ProRes/音频/timecode、OCIO、离线。
 - [ ] 反馈入口：About 里放 GitHub Issues；可选“导出诊断日志”。
 - [ ] 隐私说明：当前无遥测，state/缓存都在本地。

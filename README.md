@@ -22,17 +22,20 @@ optional plugin (D069–D071); official builds stay loader-only.
 
 Repo: https://github.com/haichangjyue/SpektraRoll
 
-## macOS preview 1 (internal test)
+## macOS 0.0.1-alpha.1 (internal test)
 
-The first preview (`0.1.0`, **Apple Silicon / arm64**, **macOS 14+**) is built
-and currently in internal testing. A public DMG will be published in
+The first alpha (`0.0.1-alpha.1`, **Apple Silicon / arm64**, **macOS 14+**) is
+built and currently in internal testing. A public DMG will be published in
 [Releases](https://github.com/haichangjyue/SpektraRoll/releases) after the
 internal acceptance pass.
 
-The preview DMG is ad-hoc signed and **not notarised** yet. Testers should
+SpektraRoll is based on [spektrafilm](https://github.com/andreavolpato/spektrafilm)
+by Andrea Volpato; this project is maintained by **haichangjyue**.
+
+The alpha DMG is ad-hoc signed and **not notarised** yet. Testers should
 right-click the app and choose **Open** the first time (or run
 `xattr -dr com.apple.quarantine /Applications/SpektraRoll.app`). Install steps
-and known issues: `docs/release-macos-preview1.md`.
+and known issues: `docs/release-macos.md`.
 
 ![SpektraRoll macOS UI](docs/ui-macos.png)
 
