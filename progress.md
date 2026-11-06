@@ -10,15 +10,84 @@
 
 ---
 
-## 本次对话交接摘要（D075–D083，2026-11-05 至 11-06）
+## 本次对话交接摘要（D083 · 2026-11-06）
 
-> **新开对话先读这一节**；下面是逐轮细节（D083 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO、D081 光谱 GPU 的 OCIO + 线性 EXR、D082 的 P1（时间线/队列/区间/滤色片偏移/代理加速），最后在 D083 做发布前审计并决定下次对话再定发布路线。
+> **新开对话先读这一节。** 本轮完成 macOS 早期预览的打包、整改与公开发布，并把 README 截图换成五个页签的实机截图。
+
+### 一、已完成的事项
+
+| 项 | 结果 |
+|---|---|
+| 发布路线 | 确定 **先 A 后 B**；A（未公证内测/公开预览）已完成，B（Developer ID + 公证）待账号 |
+| App 图标 | 换成产品负责人提供的 `X:\agent\footage\AppIcon.icns`（1,296,886 B）；`.iconset` 由该 `.icns` 反解，app 内 checksum `a04a3e53…` 一致；旧生成脚本已删除 |
+| 版本 | **`0.0.1-alpha.1`**（`CFBundleShortVersionString`），`CFBundleVersion = 1`；界面精确显示 `0.0.1-alpha.1` |
+| INFO 引擎区 | 删除重复的 **APP** 行；只保留 CLI / OCIO / GPU / RED / 预览协议 |
+| INFO「关于」 | 移到文件信息之后、引擎之前（保证版本可见）：版本、作者 **haichangjyue**、基于 **spektrafilm（Andrea Volpato）**、上游链接、源码、Issues、GPL-3.0-or-later |
+| 首次启动弹窗 | 新增「早期测试版本」sheet：实验性提醒 + GitHub / spektrafilm 链接 + 作者/许可；点「我知道了」写入 `sr.hasSeenAlphaNotice`，只显示一次 |
+| 打包 | `scripts/package-macos.sh` / `.command`：构建 → 从内到外签名（ad-hoc / Developer ID）→ DMG（app + Applications + 安装说明）→ SHA256；预留 `notarytool` / `staple` / `spctl` |
+| Info.plist | 补 `CFBundleIconFile`、`NSHumanReadableCopyright`、`LSApplicationCategoryType=public.app-category.video`、最低系统 14.0 |
+| 合规 | `THIRD_PARTY_NOTICES.md`（ffmpeg 实际为 **GPL-3.0-or-later**，含构建配置）、`LICENSE`、字体 OFL 均打包；新增 `docs/release-macos.md` |
+| DMG | `SpektraRoll-0.0.1-alpha.1-arm64.dmg`，**95,604,075 B（约 91 MB）**，app 175 MB；`shasum -c` 通过 |
+| SHA256 | `7ffe1cedbcc2835478a32cc9aca93538ef61263df31847786a0e9fd92743f353` |
+| 本机验证 | 从 DMG 安装到 `/Applications`；弹窗、关于面板、版本号正常；4K50 2 帧 **1150.9 ms/帧**；CLI / ffmpeg / app 均无非系统 dylib；OCIO 2.6.0、Metal 光谱/质感可用 |
+| CI | run **174 / 175** Windows + macOS 双绿（174 是发布代码；176 是文档提交） |
+| GitHub 发布 | **Pre-release `v0.0.1-alpha.1`**，tag 指向 `214f1d9`；上传 DMG + `SHA256.txt`；下载 `Content-Length` 与上传一致，远端 SHA 与本地逐字一致 |
+| README 截图 | 新增 `docs/screenshots/01-info` … `05-output`（1600×1007，按文件名/页签顺序）；删除旧 `docs/ui-macos.png`；五张 raw 图均 HTTP 200 |
+| 代码提交 | `c4c97cf` → `6b5bee2` → `214f1d9`（tag）→ `3eab5bd` → `8f8f6e3`（README 截图） |
+
+### 二、关键决策
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D083 | 发布顺序 | **先 A 后 B**；A 版 ad-hoc 签名、未公证，用户首次右键「打开」 |
+| D083 | 版本号 | 正式展示用 **`0.0.1-alpha.1`**，直接写入 `CFBundleShortVersionString`；`CFBundleVersion` 每次发布递增 |
+| D083 | 关于面板位置 | 放在 INFO **顶部**（文件信息之后），避免版本号被滚动区淹没；引擎区不再重复版本 |
+| D083 | 首次启动提醒 | 用一次性 sheet + `sr.hasSeenAlphaNotice`，只提醒一次；内容含实验性说明、GitHub、spektrafilm、作者、许可 |
+| D083 | 图标来源 | 以产品负责人提供的 `.icns` 为准；不再用脚本生成旧图标 |
+| D083 | 发布渠道 | **GitHub Pre-release**（公开），不上 App Store；只发 Apple Silicon / macOS 14+ |
+| D083 | 官方包范围 | 不含 RED SDK / R3D 解码；R3D 继续只限本地 BYO-SDK 构建 |
+| D083 | README 截图 | 五张实机截图按 `01-info → 05-output` 顺序；缩到 1600 px 控制仓库体积，删除旧单图 |
+
+### 三、未完成的待办（建议顺序）
+
+**P0 · 验收与下一版**
+- [ ] **干净 Mac 实测**：无 Xcode / Homebrew 的机器，DMG 安装、Gatekeeper、导入 C0113、预览、队列、区间、ProRes/音频/timecode、OCIO。
+- [ ] 收集 `0.0.1-alpha.1` 的外部反馈，整理 known issues。
+- [ ] 决定下一版版本号：`0.0.1-alpha.2` 或 `0.0.2-alpha.1`；`CFBundleVersion` 递增。
+
+**P1 · 路线 B（公开版公证）**
+- [ ] 加入 Apple Developer Program（$99/年），创建 **Developer ID Application** 证书。
+- [ ] 建立 `notarytool` keychain profile。
+- [ ] 从内到外签 `ffmpeg` / `ffprobe` / `spektra-roll-cli` / `SpektraRoll.app`，使用 `--options runtime --timestamp`。
+- [ ] `xcrun notarytool submit ... --wait` → `xcrun stapler staple` → `spctl -a -vvv -t install`。
+- [ ] 如果 Metal 运行时编译被 Hardened Runtime 拦，再评估 `com.apple.security.cs.allow-jit` 并重签/重公证。
+
+**P1 · 发布增强**
+- [ ] Universal（Intel + Apple Silicon）：需要 universal OCIO / ffmpeg。
+- [ ] Sparkle 自动更新、诊断日志导出、隐私说明。
+- [ ] GitHub Actions 手动发布流水线（证书/公证密钥放 Secrets）。
+
+**P2 · 其它**
+- [ ] DMG 背景图 / 更完整的安装页（当前只有 app + Applications + 安装说明）。
+- [ ] R3D macOS（单独立项）；空间物理模型、扫描仪 unsharp、印片机 Y/M/预闪/光源、PIZ/DWA。
+
+**下次对话要决定**
+1. 是否现在启动路线 B（Apple Developer Program）。
+2. 下一版版本号用 `0.0.1-alpha.2` 还是 `0.0.2-alpha.1`。
+3. 优先级：Universal / 空间物理 / 发布增强（三选一先做）。
+4. 是否建立公开反馈入口（Issue 模板 / 讨论区）。
+
+---
+
+## 本次对话历史摘要（D075–D083，2026-11-05 至 11-06）
+
+> 下面是逐轮细节（D083 → D075，越往后越早）。这一轮从“Windows Qt 冻结，README 换 macOS 截图”开始，随后完成 macOS UI v1.1 P0/P1、D077 反馈、D078 画幅/APP 版本、D079 配光、D080 静态 OCIO、D081 光谱 GPU 的 OCIO + 线性 EXR、D082 的 P1（时间线/队列/区间/滤色片偏移/代理加速），最后在 D083 完成打包、整改与公开发布。
 
 ### 一、已完成的事项
 
 | 编号 | 交付 | 关键结果 |
 |---|---|---|
-| **README** | 去掉 Windows Qt Desktop UI 截图，换 macOS 最新截图 | `docs/ui-macos.png`；Desktop UI 改为 macOS 参考 + Windows Qt 冻结；`537ad1f` |
+| **README** | 截图换成 macOS 五个页签实机图 | `docs/screenshots/01-info` … `05-output`（1600 px，按页签顺序）；删除旧 `docs/ui-macos.png`；`8f8f6e3` |
 | **D075** | macOS UI v1.1 P0 | 关闭胶片效果显示 sRGB 静帧；直方图/宽容度/裁切；滚轮/双指缩放、拖拽、适合/100%、双击；导出按钮跳 OUTPUT；参数 180 ms 防抖刷新 |
 | **D076** | 播放代理 P1 | CLI `video --display` + `--max-side`；960 px 显示/胶片代理；AVPlayer 保留时间切换；参数 hash 缓存；Mac 播放日志确认 `block film proxy` → `switch film` → `unblock` |
 | **D077** | 验收反馈 4 点 | ADVANCED 预览代理：默认 5 GB 上限（0 = 不限制）、自定义目录、当前占用、清理、超限删最旧；生成胶片代理时暂停播放并记住播放请求；进度胶囊移到标题行左下；INFO 新增 Mac 系统面板 |
@@ -27,7 +96,7 @@
 | **D080** | macOS 静态 OCIO 2.6.0 | 新增 `scripts/build-ocio-macos.sh` / `.command`；静态依赖装到 `~/Documents/ocio-2.6.0-static`；`build-macos-ui.sh` 自动检测；bundle `ocio.available=true, 2.6.0`；`otool -L` 无 Homebrew OCIO/Imath/yaml/pystring dylib；INFO 显示“可用 2.6.0” |
 | **D081** | 光谱 GPU 接 OCIO + 线性 EXR | GPU 后端上传前用 OCIO CPU 处理器批量解码成线性 Rec.709；D3D11 / Metal 着色器新增 `inputMode=10`，并保留原始编码缓冲保证 `--strength` 语义；`convert --ocio-display ... --exr-linear` 改为直接写显示前线性 Rec.709；移除 `lut apply` / `video` / `preview` 的 CPU 回退；Windows + Mac 本机 `ctest` **11/11**，Metal OCIO worst **0**、CPU vs Metal **113.70 dB**；CI run **153** 双绿 |
 | **D082** | P1 一次完成 | 时间线拖动 + 逐帧预览；渲染队列（持久化、顺序执行、停止/删除/清空）；区间输入；`solve --filter-pack` + `--filter-offset` + PRINT 页 Y/M 偏移；35mm Academy 21.95 / 135 全画幅 36.0 拆分；代理固定 LUT + 360–720 px + GPU 质感 + 缓存目录迁移；修复 `ffprobe` 旋转探测扫描整段导致代理慢 20 s |
-| **D083** | 路线 A 打包 | 决定**先 A 后 B**。换产品负责人提供的图标、版本 **`0.0.1-alpha.1`**、Info.plist 补齐、引擎区去掉重复 APP 行、INFO「关于」加作者/上游、首次启动早期测试弹窗、`scripts/package-macos.sh`、`THIRD_PARTY_NOTICES.md`、安装说明；产出 **91 MB DMG**（app 175 MB，arm64，ad-hoc），已装 `/Applications` 验证弹窗与关于面板。B 待 Apple Developer 账号 |
+| **D083** | 路线 A 打包 + 发布 | 决定**先 A 后 B**。换产品负责人提供的图标、版本 **`0.0.1-alpha.1`**、Info.plist 补齐、引擎区去掉重复 APP 行、INFO「关于」加作者/上游、首次启动早期测试弹窗、`scripts/package-macos.sh`、`THIRD_PARTY_NOTICES.md`、安装说明；产出 **91 MB DMG**（app 175 MB，arm64，ad-hoc），已装 `/Applications` 验证。**已发布 GitHub Pre-release**（tag `214f1d9`，DMG + SHA256）。B 待 Apple Developer 账号 |
 
 **顺手修复**：片库按路径去重（调试自动导入/重复导入不再出现两个同名素材）；`AppVersion.testTag` 升到 **D082**。
 
@@ -50,23 +119,23 @@
 | D082 | 区间 | 显式 `rangeEnabled` + 可选帧数，避免开关和帧数不一致 |
 | D082 | 滤色片 | `solve --filter-pack` 输出中性值；`--filter-offset` 在中性值上加减，`--cc` 仍是整体替换 |
 | D082 | 画幅 | 35mm 电影 = Academy 21.95 mm（CINE）；135 全画幅 = 36.0 mm（非 CINE） |
-| D083（待定） | 发布渠道 | 不上 App Store，直接发 DMG；公开预览建议 Developer ID + 公证，但**尚未决定 A/B** |
-| D083（建议） | 发布顺序 | 先 A 未公证内测 DMG，同时申请 Apple Developer；账号下来后同脚本切 B 公证版 |
+| D083 | 发布渠道 | 不上 App Store；已发 **GitHub Pre-release `v0.0.1-alpha.1`**（ad-hoc，未公证） |
+| D083 | 发布顺序 | **先 A 后 B**；A 已完成并发布，B（Developer ID + 公证）待 Apple Developer 账号 |
 | D083（建议） | 架构 | 早期预览先只发 **Apple Silicon（arm64）**；Universal 后续再做，需 universal OCIO/ffmpeg |
 | D083 | 版本 | 实际采用 **`0.0.1-alpha.1`**，去掉“内部测试（D082）”标识；`CFBundleVersion` 每次发布递增 |
 | D083（建议） | 官方包范围 | 不包含 RED SDK / R3D 解码；R3D 继续只限本地 BYO-SDK 构建 |
 
 ### 三、当前状态（截至最后一次操作）
 
-- 最新功能代码：`3b4f386`（D082；文档已到 `a2a7879`）
-- CI：D080 run **148**、D081 run **153**、D082 run **166** Windows + macOS 双绿（含 solve / filter-offset 步骤；run 162 的 Windows exit 127 是单次环境抖动）
-- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 `a2a7879` 并本机验证（`build-macos-tests` 11/11，整段 4K50 渲染、队列、代理、缓存迁移）
-- Mac app：已打开供产品负责人验收（`open build-ui-macos/SpektraRoll.app` 可重新打开）
+- 最新提交：`8f8f6e3`（README 五张截图）；发布代码 tag **`v0.0.1-alpha.1` = `214f1d9`**
+- CI：run **174 / 175** Windows + macOS 双绿（174 是发布代码；176 是文档提交）
+- GitHub：**Pre-release `v0.0.1-alpha.1`** 已发布，DMG + SHA256 已上传
+- Mac 仓库：`/Users/wenyutao/Documents/SpektraRoll`，已同步到 `8f8f6e3`
+- Mac app：`/Applications/SpektraRoll.app`，版本 **`0.0.1-alpha.1`**（从最新 DMG 安装）
 - Mac OCIO 前缀：`~/Documents/ocio-2.6.0-static`（OCIO 2.6.0，纯静态）
-- Mac 代理缓存：`~/Library/Caches/SpektraRoll/preview-cache/`，上限 5 GB，当前 5 个代理（迁移测试已迁回）
 - Mac 测试素材：`~/Movies/C0113.MP4`（3840×2160 / 50p / 312 帧 / 00:06）
-- 当前 app state（D083 清理后）：队列已清空、`outputName=grade`、`rangeEnabled=false`、起点 0；`ocioEnabled=true`、`ocioInput=S-Log3 S-Gamut3.Cine`、`filmID=kodak_portra_400`、`paperID=kodak_endura_premier`
-- 发布审计：app 174 MB、arm64 thin、ad-hoc、无图标、无 DMG；`security find-identity -v -p codesigning` = **0 valid identities**；内置 ffmpeg 9.0.2 为 GPL 静态构建，无 Homebrew dylib
+- Mac 代理缓存：目录可在 ADVANCED 切换（D082 测试时曾指向 `/tmp/sr-proxy-test`），上限默认 5 GB
+- 发布包：app 175 MB、arm64 thin、ad-hoc、有图标；未公证（`spctl` 拒绝，预期）；内置 ffmpeg 9.0.2 为 GPL-3.0-or-later 静态构建，无 Homebrew dylib
 
 **Mac 远程访问**
 
