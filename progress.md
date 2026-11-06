@@ -224,6 +224,7 @@ build-ui-macos/SpektraRoll.app/Contents/Helpers/spektra-roll-cli capabilities --
 | 渲染 | 内置 CLI + 内置 ffmpeg/ffprobe：`C0113.MP4` 2 帧 4K H.264，**1150.9 ms/帧**，3840×2160 |
 | 字体 | 思源黑体 Regular/Bold + OFL 已打包 |
 | Gatekeeper | 带 quarantine 时进程拿到 48 KB 后停住（预期拦截）；清除 quarantine 后正常启动 |
+| CI run **170** | Windows + macOS **双绿**（含 `swift build`、ctest、OCIO、视频冒烟） |
 
 ### 三、未完成 / 注意
 
